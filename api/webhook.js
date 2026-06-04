@@ -31,7 +31,7 @@ export default async function handler(req, res) {
         },
         body: JSON.stringify({
           telefone: phone,
-          conteudo: content,
+          contente: content,
           tipo: 'texto',
           de_mim: false,
           criado_em: new Date().toISOString()
@@ -43,6 +43,8 @@ export default async function handler(req, res) {
   } catch (err) {
     console.error('Webhook error:', err);
     return res.status(200).json({ ok: true });
+  }
+}
   }
 }
 
