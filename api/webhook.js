@@ -16,39 +16,37 @@ export default async function handler(req, res) {
       const phone = (key?.remoteJid || '').replace('@s.whatsapp.net','').replace('@g.us','');
       const fromMe = key?.fromMe || false;
 
-      // Detectar tipo e conteúdo
       let content = '';
       let type = 'text';
-      let mediaUrl = null;
+      let media_url = null;
 
-      if (msg?.message?.conversation) {
-        content = msg.message.conversation;
-        type = 'text';
-      } else if (msg?.message?.extendedTextMessage?.text) {
-        content = msg.message.extendedTextMessage.text;
-        type = 'text';
-      } else if (msg?.message?.imageMessage) {
-        content = msg.message.imageMessage.caption || '📷 Imagem';
+      const m = msg?.message || {};
+
+      if (m.conversation) {
+        content = m.conversation;
+      } else if (m.extendedTextMessage) {
+        content = m.extendedTextMessage.text || '';
+      } else if (m.imageMessage) {
+        content = m.imageMessage.caption || '📷 Imagem';
         type = 'image';
-        mediaUrl = msg.message.imageMessage.url || null;
-      } else if (msg?.message?.audioMessage) {
+        media_url = m.imageMessage.url || null;
+      } else if (m.audioMessage) {
         content = '🎵 Áudio';
         type = 'audio';
-        mediaUrl = msg.message.audioMessage.url || null;
-      } else if (msg?.message?.videoMessage) {
-        content = msg.message.videoMessage.caption || '🎥 Vídeo';
+        media_url = m.audioMessage.url || null;
+      } else if (m.videoMessage) {
+        content = m.videoMessage.caption || '🎥 Vídeo';
         type = 'video';
-        mediaUrl = msg.message.videoMessage.url || null;
-      } else if (msg?.message?.documentMessage) {
-        content = msg.message.documentMessage.fileName || '📄 Documento';
+        media_url = m.videoMessage.url || null;
+      } else if (m.documentMessage) {
+        content = m.documentMessage.fileName || '📄 Documento';
         type = 'document';
-        mediaUrl = msg.message.documentMessage.url || null;
-      } else if (msg?.message?.stickerMessage) {
+        media_url = m.documentMessage.url || null;
+      } else if (m.stickerMessage) {
         content = '🎭 Sticker';
         type = 'sticker';
       } else {
         content = '[mídia]';
-        type = 'other';
       }
 
       if (phone && content && !phone.includes('status')) {
@@ -60,14 +58,7 @@ export default async function handler(req, res) {
             'Authorization': `Bearer ${SUPABASE_KEY}`,
             'Prefer': 'return=minimal'
           },
-          body: JSON.stringify({
-            phone,
-            content,
-            type,
-            media_url: mediaUrl,
-            from_me: fromMe,
-            created_at: new Date().toISOString()
-          })
+          body: JSON.stringify({ phone, content, type, media_url, from_me: fromMe, created_at: new Date().toISOString() })
         });
       }
     }
@@ -78,5 +69,3 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true });
   }
 }
-}
-</html>
