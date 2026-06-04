@@ -1103,13 +1103,14 @@ async function getInstanceStatus(instanceName) {
 
 // Send text message
 async function sendWhatsAppMessage(instanceName, phone, message) {
-  const cleanPhone = phone.replace(/\D/g,'');
-  return evoRequest('POST', `/message/sendText/${instanceName}`, {
-    number: '55' + cleanPhone,
-    text: message,
+  const resp = await fetch('/api/send-message', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ instance: instanceName, phone, message }),
   });
+  if (!resp.ok) throw new Error('Erro ao enviar mensagem');
+  return resp.json();
 }
-
 // Send automation message
 async function sendAutomation(lead, autoType) {
   const clinic = currentClinic();
