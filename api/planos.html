@@ -1,1 +1,130 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>ClinicaLead — Escolha seu Plano</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', sans-serif; background: #0a0a0a; color: #fff; min-height: 100vh; }
+  .header { text-align: center; padding: 48px 20px 24px; }
+  .logo { font-size: 28px; font-weight: 800; color: #fff; }
+  .logo span { color: #d4af37; }
+  .subtitle { color: #888; margin-top: 8px; font-size: 15px; }
+  .trial-badge { display: inline-block; background: #d4af37; color: #000; font-weight: 700; padding: 6px 18px; border-radius: 20px; font-size: 13px; margin-top: 12px; }
+  .periodo-tabs { display: flex; justify-content: center; gap: 8px; margin: 32px 20px 0; }
+  .periodo-btn { padding: 10px 24px; border-radius: 8px; border: 1px solid #333; background: transparent; color: #888; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s; }
+  .periodo-btn.active { background: #d4af37; color: #000; border-color: #d4af37; }
+  .desconto { font-size: 11px; display: block; margin-top: 2px; }
+  .plans { display: flex; gap: 20px; justify-content: center; padding: 32px 20px 48px; flex-wrap: wrap; max-width: 1100px; margin: 0 auto; }
+  .plan-card { background: #141414; border: 1px solid #222; border-radius: 16px; padding: 32px 28px; width: 320px; position: relative; transition: border-color 0.2s; }
+  .plan-card.popular { border-color: #d4af37; }
+  .popular-badge { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: #d4af37; color: #000; font-size: 11px; font-weight: 700; padding: 4px 14px; border-radius: 20px; white-space: nowrap; }
+  .plan-name { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+  .plan-desc { color: #666; font-size: 13px; margin-bottom: 24px; }
+  .plan-price { margin-bottom: 8px; }
+  .price-value { font-size: 36px; font-weight: 800; color: #d4af37; }
+  .price-period { color: #666; font-size: 13px; }
+  .price-total { color: #555; font-size: 12px; margin-bottom: 24px; min-height: 18px; }
+  .plan-features { list-style: none; margin-bottom: 32px; }
+  .plan-features li { padding: 8px 0; border-bottom: 1px solid #1e1e1e; font-size: 14px; color: #ccc; display: flex; align-items: center; gap: 8px; }
+  .plan-features li::before { content: '✓'; color: #d4af37; font-weight: 700; }
+  .btn-plan { width: 100%; padding: 14px; border-radius: 10px; border: none; font-size: 15px; font-weight: 700; cursor: pointer; transition: all 0.2s; }
+  .btn-plan.primary { background: #d4af37; color: #000; }
+  .btn-plan.primary:hover { background: #c9a227; }
+  .btn-plan.secondary { background: transparent; border: 1px solid #333; color: #fff; }
+  .btn-plan.secondary:hover { border-color: #d4af37; color: #d4af37; }
+  .loading { display: none; text-align: center; padding: 20px; color: #888; }
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="logo">Clínica<span>Lead</span></div>
+  <div class="subtitle">Escolha o plano ideal para sua clínica</div>
+  <div class="trial-badge">🎉 7 dias grátis em todos os planos</div>
+</div>
 
+<div class="periodo-tabs">
+  <button class="periodo-btn active" onclick="setPeriodo('mensal')">Mensal</button>
+  <button class="periodo-btn" onclick="setPeriodo('semestral')">Semestral <span class="desconto">~8% off</span></button>
+  <button class="periodo-btn" onclick="setPeriodo('anual')">Anual <span class="desconto">~25% off</span></button>
+</div>
+
+<div class="plans">
+  <div class="plan-card" id="card-solo">
+    <div class="plan-name">Solo</div>
+    <div class="plan-desc">Para dentistas autônomos</div>
+    <div class="plan-price"><span class="price-value" id="price-solo">R$ 119,90</span><span class="price-period">/mês</span></div>
+    <div class="price-total" id="total-solo"></div>
+    <ul class="plan-features">
+      <li>1 usuário</li>
+      <li>1 clínica</li>
+      <li>Inbox WhatsApp</li>
+      <li>Funil de leads</li>
+      <li>Agenda integrada</li>
+      <li>Automações</li>
+    </ul>
+    <button class="btn-plan secondary" onclick="assinar('solo')">Começar grátis</button>
+  </div>
+
+  <div class="plan-card popular" id="card-clinica">
+    <div class="popular-badge">⭐ Mais popular</div>
+    <div class="plan-name">Clínica</div>
+    <div class="plan-desc">Para clínicas em crescimento</div>
+    <div class="plan-price"><span class="price-value" id="price-clinica">R$ 169,90</span><span class="price-period">/mês</span></div>
+    <div class="price-total" id="total-clinica"></div>
+    <ul class="plan-features">
+      <li>Até 3 usuários</li>
+      <li>1 clínica</li>
+      <li>Inbox WhatsApp</li>
+      <li>Funil de leads</li>
+      <li>Agenda integrada</li>
+      <li>Automações</li>
+    </ul>
+    <button class="btn-plan primary" onclick="assinar('clinica')">Começar grátis</button>
+  </div>
+
+  <div class="plan-card" id="card-rede">
+    <div class="plan-name">Rede</div>
+    <div class="plan-desc">Para redes de clínicas</div>
+    <div class="plan-price"><span class="price-value" id="price-rede">R$ 299,90</span><span class="price-period">/mês</span></div>
+    <div class="price-total" id="total-rede"></div>
+    <ul class="plan-features">
+      <li>Usuários ilimitados</li>
+      <li>Múltiplas clínicas</li>
+      <li>Inbox WhatsApp</li>
+      <li>Funil de leads</li>
+      <li>Agenda integrada</li>
+      <li>Automações</li>
+    </ul>
+    <button class="btn-plan secondary" onclick="assinar('rede')">Começar grátis</button>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://zcwntpkiispbhjjgidih.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_G6xEiLO4lcNaJafm9RA2tA_QLf4E2FV';
+
+const precos = {
+  solo:    { mensal: 119.90, semestral: 109.90, anual: 89.90 },
+  clinica: { mensal: 169.90, semestral: 139.90, anual: 99.90 },
+  rede:    { mensal: 299.90, semestral: 269.90, anual: 199.90 },
+};
+
+const totais = {
+  solo:    { mensal: '', semestral: 'R$ 659,40 cobrado a cada 6 meses', anual: 'R$ 1.078,80 cobrado anualmente' },
+  clinica: { mensal: '', semestral: 'R$ 839,40 cobrado a cada 6 meses', anual: 'R$ 1.198,80 cobrado anualmente' },
+  rede:    { mensal: '', semestral: 'R$ 1.619,40 cobrado a cada 6 meses', anual: 'R$ 2.398,80 cobrado anualmente' },
+};
+
+let periodoAtual = 'mensal';
+let userData = null;
+let clinicData = null;
+
+async function init() {
+  // Pega sessão do Supabase
+  const sessionStr = Object.keys(localStorage).find(k => k.includes('auth-token'));
+  if (!sessionStr) { window.location.href = '/'; return; }
+
+  const params = new URLSearchParams(window.location.search);
+  const c
