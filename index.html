@@ -2397,7 +2397,7 @@ async function loadChatMessages(chat) {
     const { data: msgs } = await db
       .from('mensagens')
       .select('*')
-      .eq('clinic_id', clinic.id)
+     .not('phone', 'is', null)
       .eq('phone', chat.phone)
       .order('created_at', { ascending: true })
       .limit(80);
