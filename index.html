@@ -1890,7 +1890,10 @@ function renderClinicas() {
         <td><span class="badge ${c.plano==='Pro'?'badge-gold':'badge-gray'}">${c.plano||'Pro'}</span></td>
         <td class="td-mono">${STATE.leads.filter(l=>l.clinic_id===c.id).length}</td>
         <td>${c.whatsapp_instance ? '<span class="badge badge-gold"><i class="ti ti-check"></i> Conectado</span>' : '<button class="btn btn-sm" onclick="openWhatsAppConnect('+i+')"><i class="ti ti-brand-whatsapp"></i> Conectar</button>'}</td>
-        <td><div style="display:flex;gap:6px;"><button class="btn btn-sm btn-primary" onclick="switchClinic(${i});showPage('dashboard')"><i class="ti ti-login"></i> Acessar</button></div></td>
+        <td><div style="display:flex;gap:6px;">
+  <button class="btn btn-sm btn-primary" onclick="switchClinic(${i});showPage('dashboard')"><i class="ti ti-login"></i> Acessar</button>
+  ${c.whatsapp_instance ? `<button class="btn btn-sm" onclick="setupWebhookManual('${c.whatsapp_instance}')" title="Configurar webhook"><i class="ti ti-webhook"></i></button>` : ''}
+</div></td>
       </tr>`).join('')
     : '<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text-secondary);">Nenhuma clínica cadastrada ainda</td></tr>';
 }
@@ -2600,6 +2603,61 @@ function createLeadFromChat(chatId) {
   document.getElementById('nlName').value = chat.name;
   document.getElementById('nlPhone').value = chat.phone;
   openModal('modalNewLead');
+}
+
+// ── WEBHOOK AUTO SETUP ───────────────────────
+async function setupWebhookManual(instanceName) {
+  toast('Configurando webhook...');
+  try {
+    await evoRequest('POST', `/webhook/set/${instanceName}`, {
+      url: 'https://zcwntpkiispbhjjgidih.supabase.co/rest/v1/rpc/whatsapp_webhook',
+      webhook_by_events: false,
+      webhook_base64: false,
+      events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE'],
+    });
+    toast('Webhook configurado! ✓');
+  } catch(e) {
+    // Generate the Railway console command for manual setup
+    const cmd = `node -e "const h=require('http');const d=JSON.stringify({url:'https://zcwntpkiispbhjjgidih.supabase.co/rest/v1/rpc/whatsapp_webhook',webhook_by_events:false,webhook_base64:false,events:['MESSAGES_UPSERT']});h.request({host:'localhost',port:8080,path:'/webhook/set/${instanceName}',method:'POST',headers:{'apikey':'185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae000','Content-Type':'application/json','Content-Length':d.length}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>console.log(b))}).end(d);"`;
+    // Copy to clipboard
+    try {
+      await navigator.clipboard.writeText(cmd);
+      toast('Comando copiado! Cole no Railway Console ✓');
+    } catch(e2) {
+      prompt('Copie e cole no Railway Console:', cmd);
+    }
+  }
+}
+
+async function setupWebhookAutomatic(instanceName) {
+  try {
+    const webhookUrl = 'https://zcwntpkiispbhjjgidih.supabase.co/rest/v1/rpc/whatsapp_webhook';
+    // Try to set webhook via Evolution API
+    // Note: direct call may fail due to CORS — handled gracefully
+    await evoRequest('POST', `/webhook/set/${instanceName}`, {
+      url: webhookUrl,
+      webhook_by_events: false,
+      webhook_base64: false,
+      events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'CONNECTION_UPDATE'],
+    });
+    console.log('Webhook configured for:', instanceName);
+  } catch(e) {
+    // CORS error expected in browser — webhook needs to be set via Railway console
+    // But we store the intent so admin can batch-configure
+    console.log('Webhook config note:', e.message);
+    await db.from('clinicas').update({
+      webhook_configured: false,
+      webhook_url: 'https://zcwntpkiispbhjjgidih.supabase.co/rest/v1/rpc/whatsapp_webhook'
+    }).eq('whatsapp_instance', instanceName);
+  }
+}
+
+// Setup webhooks for all connected clinics (called on load)
+async function setupAllWebhooks() {
+  const connected = STATE.clinics.filter(c => c.whatsapp_instance && !c.webhook_configured);
+  for (const clinic of connected) {
+    await setupWebhookAutomatic(clinic.whatsapp_instance);
+  }
 }
 
 // ── INIT ──────────────────────────────────────
