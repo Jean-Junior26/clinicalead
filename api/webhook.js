@@ -30,11 +30,11 @@ export default async function handler(req, res) {
           'Prefer': 'return=minimal'
         },
         body: JSON.stringify({
-          telefone: phone,
-          contente: content,
-          tipo: 'texto',
-          de_mim: false,
-          criado_em: new Date().toISOString()
+          phone: phone,
+          content: content,
+          type: 'text',
+          from_me: false,
+          created_at: new Date().toISOString()
         })
       });
     }
