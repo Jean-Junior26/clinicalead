@@ -6,66 +6,84 @@ export default async function handler(req, res) {
 
   try {
     const body = req.body;
-    if (body?.event !== 'messages.upsert') return res.status(200).json({ ok: true });
+
+    // Aceita "messages.upsert" E "MESSAGES_UPSERT"
+    const evento = (body?.event || body?.type || '').toLowerCase().replace('.', '_');
+    if (evento !== 'messages_upsert') {
+      return res.status(200).json({ ok: true, ignorado: body?.event });
+    }
 
     const messages = body?.data || [];
     const list = Array.isArray(messages) ? messages : [messages];
 
     for (const msg of list) {
-      const key = msg?.key || {};
-      const phone = (key?.remoteJid || '').replace('@s.whatsapp.net','').replace('@g.us','');
+      const key    = msg?.key || {};
+      const jid    = key?.remoteJid || '';
       const fromMe = key?.fromMe || false;
 
-      let content = '';
-      let type = 'text';
-      let media_url = null;
+      if (!jid || jid.includes('status@broadcast')) continue;
 
+      const telefone     = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
+      const nome_contato = msg?.pushName || null;
+
+      let conteudo = '';
+      let tipo = 'texto';
       const m = msg?.message || {};
 
       if (m.conversation) {
-        content = m.conversation;
+        conteudo = m.conversation;
       } else if (m.extendedTextMessage) {
-        content = m.extendedTextMessage.text || '';
+        conteudo = m.extendedTextMessage.text || '';
       } else if (m.imageMessage) {
-        content = m.imageMessage.caption || '📷 Imagem';
-        type = 'image';
-        media_url = m.imageMessage.url || null;
+        conteudo = m.imageMessage.caption || '📷 Imagem';
+        tipo = 'imagem';
       } else if (m.audioMessage) {
-        content = '🎵 Áudio';
-        type = 'audio';
-        media_url = m.audioMessage.url || null;
+        conteudo = '🎵 Áudio';
+        tipo = 'audio';
       } else if (m.videoMessage) {
-        content = m.videoMessage.caption || '🎥 Vídeo';
-        type = 'video';
-        media_url = m.videoMessage.url || null;
+        conteudo = m.videoMessage.caption || '🎥 Vídeo';
+        tipo = 'video';
       } else if (m.documentMessage) {
-        content = m.documentMessage.fileName || '📄 Documento';
-        type = 'document';
-        media_url = m.documentMessage.url || null;
+        conteudo = m.documentMessage.fileName || '📄 Documento';
+        tipo = 'documento';
       } else if (m.stickerMessage) {
-        content = '🎭 Sticker';
-        type = 'sticker';
+        conteudo = '🎭 Sticker';
+        tipo = 'sticker';
       } else {
-        content = '[mídia]';
+        conteudo = '[mídia]';
       }
 
-      if (phone && content && !phone.includes('status')) {
-        await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': SUPABASE_KEY,
-            'Authorization': `Bearer ${SUPABASE_KEY}`,
-            'Prefer': 'return=minimal'
-          },
-          body: JSON.stringify({ phone, content, type, media_url, from_me: fromMe, created_at: new Date().toISOString() })
-        });
+      if (!telefone || !conteudo) continue;
+
+      const payload = {
+        telefone,
+        nome_contato,
+        conteudo,
+        tipo,
+        from_me: fromMe,
+        criado_em: new Date().toISOString(),
+      };
+
+      const resp = await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`,
+          'Prefer': 'return=minimal',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!resp.ok) {
+        const erro = await resp.text();
+        console.error('[webhook] Supabase erro:', resp.status, erro);
       }
     }
 
     return res.status(200).json({ ok: true });
-  } catch(err) {
-    console.error(err);
+  } catch (err) {
+    console.error('[webhook] exceção:', err);
     return res.status(200).json({ ok: true });
   }
 }
