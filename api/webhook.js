@@ -8,28 +8,49 @@ export default async function handler(req, res) {
 
   try {
     const body = req.body;
-    const bodyStr = JSON.stringify(body).substring(0, 500);
 
-    await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'Prefer': 'return=minimal'
-      },
-      body: JSON.stringify({
-        phone: 'debug',
-        content: bodyStr,
-        type: 'debug',
-        from_me: false,
-        created_at: new Date().toISOString()
-      })
-    });
+    if (body?.event !== 'messages.upsert') {
+      return res.status(200).json({ ok: true });
+    }
+
+    const messages = body?.data || [];
+    const list = Array.isArray(messages) ? messages : [messages];
+
+    for (const msg of list) {
+      const key = msg?.key || {};
+      const phone = (key?.remoteJid || '').replace('@s.whatsapp.net', '').replace('@g.us', '');
+      const fromMe = key?.fromMe || false;
+      const content =
+        msg?.message?.conversation ||
+        msg?.message?.extendedTextMessage?.text ||
+        msg?.message?.imageMessage?.caption ||
+        '[mídia]';
+
+      if (phone && content && !phone.includes('status')) {
+        await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Prefer': 'return=minimal'
+          },
+          body: JSON.stringify({
+            phone: phone,
+            content: content,
+            type: 'text',
+            from_me: fromMe,
+            created_at: new Date().toISOString()
+          })
+        });
+      }
+    }
 
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error(err);
     return res.status(200).json({ ok: true });
+  }
+}
   }
 }
