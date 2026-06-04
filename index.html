@@ -2179,50 +2179,95 @@ let INBOX = {
 
 async function renderInbox() {
   const clinic = currentClinic();
-  if (!clinic?.whatsapp_instance) {
-    document.getElementById('inboxNoBanner').style.display = 'flex';
-    document.getElementById('inboxStatusText').textContent = 'WhatsApp não conectado';
-    document.getElementById('inboxList').innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-secondary);font-size:13px;"><i class="ti ti-brand-whatsapp" style="font-size:32px;display:block;margin-bottom:8px;color:var(--coral);"></i>Conecte o WhatsApp primeiro</div>';
+  if (!clinic) {
+    document.getElementById('inboxStatusText').textContent = 'Selecione uma clínica';
     return;
   }
-  document.getElementById('inboxNoBanner').style.display = 'none';
-  document.getElementById('inboxStatusText').textContent = 'Buscando conversas...';
+  // Show banner if WhatsApp not connected but don't block
+  const banner = document.getElementById('inboxNoBanner');
+  if (banner) banner.style.display = clinic.whatsapp_instance ? 'none' : 'flex';
+  document.getElementById('inboxStatusText').textContent = 'Carregando conversas...';
   await loadInboxChats();
   startInboxPolling();
 }
 
 async function loadInboxChats() {
   const clinic = currentClinic();
-  if (!clinic?.whatsapp_instance) return;
+  if (!clinic) return;
+
   try {
-    const data = await evoRequest('GET', `/chat/findChats/${clinic.whatsapp_instance}`);
-    if (Array.isArray(data)) {
-      INBOX.chats = data.map(c => {
-        const phone = (c.id || '').replace('@s.whatsapp.net','').replace('@g.us','');
-        const lead = STATE.leads.find(l => l.telefone && l.telefone.replace(/\D/g,'').endsWith(phone.slice(-8)));
-        return {
-          id: c.id,
+    // Load messages from Supabase (stored via webhook)
+    const { data: msgs, error } = await db
+      .from('mensagens')
+      .select('*')
+      .eq('clinic_id', clinic.id)
+      .order('created_at', { ascending: false })
+      .limit(200);
+
+    if (error) throw error;
+
+    // Group by phone number to build chat list
+    const chatMap = {};
+    (msgs || []).forEach(m => {
+      const phone = m.phone || '';
+      if (!chatMap[phone]) {
+        const lead = STATE.leads.find(l => l.telefone && l.telefone.replace(/\D/g,'').slice(-8) === phone.slice(-8));
+        chatMap[phone] = {
+          id: phone + '@s.whatsapp.net',
           phone,
-          name: c.name || c.pushName || phone,
-          lastMsg: c.lastMessage?.message?.conversation || c.lastMessage?.message?.extendedTextMessage?.text || '📎 Mídia',
-          time: c.lastMessage?.messageTimestamp ? new Date(c.lastMessage.messageTimestamp * 1000) : new Date(),
-          unread: c.unreadCount || 0,
-          isGroup: c.id?.includes('@g.us'),
+          name: m.contact_name || lead?.nome || phone,
+          lastMsg: m.content || '📎 Mídia',
+          time: new Date(m.created_at),
+          unread: 0,
           lead,
+          messages: [],
         };
-      }).filter(c => !c.isGroup).sort((a,b) => b.time - a.time);
-      const totalUnread = INBOX.chats.reduce((s,c) => s + c.unread, 0);
-      const badge = document.getElementById('inboxUnreadBadge');
-      if (badge) { badge.textContent = totalUnread; badge.style.display = totalUnread > 0 ? '' : 'none'; }
-      document.getElementById('inboxStatusText').textContent = INBOX.chats.length + ' conversa' + (INBOX.chats.length !== 1 ? 's' : '');
-      renderInboxList();
-    } else {
-      document.getElementById('inboxStatusText').textContent = 'Erro ao carregar conversas';
-      document.getElementById('inboxList').innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary);font-size:13px;">Erro ao buscar conversas. Verifique se o WhatsApp está conectado.</div>';
-    }
+      }
+      chatMap[phone].messages.push(m);
+      if (!m.from_me && !m.read_at) chatMap[phone].unread++;
+    });
+
+    INBOX.chats = Object.values(chatMap).sort((a,b) => b.time - a.time);
+
+    // Also include leads with phone that have no messages yet
+    STATE.leads.filter(l => l.telefone).forEach(lead => {
+      const phone = lead.telefone.replace(/\D/g,'');
+      const exists = INBOX.chats.find(c => c.phone.endsWith(phone.slice(-8)));
+      if (!exists) {
+        INBOX.chats.push({
+          id: phone + '@s.whatsapp.net',
+          phone,
+          name: lead.nome,
+          lastMsg: 'Nenhuma mensagem ainda',
+          time: new Date(lead.created_at || Date.now()),
+          unread: 0,
+          lead,
+          messages: [],
+        });
+      }
+    });
+
+    const totalUnread = INBOX.chats.reduce((s,c) => s + c.unread, 0);
+    const badge = document.getElementById('inboxUnreadBadge');
+    if (badge) { badge.textContent = totalUnread; badge.style.display = totalUnread > 0 ? '' : 'none'; }
+    document.getElementById('inboxStatusText').textContent = INBOX.chats.length + ' conversa' + (INBOX.chats.length !== 1 ? 's' : '');
+    renderInboxList();
+
   } catch(e) {
-    document.getElementById('inboxStatusText').textContent = 'Erro de conexão';
-    document.getElementById('inboxList').innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary);font-size:13px;">Não foi possível conectar à Evolution API.</div>';
+    console.error('inbox error:', e);
+    // Fallback: show leads as chats even without messages
+    INBOX.chats = STATE.leads.filter(l => l.telefone).map(l => ({
+      id: l.telefone.replace(/\D/g,'') + '@s.whatsapp.net',
+      phone: l.telefone.replace(/\D/g,''),
+      name: l.nome,
+      lastMsg: 'Clique para enviar mensagem',
+      time: new Date(l.created_at || Date.now()),
+      unread: 0,
+      lead: l,
+      messages: [],
+    }));
+    document.getElementById('inboxStatusText').textContent = INBOX.chats.length + ' lead' + (INBOX.chats.length !== 1 ? 's' : '') + ' — configure webhook para ver mensagens';
+    renderInboxList();
   }
 }
 
@@ -2341,18 +2386,38 @@ function setQuickReply(type, chatId) {
 
 async function loadChatMessages(chat) {
   const clinic = currentClinic();
-  if (!clinic?.whatsapp_instance) return;
+  if (!clinic) return;
+
+  // Use messages already loaded in chat object or fetch from Supabase
   try {
-    const data = await evoRequest('POST', `/chat/findMessages/${clinic.whatsapp_instance}`, {
-      where: { key: { remoteJid: chat.id } },
-      limit: 40,
-    });
-    const msgs = (data?.messages?.records || data?.messages || []).sort((a,b) => (a.messageTimestamp||0)-(b.messageTimestamp||0));
-    INBOX.messages[chat.id] = msgs;
-    renderMessages(msgs, chat);
+    const { data: msgs } = await db
+      .from('mensagens')
+      .select('*')
+      .eq('clinic_id', clinic.id)
+      .eq('phone', chat.phone)
+      .order('created_at', { ascending: true })
+      .limit(80);
+
+    const formatted = (msgs || chat.messages || []).map(m => ({
+      key: { fromMe: m.from_me },
+      message: { conversation: m.content },
+      messageTimestamp: new Date(m.created_at).getTime() / 1000,
+      type: m.type || 'text',
+    }));
+
+    INBOX.messages[chat.id] = formatted;
+    renderMessages(formatted, chat);
+
+    // Mark as read
+    if (msgs?.length) {
+      await db.from('mensagens').update({ read_at: new Date().toISOString() })
+        .eq('clinic_id', clinic.id).eq('phone', chat.phone).is('read_at', null).eq('from_me', false);
+    }
+
   } catch(e) {
+    // Show empty state with send option
     const msgsEl = document.getElementById('chatMessages');
-    if (msgsEl) msgsEl.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-secondary);font-size:12px;">Não foi possível carregar as mensagens.</div>';
+    if (msgsEl) msgsEl.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-secondary);font-size:13px;"><i class="ti ti-message-circle" style="font-size:32px;display:block;margin-bottom:8px;color:var(--gold);opacity:0.4;"></i>Nenhuma mensagem ainda.<br>Envie a primeira mensagem abaixo! 👋</div>';
   }
 }
 
@@ -2398,22 +2463,42 @@ async function sendChatMessage() {
   const text = input?.value?.trim();
   if (!text || !INBOX.activeChat) return;
   const clinic = currentClinic();
-  if (!clinic?.whatsapp_instance) { toast('WhatsApp não conectado!','error'); return; }
   input.value = '';
   autoResizeInput(input);
+
+  // Add message locally immediately (optimistic UI)
+  const localMsg = { key: { fromMe: true }, message: { conversation: text }, messageTimestamp: Date.now()/1000 };
+  if (!INBOX.messages[INBOX.activeChat.id]) INBOX.messages[INBOX.activeChat.id] = [];
+  INBOX.messages[INBOX.activeChat.id].push(localMsg);
+  renderMessages(INBOX.messages[INBOX.activeChat.id], INBOX.activeChat);
+  INBOX.activeChat.lastMsg = text;
+  INBOX.activeChat.time = new Date();
+  renderInboxList();
+
+  // Save to Supabase
   try {
-    const phone = INBOX.activeChat.phone;
-    await sendWhatsAppMessage(clinic.whatsapp_instance, phone, text);
-    // Add message locally immediately
-    const localMsg = { key: { fromMe: true }, message: { conversation: text }, messageTimestamp: Date.now()/1000 };
-    if (!INBOX.messages[INBOX.activeChat.id]) INBOX.messages[INBOX.activeChat.id] = [];
-    INBOX.messages[INBOX.activeChat.id].push(localMsg);
-    renderMessages(INBOX.messages[INBOX.activeChat.id], INBOX.activeChat);
-    // Update last message in list
-    INBOX.activeChat.lastMsg = text;
-    INBOX.activeChat.time = new Date();
-    renderInboxList();
-  } catch(e) { toast('Erro ao enviar: '+e.message,'error'); }
+    await db.from('mensagens').insert({
+      clinic_id: clinic.id,
+      phone: INBOX.activeChat.phone,
+      contact_name: INBOX.activeChat.name,
+      content: text,
+      type: 'text',
+      from_me: true,
+      created_at: new Date().toISOString(),
+    });
+  } catch(e) { console.error('save msg error:', e); }
+
+  // Send via Evolution API if connected
+  if (clinic?.whatsapp_instance) {
+    try {
+      await sendWhatsAppMessage(clinic.whatsapp_instance, INBOX.activeChat.phone, text);
+      toast('Mensagem enviada! ✓');
+    } catch(e) {
+      toast('Salvo localmente — WhatsApp offline', 'error');
+    }
+  } else {
+    toast('Mensagem salva — conecte o WhatsApp para enviar');
+  }
 }
 
 async function sendImageMsg(event) {
