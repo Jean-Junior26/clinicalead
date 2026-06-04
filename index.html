@@ -591,20 +591,11 @@ tbody tr:hover td { background:var(--bg-elevated); }
       <h3>Criar nova conta</h3>
       <p>Cadastre-se para começar a usar o ClinicaLead</p>
       <div class="login-error" id="registerError"></div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Nome completo</label>
-          <input class="form-input" id="regName" placeholder="Seu nome"/>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Perfil</label>
-          <select class="form-select" id="regRole">
-            <option value="admin">Administrador</option>
-            <option value="dentist">Dentista</option>
-            <option value="receptionist">Recepcionista</option>
-          </select>
-        </div>
-      </div>
+   <div class="form-group">
+  <label class="form-label">Nome completo</label>
+  <input class="form-input" id="regName" placeholder="Seu nome"/>
+  <input type="hidden" id="regRole" value="clinic"/>
+</div>
       <div class="form-group">
         <label class="form-label">E-mail</label>
         <input class="form-input" type="email" id="regEmail" placeholder="seu@email.com"/>
@@ -1242,7 +1233,7 @@ async function doRegister() {
   const name  = document.getElementById('regName').value.trim();
   const email = document.getElementById('regEmail').value.trim();
   const pass  = document.getElementById('regPassword').value;
-  const role  = document.getElementById('regRole').value;
+const role = document.getElementById('regEmail').value.trim() === 'jeanjunior.digital@gmail.com' ? 'admin' : 'clinic';
   const errEl = document.getElementById('registerError');
   const btn   = document.getElementById('registerBtn');
   if (!name||!email||!pass) { errEl.textContent='Preencha todos os campos.'; errEl.classList.add('show'); return; }
