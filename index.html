@@ -2089,6 +2089,7 @@ async function gerarQRCode() {
           const s = await getInstanceStatus(currentWAInstance);
           if (s?.instance?.state === 'open') {
             clearInterval(qrInterval);
+            fetch('/api/setup-webhook', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instance: currentWAInstance }) });
             document.getElementById('waStatus').innerHTML = '<span style="color:var(--gold);font-weight:600;">✅ WhatsApp conectado com sucesso!</span>';
             document.getElementById('qrCodeArea').style.display = 'none';
             document.getElementById('btnGerarQR').style.display = 'none';
