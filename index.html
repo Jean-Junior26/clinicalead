@@ -1340,9 +1340,8 @@ function renderClinicSwitcher() {
       ${i===STATE.currentClinicIdx?'<i class="ti ti-check" style="margin-left:auto;"></i>':''}
     </div>
   `).join('') + `
-  ${STATE.clinics.length === 0 || STATE.profile?.role === 'admin' ? `<div class="clinic-add" onclick="openAddClinicWizard()"><i class="ti ti-plus"></i><span>Adicionar nova clínica</span></div>` : ''}
-      <i class="ti ti-plus"></i><span>Adicionar nova clínica</span>
-    </div>`;
+${STATE.clinics.length === 0 || STATE.profile?.role === 'admin' ? `<div class="clinic-add" onclick="openAddClinicWizard()"><i class="ti ti-plus"></i><span>Adicionar nova clínica</span></div>` : ''}
+`;
 }
 
 async function switchClinic(idx) {
