@@ -1204,12 +1204,18 @@ async function loadLeads() {
 
 function loadAutomations() {
   STATE.automations = [
-    { id:1, title:'Boas-vindas ao novo lead', desc:'Enviada assim que um novo lead entra no sistema.', trigger:'Lead criado', icon:'ti-hand-click', active:true, msg:'Olá, {nome}! 👋 Vi que você tem interesse em {procedimento}. Posso te ajudar a agendar uma avaliação gratuita?' },
-    { id:2, title:'Confirmação de agendamento', desc:'Enviada imediatamente ao registrar a consulta.', trigger:'Consulta agendada', icon:'ti-calendar-check', active:true, msg:'Ótimo, {nome}! ✅ Sua consulta está confirmada para {data} às {hora}. Qualquer dúvida é só chamar!' },
-    { id:3, title:'Lembrete 24h antes', desc:'Enviado 24h antes para reduzir faltas.', trigger:'24h antes da consulta', icon:'ti-clock', active:true, msg:'Oi {nome}! 🦷 Lembrando que amanhã você tem consulta às {hora}. Confirma presença? Responda SIM ou NÃO.' },
-    { id:4, title:'Follow-up sem resposta', desc:'Reativa leads sem resposta após 48h.', trigger:'48h sem resposta', icon:'ti-refresh', active:true, msg:'Oi {nome}, tudo bem? 😊 Ainda posso te ajudar a agendar sua avaliação de {procedimento}. Quando seria melhor?' },
-    { id:5, title:'Pós-consulta', desc:'Enviada 2h após comparecimento.', trigger:'Status = Compareceu', icon:'ti-heart', active:true, msg:'Oi {nome}! Espero que tenha gostado da avaliação 😊 Posso te ajudar com formas de pagamento!' },
-    { id:6, title:'Reativação de lead frio', desc:'Reativa leads inativos há 7+ dias.', trigger:'7 dias sem atividade', icon:'ti-star', active:false, msg:'Oi {nome}! 🎉 Temos uma condição especial esse mês. Quer saber mais?' },
+    { id:1, title:'Boas-vindas ao novo lead', desc:'Enviada assim que um novo lead entra no sistema.', trigger:'Lead criado', icon:'ti-hand-click', active:true,
+      msg:'Olá, {nome}! 😊 Tudo bem?\n\nAqui é da *{clinica}*! Vi que você tem interesse em *{procedimento}* e adoraria te ajudar nessa jornada.\n\nPosso te agendar uma *avaliação gratuita e sem compromisso*? É rapidinho, a gente te explica tudo pessoalmente! 🦷\n\nQual o melhor dia pra você?' },
+    { id:2, title:'Confirmação de agendamento', desc:'Enviada imediatamente ao registrar a consulta.', trigger:'Consulta agendada', icon:'ti-calendar-check', active:true,
+      msg:'Olá, {nome}! 🎉 Sua consulta está *confirmada*!\n\n📅 *Data:* {data}\n⏰ *Horário:* {hora}\n📍 *Endereço:* R. Rui Barbosa, 483 - Centro, Araguari - MG\n🗺️ *Como chegar:* https://share.google/aBRk2BmdSOHL2iN9X\n\nQualquer dúvida, é só chamar aqui! Te esperamos 😊' },
+    { id:3, title:'Lembrete 24h antes', desc:'Enviado 24h antes para reduzir faltas.', trigger:'24h antes da consulta', icon:'ti-clock', active:true,
+      msg:'Oi {nome}! 👋 Passando para lembrar que *amanhã* você tem consulta conosco!\n\n⏰ *Horário:* {hora}\n📍 *Endereço:* R. Rui Barbosa, 483 - Centro, Araguari - MG\n🗺️ https://share.google/aBRk2BmdSOHL2iN9X\n\nConfirma sua presença? Responda *SIM* ou *NÃO* 😊' },
+    { id:4, title:'Follow-up sem resposta', desc:'Reativa leads sem resposta após 48h.', trigger:'48h sem resposta', icon:'ti-refresh', active:true,
+      msg:'Oi {nome}, tudo bem? 😊\n\nVi que ainda não conseguimos conversar sobre *{procedimento}* e queria saber se ainda posso te ajudar!\n\nTemos horários disponíveis essa semana para uma *avaliação gratuita*. Seria ótimo te conhecer pessoalmente 🦷\n\nQual o melhor momento pra você?' },
+    { id:5, title:'Pós-consulta', desc:'Enviada 2h após comparecimento.', trigger:'Status = Compareceu', icon:'ti-heart', active:true,
+      msg:'Oi {nome}! 😊 Foi um prazer te receber hoje na *{clinica}*!\n\nEspero que tenha gostado da avaliação e que tenha tirado todas as suas dúvidas.\n\nCaso queira dar continuidade ao tratamento de *{procedimento}*, temos condições especiais de pagamento e parcelamento. Posso te passar mais detalhes? 💛' },
+    { id:6, title:'Reativação de lead frio', desc:'Reativa leads inativos há 7+ dias.', trigger:'7 dias sem atividade', icon:'ti-star', active:false,
+      msg:'Oi {nome}! 🌟 Tudo bem?\n\nPassei aqui porque lembrei de você e queria saber se ainda tem interesse em cuidar do seu sorriso com a gente! 😊\n\nEsse mês temos uma *condição especial* para *{procedimento}* com formas facilitadas de pagamento.\n\nPosso te contar mais detalhes? É por tempo limitado! 🦷' },
   ];
 }
 
@@ -1560,7 +1566,7 @@ async function sendWAConsulta(consultaId) {
   const lead = STATE.leads.find(l => l.id === c.lead_id);
   const clinic = currentClinic();
   if (!clinic?.whatsapp_instance || !lead?.telefone) { toast('Configure o WhatsApp primeiro!','error'); return; }
-  const msg = `Oi ${lead.nome}! 🦷 Lembrando que você tem consulta amanhã às ${c.hora} na ${clinic.nome}. Confirma presença? Responda SIM ou NÃO.`;
+  const msg = `Oi ${lead.nome}! 👋 Passando para lembrar que *amanhã* você tem consulta conosco!\n\n⏰ *Horário:* ${c.hora}\n📍 *Endereço:* R. Rui Barbosa, 483 - Centro, Araguari - MG\n🗺️ https://share.google/aBRk2BmdSOHL2iN9X\n\nConfirma sua presença? Responda *SIM* ou *NÃO* 😊`;
   try {
     await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg);
     await db.from('consultas').update({status:'confirmado'}).eq('id', consultaId);
@@ -1680,7 +1686,8 @@ async function salvarNovoAgendamento() {
   toast('Consulta agendada! ✓');
   // Send WhatsApp confirmation
   if (clinic?.whatsapp_instance && lead?.telefone) {
-    const msg = `Ótimo, ${lead.nome}! ✅ Sua consulta está confirmada para ${new Date(data+'T12:00').toLocaleDateString('pt-BR')} às ${hora} na ${clinic.nome}. Qualquer dúvida é só chamar!`;
+    const dataFormatada = new Date(data+'T12:00').toLocaleDateString('pt-BR', {weekday:'long', day:'numeric', month:'long'});
+    const msg = `Olá, ${lead.nome}! 🎉 Sua consulta está *confirmada*!\n\n📅 *Data:* ${dataFormatada}\n⏰ *Horário:* ${hora}\n📍 *Endereço:* R. Rui Barbosa, 483 - Centro, Araguari - MG\n🗺️ *Como chegar:* https://share.google/aBRk2BmdSOHL2iN9X\n\nQualquer dúvida, é só chamar aqui! Te esperamos 😊`;
     try { await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg); toast('Confirmação enviada por WhatsApp! ✓'); } catch(e) {}
   }
 }
