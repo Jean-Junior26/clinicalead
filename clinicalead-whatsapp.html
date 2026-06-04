@@ -1,0 +1,1765 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>ClinicaLead CRM</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root {
+  --gold: #C9A84C;
+  --gold-bright: #E8C96A;
+  --gold-dim: #A07B30;
+  --gold-pale: rgba(201,168,76,0.12);
+  --gold-border: rgba(201,168,76,0.25);
+  --gold-border2: rgba(201,168,76,0.4);
+  --bg-base: #0A0A0B;
+  --bg-surface: #111113;
+  --bg-elevated: #18181B;
+  --bg-card: #1C1C20;
+  --bg-hover: #232328;
+  --bg-input: #16161A;
+  --text-primary: #F0EAD6;
+  --text-secondary: #8A8570;
+  --text-muted: #4A4840;
+  --border: rgba(201,168,76,0.15);
+  --border-subtle: rgba(255,255,255,0.05);
+  --border-strong: rgba(201,168,76,0.35);
+  --coral: #C0624A;
+  --coral-pale: rgba(192,98,74,0.15);
+  --blue: #5B8DB8;
+  --blue-pale: rgba(91,141,184,0.15);
+  --sidebar-w: 230px;
+  --font: 'DM Sans', sans-serif;
+  --font-display: 'Playfair Display', serif;
+  --mono: 'DM Mono', monospace;
+  --r-sm: 8px; --r-md: 12px; --r-lg: 16px;
+  --shadow-md: 0 8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(201,168,76,0.1);
+  --shadow-gold: 0 0 20px rgba(201,168,76,0.15);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;font-family:var(--font);background:var(--bg-base);color:var(--text-primary);font-size:14px;}
+::-webkit-scrollbar{width:5px;height:5px;}
+::-webkit-scrollbar-thumb{background:rgba(201,168,76,0.2);border-radius:3px;}
+
+/* ── LOGIN PAGE ── */
+.login-page {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  background: var(--bg-base);
+  background-image: radial-gradient(ellipse at 20% 50%, rgba(201,168,76,0.05) 0%, transparent 60%),
+                    radial-gradient(ellipse at 80% 20%, rgba(201,168,76,0.03) 0%, transparent 50%);
+}
+.login-box {
+  width: 100%; max-width: 420px; padding: 20px;
+}
+.login-logo {
+  text-align: center; margin-bottom: 32px;
+}
+.login-logo-mark {
+  width: 52px; height: 52px; border-radius: 14px;
+  background: var(--gold); display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 12px; box-shadow: 0 0 24px rgba(201,168,76,0.3);
+}
+.login-logo-mark i { font-size: 26px; color: #0A0A0B; }
+.login-title { font-family: var(--font-display); font-size: 28px; font-weight: 600; color: var(--text-primary); letter-spacing: -0.5px; }
+.login-title em { color: var(--gold); font-style: normal; }
+.login-sub { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+.login-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--r-lg); padding: 32px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px var(--border);
+}
+.login-card h3 { font-size: 16px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; font-family: var(--font-display); }
+.login-card p { font-size: 12px; color: var(--text-secondary); margin-bottom: 24px; }
+.form-group { margin-bottom: 16px; }
+.form-label { display: block; font-size: 12px; font-weight: 500; color: var(--text-secondary); margin-bottom: 6px; }
+.form-input {
+  width: 100%; padding: 11px 14px;
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  font-size: 13px; font-family: var(--font); color: var(--text-primary);
+  background: var(--bg-input); outline: none; transition: border-color 0.15s, box-shadow 0.15s;
+}
+.form-input:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(201,168,76,0.1); }
+.form-input::placeholder { color: var(--text-muted); }
+.form-select {
+  width: 100%; padding: 11px 14px;
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  font-size: 13px; font-family: var(--font); color: var(--text-primary);
+  background: var(--bg-input); outline: none; cursor: pointer;
+}
+.form-select:focus { border-color: var(--gold); }
+select option { background: #18181B; color: #F0EAD6; }
+.form-hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+.form-textarea {
+  width: 100%; padding: 10px 14px;
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  font-size: 13px; font-family: var(--font); color: var(--text-primary);
+  background: var(--bg-input); outline: none; resize: vertical; min-height: 80px;
+}
+.form-textarea:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(201,168,76,0.1); }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 10px 18px; border-radius: var(--r-sm);
+  font-size: 13px; font-weight: 500; font-family: var(--font);
+  cursor: pointer; border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated); color: var(--text-primary);
+  transition: all 0.15s; white-space: nowrap;
+}
+.btn:hover { background: var(--bg-hover); border-color: var(--border); }
+.btn i { font-size: 15px; }
+.btn-primary {
+  background: var(--gold); border-color: var(--gold); color: #0A0A0B;
+  font-weight: 600; box-shadow: 0 0 16px rgba(201,168,76,0.2);
+}
+.btn-primary:hover { background: var(--gold-bright); box-shadow: 0 0 24px rgba(201,168,76,0.35); }
+.btn-full { width: 100%; justify-content: center; padding: 12px; font-size: 14px; }
+.btn-sm { padding: 6px 12px; font-size: 12px; }
+.btn-ghost { border-color: transparent; background: transparent; }
+.btn-ghost:hover { background: var(--bg-elevated); border-color: transparent; }
+.btn-icon { padding: 7px; }
+.btn-danger { background: var(--coral-pale); border-color: var(--coral); color: #E8907A; }
+.login-divider { display: flex; align-items: center; gap: 12px; margin: 16px 0; }
+.login-divider::before,.login-divider::after { content:''; flex:1; height:1px; background:var(--border); }
+.login-divider span { font-size: 11px; color: var(--text-muted); }
+.login-switch { text-align: center; margin-top: 16px; font-size: 12px; color: var(--text-secondary); }
+.login-switch a { color: var(--gold); cursor: pointer; text-decoration: none; font-weight: 500; }
+.login-switch a:hover { text-decoration: underline; }
+.login-error {
+  background: rgba(192,98,74,0.12); border: 1px solid rgba(192,98,74,0.3);
+  border-radius: var(--r-sm); padding: 10px 14px;
+  font-size: 12px; color: #E8907A; margin-bottom: 16px; display: none;
+}
+.login-error.show { display: block; }
+
+/* ── APP LAYOUT ── */
+.app { display: flex; height: 100vh; overflow: hidden; }
+.sidebar {
+  width: var(--sidebar-w); background: var(--bg-surface);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; flex-shrink: 0;
+  overflow-y: auto; position: relative;
+}
+.sidebar::after {
+  content:''; position:absolute; top:0; left:0; right:0; height:1px;
+  background:linear-gradient(90deg,transparent,var(--gold),transparent); opacity:0.4;
+}
+.sidebar-logo {
+  display:flex; align-items:center; gap:10px;
+  padding:20px 16px 16px; border-bottom:1px solid var(--border);
+}
+.logo-mark {
+  width:36px; height:36px; border-radius:10px; background:var(--gold);
+  display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  box-shadow:0 0 16px rgba(201,168,76,0.3);
+}
+.logo-mark i { color:#0A0A0B; font-size:20px; }
+.logo-text { font-size:16px; font-weight:600; letter-spacing:0.3px; color:var(--text-primary); font-family:var(--font-display); }
+.logo-text em { color:var(--gold); font-style:normal; }
+.clinic-switcher {
+  margin:12px 10px; border-radius:var(--r-md);
+  border:1px solid var(--border); background:var(--bg-elevated);
+  padding:10px 12px; cursor:pointer; transition:all 0.15s;
+}
+.clinic-switcher:hover { border-color:var(--border-strong); }
+.clinic-switcher-header { display:flex; align-items:center; gap:8px; }
+.clinic-dot { width:8px; height:8px; border-radius:50%; background:var(--gold); box-shadow:0 0 6px rgba(201,168,76,0.5); flex-shrink:0; }
+.clinic-name-text { font-size:12px; font-weight:500; color:var(--text-primary); flex:1; }
+.clinic-plan { font-size:10px; color:var(--text-secondary); margin-top:3px; }
+.clinic-dropdown {
+  display:none; margin:0 10px 6px;
+  background:var(--bg-card); border:1px solid var(--border-strong);
+  border-radius:var(--r-md); overflow:hidden; box-shadow:var(--shadow-md);
+}
+.clinic-dropdown.open { display:block; }
+.clinic-option {
+  display:flex; align-items:center; gap:10px;
+  padding:10px 14px; cursor:pointer; font-size:12px; font-weight:500;
+  color:var(--text-primary); transition:background 0.1s;
+}
+.clinic-option:hover { background:var(--bg-hover); }
+.clinic-option.active { color:var(--gold); background:var(--gold-pale); }
+.clinic-option i { font-size:15px; color:var(--text-secondary); }
+.clinic-option.active i { color:var(--gold); }
+.clinic-add {
+  display:flex; align-items:center; gap:10px;
+  padding:10px 14px; cursor:pointer; font-size:12px; font-weight:600;
+  color:var(--gold); border-top:1px solid var(--border); transition:background 0.1s;
+}
+.clinic-add:hover { background:var(--gold-pale); }
+.sidebar-section { padding:14px 10px 4px; }
+.sidebar-label {
+  font-size:10px; font-weight:600; letter-spacing:1px;
+  color:var(--text-muted); text-transform:uppercase;
+  padding:0 8px; margin-bottom:4px;
+}
+.nav-item {
+  display:flex; align-items:center; gap:10px;
+  padding:9px 10px; border-radius:var(--r-sm);
+  font-size:13px; font-weight:400; color:var(--text-secondary);
+  cursor:pointer; transition:all 0.15s;
+  border:none; background:none; width:100%; text-align:left;
+  font-family:var(--font); position:relative;
+}
+.nav-item i { font-size:17px; flex-shrink:0; }
+.nav-item:hover { background:var(--bg-elevated); color:var(--text-primary); }
+.nav-item.active {
+  background:var(--gold-pale); color:var(--gold); font-weight:500;
+  border:1px solid var(--gold-border);
+}
+.nav-item.active::before {
+  content:''; position:absolute; left:0; top:4px; bottom:4px;
+  width:2px; background:var(--gold); border-radius:0 2px 2px 0;
+  box-shadow:0 0 6px rgba(201,168,76,0.5);
+}
+.nav-badge {
+  margin-left:auto; font-size:10px; font-weight:700;
+  background:var(--gold); color:#0A0A0B;
+  padding:1px 6px; border-radius:20px; min-width:20px; text-align:center;
+}
+.sidebar-footer {
+  margin-top:auto; padding:12px 10px;
+  border-top:1px solid var(--border);
+}
+.user-card {
+  display:flex; align-items:center; gap:10px;
+  padding:8px 10px; border-radius:var(--r-sm); cursor:pointer;
+}
+.user-card:hover { background:var(--bg-elevated); }
+.user-avatar {
+  width:30px; height:30px; border-radius:50%;
+  background:var(--gold); color:#0A0A0B;
+  display:flex; align-items:center; justify-content:center;
+  font-size:11px; font-weight:700; flex-shrink:0;
+}
+.user-name { font-size:12px; font-weight:500; color:var(--text-primary); }
+.user-role { font-size:10px; color:var(--text-secondary); }
+.main { flex:1; display:flex; flex-direction:column; overflow:hidden; min-width:0; }
+.topbar {
+  height:62px; background:var(--bg-surface); border-bottom:1px solid var(--border);
+  display:flex; align-items:center; justify-content:space-between;
+  padding:0 28px; flex-shrink:0; gap:16px;
+}
+.topbar-title { font-size:17px; font-weight:600; letter-spacing:-0.3px; color:var(--text-primary); font-family:var(--font-display); }
+.topbar-right { display:flex; align-items:center; gap:8px; }
+.content { flex:1; overflow-y:auto; padding:24px 28px; background:var(--bg-base); }
+.page { display:none; }
+.page.active { display:block; animation:fadeIn 0.2s ease; }
+@keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
+.page-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:22px; gap:16px; }
+.page-header-left h2 { font-size:20px; font-weight:600; letter-spacing:-0.3px; color:var(--text-primary); font-family:var(--font-display); }
+.page-header-left p { font-size:13px; color:var(--text-secondary); margin-top:3px; }
+.page-header-actions { display:flex; align-items:center; gap:8px; flex-shrink:0; }
+
+/* METRICS */
+.metrics-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:22px; }
+.metric-card {
+  background:var(--bg-card); border-radius:var(--r-md);
+  border:1px solid var(--border); padding:18px 20px; position:relative; overflow:hidden;
+}
+.metric-card::after {
+  content:''; position:absolute; inset:0;
+  background:radial-gradient(ellipse at top left,rgba(201,168,76,0.03) 0%,transparent 60%);
+  pointer-events:none;
+}
+.metric-top-bar { position:absolute; top:0; left:0; right:0; height:3px; }
+.metric-icon { width:38px; height:38px; border-radius:10px; display:flex; align-items:center; justify-content:center; margin-bottom:14px; }
+.metric-icon i { font-size:20px; }
+.metric-icon.gold { background:var(--gold-pale); }
+.metric-icon.gold i { color:var(--gold); }
+.metric-icon.blue { background:var(--blue-pale); }
+.metric-icon.blue i { color:var(--blue); }
+.metric-icon.coral { background:var(--coral-pale); }
+.metric-icon.coral i { color:var(--coral); }
+.metric-label { font-size:11px; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:4px; }
+.metric-value { font-size:26px; font-weight:600; letter-spacing:-1px; color:var(--text-primary); line-height:1; font-family:var(--font-display); }
+.metric-delta { font-size:11px; margin-top:6px; display:flex; align-items:center; gap:3px; color:var(--gold); }
+
+/* CARDS */
+.card { background:var(--bg-card); border-radius:var(--r-md); border:1px solid var(--border); }
+.card-header { display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid var(--border); }
+.card-header h3 { font-size:14px; font-weight:500; color:var(--text-primary); letter-spacing:0.1px; }
+.card-body { padding:16px 20px; }
+.dash-2col { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
+
+/* BADGES */
+.badge { display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:600; padding:3px 10px; border-radius:20px; white-space:nowrap; }
+.badge-gold { background:var(--gold-pale); color:var(--gold); border:1px solid var(--gold-border); }
+.badge-amber { background:rgba(232,201,106,0.1); color:var(--gold-bright); border:1px solid rgba(232,201,106,0.2); }
+.badge-blue { background:var(--blue-pale); color:#8ABBE8; border:1px solid rgba(91,141,184,0.2); }
+.badge-coral { background:var(--coral-pale); color:#E8907A; border:1px solid rgba(192,98,74,0.2); }
+.badge-gray { background:rgba(255,255,255,0.05); color:var(--text-secondary); border:1px solid var(--border-subtle); }
+.badge-purple { background:rgba(139,126,200,0.1); color:#B8AEE8; border:1px solid rgba(139,126,200,0.2); }
+
+/* TABLE */
+.table-wrap { background:var(--bg-card); border-radius:var(--r-md); border:1px solid var(--border); overflow:hidden; }
+table { width:100%; border-collapse:collapse; }
+thead { background:var(--bg-elevated); }
+th { padding:11px 16px; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.8px; color:var(--gold-dim); text-align:left; border-bottom:1px solid var(--border); white-space:nowrap; }
+td { padding:13px 16px; font-size:13px; color:var(--text-primary); border-bottom:1px solid var(--border-subtle); }
+tr:last-child td { border-bottom:none; }
+tbody tr:hover td { background:var(--bg-elevated); }
+.td-bold { font-weight:600; }
+.td-muted { color:var(--text-secondary); font-size:12px; }
+.td-mono { font-family:var(--mono); font-size:12px; color:var(--gold); font-weight:500; }
+
+/* AVATAR */
+.avatar { width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0; }
+
+/* LEAD ROW */
+.lead-row { display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid var(--border-subtle); }
+.lead-row:last-child { border-bottom:none; }
+.lead-info { flex:1; min-width:0; }
+.lead-name { font-size:13px; font-weight:500; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.lead-sub { font-size:11px; color:var(--text-secondary); margin-top:1px; }
+
+/* FUNNEL */
+.funnel-row { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+.funnel-row:last-child { margin-bottom:0; }
+.funnel-label { font-size:12px; color:var(--text-secondary); min-width:108px; }
+.funnel-track { flex:1; height:8px; background:rgba(255,255,255,0.06); border-radius:4px; overflow:hidden; }
+.funnel-fill { height:100%; border-radius:4px; transition:width 0.8s ease; }
+.funnel-n { font-size:12px; font-weight:600; color:var(--text-primary); min-width:28px; text-align:right; }
+.funnel-pct { font-size:11px; color:var(--text-secondary); min-width:36px; text-align:right; }
+
+/* KANBAN */
+.kanban-board { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; align-items:start; }
+.kanban-col { background:var(--bg-surface); border-radius:var(--r-md); border:1px solid var(--border); padding:12px; }
+.col-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; padding-bottom:10px; border-bottom:1px solid var(--border); }
+.col-title { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; }
+.col-count { font-size:11px; font-weight:700; width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.k-card {
+  background:var(--bg-card); border-radius:var(--r-sm);
+  border:1px solid var(--border); padding:12px; margin-bottom:8px; cursor:pointer;
+  transition:box-shadow 0.15s, transform 0.15s, border-color 0.15s;
+}
+.k-card:last-child { margin-bottom:0; }
+.k-card:hover { box-shadow:var(--shadow-gold); transform:translateY(-1px); border-color:var(--gold-border); }
+.k-card-name { font-size:13px; font-weight:500; color:var(--text-primary); margin-bottom:3px; }
+.k-card-proc { font-size:11px; color:var(--text-secondary); margin-bottom:8px; }
+.k-card-foot { display:flex; align-items:center; justify-content:space-between; }
+.k-source { font-size:10px; color:var(--text-muted); display:flex; align-items:center; gap:3px; }
+.k-source i { font-size:12px; }
+.k-wa { width:22px; height:22px; border-radius:50%; background:var(--gold-pale); border:1px solid var(--gold-border); display:flex; align-items:center; justify-content:center; }
+.k-wa i { font-size:12px; color:var(--gold); }
+.k-val { font-size:11px; font-weight:600; color:var(--gold); font-family:var(--mono); }
+
+/* MODAL */
+.modal-overlay {
+  position:fixed; inset:0; background:rgba(0,0,0,0.75);
+  display:none; align-items:center; justify-content:center; z-index:1000; padding:20px;
+}
+.modal-overlay.open { display:flex; animation:fadeIn 0.15s ease; }
+.modal {
+  background:var(--bg-card); border-radius:var(--r-lg);
+  width:100%; max-width:540px;
+  box-shadow:0 20px 60px rgba(0,0,0,0.8),0 0 0 1px var(--border);
+  max-height:90vh; display:flex; flex-direction:column;
+}
+.modal-header { display:flex; align-items:center; justify-content:space-between; padding:20px 24px; border-bottom:1px solid var(--border); flex-shrink:0; }
+.modal-header h3 { font-size:16px; font-weight:600; color:var(--text-primary); font-family:var(--font-display); }
+.modal-body { padding:24px; overflow-y:auto; flex:1; }
+.modal-footer { padding:16px 24px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:10px; flex-shrink:0; }
+
+/* AUTOMATIONS */
+.auto-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+.auto-card { background:var(--bg-card); border-radius:var(--r-md); border:1px solid var(--border); overflow:hidden; }
+.auto-card-top { padding:16px 18px 12px; border-bottom:1px solid var(--border); }
+.auto-card-icon { width:38px; height:38px; border-radius:10px; background:var(--gold-pale); border:1px solid var(--gold-border); display:flex; align-items:center; justify-content:center; margin-bottom:10px; }
+.auto-card-icon i { font-size:20px; color:var(--gold); }
+.auto-title { font-size:13px; font-weight:500; color:var(--text-primary); margin-bottom:3px; }
+.auto-desc { font-size:12px; color:var(--text-secondary); line-height:1.5; }
+.auto-body { padding:14px 18px; }
+.auto-trigger-label { font-size:10px; font-weight:600; color:var(--gold-dim); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:8px; }
+.auto-msg { font-size:11px; color:var(--text-secondary); line-height:1.7; background:var(--bg-elevated); border-radius:8px; padding:10px 12px; border-left:3px solid var(--gold); font-family:var(--mono); }
+.auto-footer { padding:12px 18px; border-top:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
+.toggle { width:36px; height:20px; border-radius:10px; background:var(--gold); position:relative; cursor:pointer; transition:background 0.2s; flex-shrink:0; box-shadow:0 0 8px rgba(201,168,76,0.3); }
+.toggle.off { background:rgba(255,255,255,0.08); box-shadow:none; }
+.toggle-knob { width:16px; height:16px; border-radius:50%; background:#fff; position:absolute; top:2px; right:2px; transition:right 0.2s; }
+.toggle.off .toggle-knob { right:18px; }
+.toggle-wrap { display:flex; align-items:center; gap:8px; }
+.toggle-label { font-size:12px; font-weight:600; }
+
+/* AGENDA */
+.agenda-layout { display:grid; grid-template-columns:280px 1fr; gap:16px; }
+.mini-cal { background:var(--bg-card); border-radius:var(--r-md); border:1px solid var(--border); padding:18px; }
+.cal-nav { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+.cal-month { font-size:14px; font-weight:600; color:var(--text-primary); font-family:var(--font-display); }
+.cal-grid-header { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; margin-bottom:4px; }
+.cal-dh { font-size:10px; font-weight:600; color:var(--text-muted); text-align:center; padding:2px; text-transform:uppercase; }
+.cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; }
+.cal-day { aspect-ratio:1; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:400; color:var(--text-secondary); cursor:pointer; transition:all 0.15s; position:relative; }
+.cal-day:hover { background:var(--bg-elevated); }
+.cal-day.other { color:var(--text-muted); }
+.cal-day.today { background:var(--gold) !important; color:#0A0A0B; font-weight:700; box-shadow:0 0 12px rgba(201,168,76,0.4); }
+.cal-day.has-dot::after { content:''; width:4px; height:4px; border-radius:50%; background:var(--gold-bright); position:absolute; bottom:3px; }
+.sched-card { background:var(--bg-card); border-radius:var(--r-md); border:1px solid var(--border); overflow:hidden; }
+.sched-header { padding:16px 20px; border-bottom:1px solid var(--border); background:var(--bg-elevated); }
+.sched-item { display:flex; gap:14px; padding:16px 20px; border-bottom:1px solid var(--border-subtle); }
+.sched-item:last-child { border-bottom:none; }
+.sched-time { font-family:var(--mono); font-size:13px; font-weight:500; min-width:48px; margin-top:2px; color:var(--text-primary); }
+.sched-line-col { display:flex; flex-direction:column; align-items:center; padding-top:5px; }
+.sched-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+.sched-connector { width:2px; flex:1; background:var(--border); margin-top:3px; }
+.sched-info { flex:1; }
+.sched-name { font-size:14px; font-weight:500; color:var(--text-primary); margin-bottom:2px; }
+.sched-proc { font-size:12px; color:var(--text-secondary); }
+.sched-acts { display:flex; align-items:center; gap:8px; margin-top:8px; }
+
+/* REPORTS */
+.reports-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.stat-row { display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--border-subtle); }
+.stat-row:last-child { border-bottom:none; }
+.stat-label { font-size:13px; color:var(--text-secondary); }
+.stat-val { font-size:13px; font-weight:600; color:var(--text-primary); }
+
+/* WIZARD */
+.wizard-overlay {
+  position:fixed; inset:0; background:rgba(0,0,0,0.75);
+  display:flex; align-items:center; justify-content:center; z-index:2000; padding:20px;
+}
+.wizard-box {
+  background:var(--bg-card); border-radius:var(--r-lg); width:100%; max-width:580px;
+  box-shadow:0 24px 80px rgba(0,0,0,0.9),0 0 0 1px var(--border-strong); overflow:hidden;
+}
+.wizard-progress { height:4px; background:rgba(255,255,255,0.06); }
+.wizard-progress-fill { height:100%; background:var(--gold); transition:width 0.4s ease; box-shadow:0 0 8px rgba(201,168,76,0.4); }
+.wizard-content { padding:32px; }
+.wizard-step { display:none; }
+.wizard-step.active { display:block; animation:fadeIn 0.2s ease; }
+.wizard-icon { width:52px; height:52px; border-radius:14px; background:var(--gold-pale); border:1px solid var(--gold-border); display:flex; align-items:center; justify-content:center; margin-bottom:16px; }
+.wizard-icon i { font-size:26px; color:var(--gold); }
+.wizard-title { font-size:20px; font-weight:600; color:var(--text-primary); margin-bottom:6px; letter-spacing:-0.3px; font-family:var(--font-display); }
+.wizard-sub { font-size:13px; color:var(--text-secondary); margin-bottom:24px; line-height:1.6; }
+.wizard-footer { padding:16px 32px 24px; display:flex; align-items:center; justify-content:space-between; border-top:1px solid var(--border); }
+.step-dot { width:8px; height:8px; border-radius:50%; background:rgba(255,255,255,0.1); transition:background 0.2s; }
+.step-dot.active { background:var(--gold); box-shadow:0 0 6px rgba(201,168,76,0.5); }
+.wizard-steps-indicator { display:flex; gap:6px; }
+
+/* TOAST */
+.toast {
+  position:fixed; bottom:24px; right:24px;
+  background:var(--bg-elevated); color:var(--text-primary); border:1px solid var(--gold-border);
+  padding:12px 18px; border-radius:var(--r-sm); font-size:13px; font-weight:500;
+  display:flex; align-items:center; gap:8px;
+  box-shadow:var(--shadow-md); z-index:3000;
+  transform:translateY(80px); opacity:0; transition:all 0.3s ease;
+}
+.toast.show { transform:translateY(0); opacity:1; }
+.toast.success i { color:var(--gold); }
+.toast.error i { color:#E8907A; }
+
+/* SEARCH */
+.search-box { display:flex; align-items:center; gap:8px; background:var(--bg-input); border:1px solid var(--border); border-radius:var(--r-sm); padding:8px 14px; }
+.search-box i { color:var(--text-muted); font-size:16px; flex-shrink:0; }
+.search-box input { border:none; outline:none; font-size:13px; font-family:var(--font); color:var(--text-primary); background:transparent; width:100%; }
+.search-box input::placeholder { color:var(--text-muted); }
+.toolbar { display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap; }
+.filter-select { border:1px solid var(--border); border-radius:var(--r-sm); padding:8px 12px; font-size:13px; font-family:var(--font); color:var(--text-primary); background:var(--bg-input); cursor:pointer; outline:none; }
+
+/* NOTIF */
+.notif-wrap { position:relative; }
+.notif-dot { width:8px; height:8px; border-radius:50%; background:var(--coral); position:absolute; top:5px; right:5px; border:2px solid var(--bg-surface); }
+
+/* LOADING */
+.loading-screen {
+  position:fixed; inset:0; background:var(--bg-base); display:flex;
+  align-items:center; justify-content:center; z-index:9999; flex-direction:column; gap:16px;
+}
+.loading-logo { width:56px; height:56px; border-radius:14px; background:var(--gold); display:flex; align-items:center; justify-content:center; box-shadow:0 0 24px rgba(201,168,76,0.3); animation:pulse 1.5s ease-in-out infinite; }
+.loading-logo i { font-size:28px; color:#0A0A0B; }
+@keyframes pulse { 0%,100%{box-shadow:0 0 24px rgba(201,168,76,0.3)} 50%{box-shadow:0 0 40px rgba(201,168,76,0.6)} }
+.loading-text { font-size:14px; color:var(--text-secondary); }
+
+/* EMPTY STATE */
+.empty-state { text-align:center; padding:48px 20px; }
+.empty-icon { width:52px; height:52px; border-radius:14px; background:var(--gold-pale); border:1px solid var(--gold-border); display:flex; align-items:center; justify-content:center; margin:0 auto 14px; }
+.empty-icon i { font-size:24px; color:var(--gold); }
+.empty-title { font-size:15px; font-weight:600; color:var(--text-primary); margin-bottom:6px; font-family:var(--font-display); }
+.empty-desc { font-size:12px; color:var(--text-secondary); max-width:280px; margin:0 auto 18px; line-height:1.6; }
+
+/* TEXT LINK */
+.text-link { color:var(--gold); cursor:pointer; font-size:12px; font-weight:500; background:none; border:none; padding:0; font-family:var(--font); }
+.text-link:hover { text-decoration:underline; }
+</style>
+</head>
+<body>
+
+<!-- LOADING -->
+<div class="loading-screen" id="loadingScreen">
+  <div class="loading-logo"><i class="ti ti-tooth"></i></div>
+  <div class="loading-text">Carregando ClinicaLead...</div>
+</div>
+
+<!-- LOGIN PAGE -->
+<div class="login-page" id="loginPage" style="display:none;">
+  <div class="login-box">
+    <div class="login-logo">
+      <div class="login-logo-mark"><i class="ti ti-tooth"></i></div>
+      <div class="login-title">Clínica<em>Lead</em></div>
+      <div class="login-sub">CRM inteligente para clínicas odontológicas</div>
+    </div>
+    <div class="login-card" id="loginCard">
+      <h3>Entrar na plataforma</h3>
+      <p>Acesse sua conta para gerenciar leads e consultas</p>
+      <div class="login-error" id="loginError"></div>
+      <div class="form-group">
+        <label class="form-label">E-mail</label>
+        <input class="form-input" type="email" id="loginEmail" placeholder="seu@email.com"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Senha</label>
+        <input class="form-input" type="password" id="loginPassword" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()"/>
+      </div>
+      <button class="btn btn-primary btn-full" onclick="doLogin()" id="loginBtn">
+        <i class="ti ti-login"></i> Entrar
+      </button>
+      <div class="login-divider"><span>ou</span></div>
+      <div class="login-switch">
+        Não tem conta? <a onclick="showRegister()">Criar conta gratuita</a>
+      </div>
+    </div>
+
+    <!-- REGISTER CARD -->
+    <div class="login-card" id="registerCard" style="display:none;">
+      <h3>Criar nova conta</h3>
+      <p>Cadastre-se para começar a usar o ClinicaLead</p>
+      <div class="login-error" id="registerError"></div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Nome completo</label>
+          <input class="form-input" id="regName" placeholder="Seu nome"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Perfil</label>
+          <select class="form-select" id="regRole">
+            <option value="admin">Administrador</option>
+            <option value="dentist">Dentista</option>
+            <option value="receptionist">Recepcionista</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">E-mail</label>
+        <input class="form-input" type="email" id="regEmail" placeholder="seu@email.com"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Senha</label>
+        <input class="form-input" type="password" id="regPassword" placeholder="Mínimo 6 caracteres"/>
+      </div>
+      <button class="btn btn-primary btn-full" onclick="doRegister()" id="registerBtn">
+        <i class="ti ti-user-plus"></i> Criar conta
+      </button>
+      <div class="login-switch" style="margin-top:12px;">
+        Já tem conta? <a onclick="showLogin()">Entrar</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- APP -->
+<div class="app" id="appPage" style="display:none;">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-mark"><i class="ti ti-tooth"></i></div>
+      <div class="logo-text">Clínica<em>Lead</em></div>
+    </div>
+    <div class="clinic-switcher" onclick="toggleClinicDropdown()">
+      <div class="clinic-switcher-header">
+        <div class="clinic-dot"></div>
+        <span class="clinic-name-text" id="clinicName">Carregando...</span>
+        <i class="ti ti-chevron-down" style="font-size:14px;color:var(--text-secondary);"></i>
+      </div>
+      <div class="clinic-plan" id="clinicPlan">—</div>
+    </div>
+    <div class="clinic-dropdown" id="clinicDropdown"></div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Principal</div>
+      <button class="nav-item active" data-page="dashboard" onclick="showPage('dashboard',this)"><i class="ti ti-layout-dashboard"></i> Painel</button>
+      <button class="nav-item" data-page="kanban" onclick="showPage('kanban',this)"><i class="ti ti-layout-kanban"></i> Funil Kanban</button>
+      <button class="nav-item" data-page="leads" onclick="showPage('leads',this)"><i class="ti ti-users"></i> Leads <span class="nav-badge" id="navLeadsBadge">0</span></button>
+      <button class="nav-item" data-page="agenda" onclick="showPage('agenda',this)"><i class="ti ti-calendar"></i> Agenda</button>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Automação</div>
+      <button class="nav-item" data-page="automacoes" onclick="showPage('automacoes',this)"><i class="ti ti-brand-whatsapp"></i> Automações <span class="nav-badge">6</span></button>
+      <button class="nav-item" data-page="relatorios" onclick="showPage('relatorios',this)"><i class="ti ti-chart-bar"></i> Relatórios</button>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Gestão</div>
+      <button class="nav-item" data-page="clinicas" onclick="showPage('clinicas',this)"><i class="ti ti-building-hospital"></i> Clínicas <span class="nav-badge" id="navClinicasBadge">0</span></button>
+    </div>
+    <div class="sidebar-footer">
+      <div class="user-card">
+        <div class="user-avatar" id="userAvatar">—</div>
+        <div>
+          <div class="user-name" id="userName">—</div>
+          <div class="user-role" id="userRole">—</div>
+        </div>
+        <button class="btn btn-ghost btn-icon" style="margin-left:auto;" onclick="doLogout()" title="Sair">
+          <i class="ti ti-logout" style="font-size:15px;color:var(--text-secondary);"></i>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <div class="topbar-title">Clínica<span style="color:var(--gold);">Lead</span></div>
+        <div style="font-size:11px;color:var(--text-secondary);margin-top:1px;" id="topbarSub">—</div>
+      </div>
+      <div class="topbar-right">
+        <div class="notif-wrap">
+          <button class="btn btn-ghost btn-icon"><i class="ti ti-bell" style="font-size:18px;"></i></button>
+          <div class="notif-dot"></div>
+        </div>
+        <button class="btn btn-primary" onclick="openNewLead()"><i class="ti ti-plus"></i> Novo lead</button>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- DASHBOARD -->
+      <div class="page active" id="page-dashboard">
+        <div class="page-header">
+          <div class="page-header-left"><h2>Painel geral</h2><p>Visão consolidada da clínica atual</p></div>
+          <div class="page-header-actions">
+            <button class="btn" onclick="showPage('relatorios')"><i class="ti ti-chart-bar"></i> Relatórios</button>
+            <button class="btn btn-primary" onclick="openNewLead()"><i class="ti ti-plus"></i> Novo lead</button>
+          </div>
+        </div>
+        <div class="metrics-grid">
+          <div class="metric-card"><div class="metric-top-bar" style="background:var(--gold);"></div><div class="metric-icon gold"><i class="ti ti-users"></i></div><div class="metric-label">Leads ativos</div><div class="metric-value" id="metricLeads">0</div><div class="metric-delta"><i class="ti ti-arrow-up" style="font-size:11px;"></i> Total cadastrado</div></div>
+          <div class="metric-card"><div class="metric-top-bar" style="background:var(--gold-bright);"></div><div class="metric-icon gold"><i class="ti ti-calendar-check"></i></div><div class="metric-label">Agendamentos</div><div class="metric-value" id="metricAgendam">0</div><div class="metric-delta"><i class="ti ti-arrow-up" style="font-size:11px;"></i> Consultas marcadas</div></div>
+          <div class="metric-card"><div class="metric-top-bar" style="background:var(--blue);"></div><div class="metric-icon blue"><i class="ti ti-door-enter"></i></div><div class="metric-label">Comparecimentos</div><div class="metric-value" id="metricCompare">0</div><div class="metric-delta" style="color:var(--text-secondary);">Taxa de presença</div></div>
+          <div class="metric-card"><div class="metric-top-bar" style="background:var(--coral);"></div><div class="metric-icon coral"><i class="ti ti-currency-dollar"></i></div><div class="metric-label">Potencial (R$)</div><div class="metric-value" id="metricFatur">R$ 0</div><div class="metric-delta" style="color:var(--text-secondary);">Valor dos leads ativos</div></div>
+        </div>
+        <div class="dash-2col">
+          <div class="card">
+            <div class="card-header"><h3><i class="ti ti-filter" style="margin-right:6px;font-size:15px;color:var(--text-secondary);"></i>Funil do mês</h3><button class="text-link" onclick="showPage('kanban')">Ver Kanban →</button></div>
+            <div class="card-body" id="funnelRows"><div style="text-align:center;padding:20px;color:var(--text-secondary);font-size:13px;">Nenhum lead ainda</div></div>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3><i class="ti ti-users" style="margin-right:6px;font-size:15px;color:var(--text-secondary);"></i>Leads recentes</h3><button class="text-link" onclick="showPage('leads')">Ver todos →</button></div>
+            <div class="card-body" id="recentLeads"><div style="text-align:center;padding:20px;color:var(--text-secondary);font-size:13px;">Nenhum lead ainda</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- KANBAN -->
+      <div class="page" id="page-kanban">
+        <div class="page-header">
+          <div class="page-header-left"><h2>Funil de Vendas</h2><p>Arraste os cards para avançar no funil</p></div>
+          <div class="page-header-actions"><button class="btn btn-primary" onclick="openNewLead()"><i class="ti ti-plus"></i> Novo lead</button></div>
+        </div>
+        <div class="kanban-board" id="kanbanBoard"></div>
+      </div>
+
+      <!-- LEADS -->
+      <div class="page" id="page-leads">
+        <div class="page-header">
+          <div class="page-header-left"><h2>Leads</h2><p id="leadsCount">0 leads</p></div>
+          <div class="page-header-actions"><button class="btn btn-primary" onclick="openNewLead()"><i class="ti ti-plus"></i> Novo lead</button></div>
+        </div>
+        <div class="toolbar">
+          <div class="search-box" style="max-width:300px;flex:1;"><i class="ti ti-search"></i><input type="text" placeholder="Buscar por nome ou procedimento..." oninput="renderLeads(document.getElementById('filterStatus').value,this.value)" id="searchLeads"/></div>
+          <select class="filter-select" id="filterStatus" onchange="renderLeads(this.value,document.getElementById('searchLeads').value)">
+            <option value="all">Todos os status</option>
+            <option value="novo">Novo lead</option>
+            <option value="contato">Contato feito</option>
+            <option value="agendado">Agendado</option>
+            <option value="compareceu">Compareceu</option>
+            <option value="sem_resposta">Sem resposta</option>
+            <option value="fechado">Fechado</option>
+          </select>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Paciente</th><th>Procedimento</th><th>Status</th><th>Valor est.</th><th>Origem</th><th>Criado em</th><th>Ações</th></tr></thead>
+            <tbody id="leadsTableBody"><tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text-secondary);">Nenhum lead ainda</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- AGENDA -->
+      <div class="page" id="page-agenda">
+        <div class="page-header">
+          <div class="page-header-left"><h2>Agenda</h2><p id="agendaDate">Hoje</p></div>
+          <div class="page-header-actions"><button class="btn btn-primary" onclick="toast('Em breve: agendar consulta!')"><i class="ti ti-plus"></i> Agendar</button></div>
+        </div>
+        <div class="agenda-layout">
+          <div class="mini-cal">
+            <div class="cal-nav">
+              <button class="btn btn-sm btn-ghost btn-icon"><i class="ti ti-chevron-left"></i></button>
+              <span class="cal-month" id="calMonth">Junho 2025</span>
+              <button class="btn btn-sm btn-ghost btn-icon"><i class="ti ti-chevron-right"></i></button>
+            </div>
+            <div class="cal-grid-header"><div class="cal-dh">D</div><div class="cal-dh">S</div><div class="cal-dh">T</div><div class="cal-dh">Q</div><div class="cal-dh">Q</div><div class="cal-dh">S</div><div class="cal-dh">S</div></div>
+            <div class="cal-grid" id="calGrid"></div>
+          </div>
+          <div class="sched-card">
+            <div class="sched-header"><div style="font-size:14px;font-weight:600;color:var(--text-primary);font-family:var(--font-display);">Consultas do dia</div><div style="font-size:12px;color:var(--text-secondary);margin-top:2px;" id="agendaDaySub">—</div></div>
+            <div id="agendaList"><div style="padding:32px;text-align:center;color:var(--text-secondary);font-size:13px;">Nenhuma consulta agendada para hoje</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- AUTOMAÇÕES -->
+      <div class="page" id="page-automacoes">
+        <div class="page-header">
+          <div class="page-header-left"><h2>Automações de WhatsApp</h2><p>Mensagens automáticas por etapa do funil</p></div>
+          <div class="page-header-actions"><button class="btn btn-primary" onclick="toast('Em breve: criar automação!')"><i class="ti ti-plus"></i> Nova automação</button></div>
+        </div>
+        <div class="auto-grid" id="autoGrid"></div>
+      </div>
+
+      <!-- RELATÓRIOS -->
+      <div class="page" id="page-relatorios">
+        <div class="page-header">
+          <div class="page-header-left"><h2>Relatórios</h2><p>Performance da clínica atual</p></div>
+          <div class="page-header-actions"><button class="btn" onclick="toast('Exportando PDF...')"><i class="ti ti-download"></i> Exportar</button></div>
+        </div>
+        <div class="reports-grid">
+          <div class="card"><div class="card-header"><h3>Resumo geral</h3></div><div class="card-body"><div class="stat-row"><span class="stat-label">Total de leads</span><span class="stat-val" id="repLeads">0</span></div><div class="stat-row"><span class="stat-label">Leads fechados</span><span class="stat-val" id="repFechados">0</span></div><div class="stat-row"><span class="stat-label">Taxa de conversão</span><span class="stat-val" id="repConv">0%</span></div><div class="stat-row"><span class="stat-label">Potencial de receita</span><span class="stat-val" id="repFatur">R$ 0</span></div></div></div>
+          <div class="card"><div class="card-header"><h3>Leads por origem</h3></div><div class="card-body" id="repSources"><div style="color:var(--text-secondary);font-size:13px;padding:8px 0;">Nenhum dado ainda</div></div></div>
+          <div class="card"><div class="card-header"><h3>Leads por status</h3></div><div class="card-body" id="repStatus"><div style="color:var(--text-secondary);font-size:13px;padding:8px 0;">Nenhum dado ainda</div></div></div>
+          <div class="card"><div class="card-header"><h3>Automações ativas</h3></div><div class="card-body" id="repAutos"><div style="color:var(--text-secondary);font-size:13px;padding:8px 0;">Carregando...</div></div></div>
+        </div>
+      </div>
+
+      <!-- CLÍNICAS -->
+      <div class="page" id="page-clinicas">
+        <div class="page-header">
+          <div class="page-header-left"><h2>Gestão de Clínicas</h2><p>Todas as clínicas cadastradas</p></div>
+          <div class="page-header-actions"><button class="btn btn-primary" onclick="openAddClinicWizard()"><i class="ti ti-plus"></i> Nova clínica</button></div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Clínica</th><th>Responsável</th><th>Telefone</th><th>Plano</th><th>Leads</th><th>WhatsApp</th><th>Ações</th></tr></thead>
+            <tbody id="clinicasList"><tr><td colspan="6" style="text-align:center;padding:32px;color:var(--text-secondary);">Nenhuma clínica ainda</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<!-- MODAL NOVO LEAD -->
+<div class="modal-overlay" id="modalNewLead">
+  <div class="modal">
+    <div class="modal-header"><h3><i class="ti ti-user-plus" style="margin-right:8px;color:var(--gold);"></i>Novo Lead</h3><button class="btn btn-ghost btn-icon" onclick="closeModal('modalNewLead')"><i class="ti ti-x"></i></button></div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Nome completo *</label><input class="form-input" id="nlName" placeholder="Ex: João da Silva"/></div>
+        <div class="form-group"><label class="form-label">Telefone (WhatsApp)</label><input class="form-input" id="nlPhone" placeholder="(XX) XXXXX-XXXX"/></div>
+      </div>
+      <div class="form-group"><label class="form-label">Procedimento de interesse *</label>
+        <select class="form-select" id="nlProc"><option value="">Selecione...</option><option>Implante dentário</option><option>Ortodontia</option><option>Clareamento dental</option><option>Lentes de contato dental</option><option>Prótese dentária</option><option>Tratamento de canal</option><option>Consulta geral</option></select>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Origem do lead</label>
+          <select class="form-select" id="nlSource"><option>WhatsApp</option><option>Instagram</option><option>Google</option><option>Indicação</option><option>Facebook</option><option>Site</option></select>
+        </div>
+        <div class="form-group"><label class="form-label">Valor estimado (R$)</label><input class="form-input" id="nlValue" type="number" placeholder="Ex: 4800"/></div>
+      </div>
+      <div class="form-group" style="margin-bottom:0;"><label class="form-label">Observações</label><textarea class="form-textarea" id="nlObs" placeholder="Informações adicionais..."></textarea></div>
+    </div>
+    <div class="modal-footer"><button class="btn" onclick="closeModal('modalNewLead')">Cancelar</button><button class="btn btn-primary" onclick="saveNewLead()"><i class="ti ti-check"></i> Salvar lead</button></div>
+  </div>
+</div>
+
+<!-- MODAL EDITAR LEAD -->
+<div class="modal-overlay" id="modalEditLead">
+  <div class="modal">
+    <div class="modal-header"><h3><i class="ti ti-edit" style="margin-right:8px;color:var(--gold);"></i>Editar Lead</h3><button class="btn btn-ghost btn-icon" onclick="closeModal('modalEditLead')"><i class="ti ti-x"></i></button></div>
+    <div class="modal-body">
+      <input type="hidden" id="editLeadId"/>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Nome</label><input class="form-input" id="editLeadName"/></div>
+        <div class="form-group"><label class="form-label">Telefone</label><input class="form-input" id="editLeadPhone"/></div>
+      </div>
+      <div class="form-group"><label class="form-label">Procedimento</label><input class="form-input" id="editLeadProc"/></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Origem</label>
+          <select class="form-select" id="editLeadSource"><option>WhatsApp</option><option>Instagram</option><option>Google</option><option>Indicação</option><option>Facebook</option><option>Site</option></select>
+        </div>
+        <div class="form-group"><label class="form-label">Valor estimado</label><input class="form-input" type="number" id="editLeadValue"/></div>
+      </div>
+      <div class="form-group"><label class="form-label">Status no funil</label>
+        <select class="form-select" id="editLeadStatus"><option value="novo">Novo lead</option><option value="contato">Contato feito</option><option value="agendado">Agendado</option><option value="compareceu">Compareceu</option><option value="sem_resposta">Sem resposta</option><option value="fechado">Fechado</option></select>
+      </div>
+      <div class="form-group" style="margin-bottom:0;"><label class="form-label">Observações</label><textarea class="form-textarea" id="editLeadObs"></textarea></div>
+    </div>
+    <div class="modal-footer"><button class="btn" onclick="closeModal('modalEditLead')">Cancelar</button><button class="btn btn-primary" onclick="saveEditLead()"><i class="ti ti-check"></i> Salvar</button></div>
+  </div>
+</div>
+
+<!-- MODAL VER LEAD -->
+<div class="modal-overlay" id="modalLead">
+  <div class="modal">
+    <div class="modal-header"><h3 id="modalLeadTitle">Lead</h3><button class="btn btn-ghost btn-icon" onclick="closeModal('modalLead')"><i class="ti ti-x"></i></button></div>
+    <div class="modal-body" id="modalLeadBody"></div>
+  </div>
+</div>
+
+<!-- MODAL EDITAR AUTOMAÇÃO -->
+<div class="modal-overlay" id="modalEditAuto">
+  <div class="modal">
+    <div class="modal-header"><h3><i class="ti ti-brand-whatsapp" style="margin-right:8px;color:var(--gold);"></i>Editar mensagem</h3><button class="btn btn-ghost btn-icon" onclick="closeModal('modalEditAuto')"><i class="ti ti-x"></i></button></div>
+    <div class="modal-body">
+      <input type="hidden" id="editAutoId"/>
+      <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:12px;" id="editAutoTitle"></div>
+      <div class="form-group"><label class="form-label">Mensagem</label><textarea class="form-textarea" id="editAutoMsg" style="min-height:120px;font-family:var(--mono);font-size:12px;"></textarea><div class="form-hint">Variáveis: {nome} {procedimento} {data} {hora} {clinica}</div></div>
+    </div>
+    <div class="modal-footer"><button class="btn" onclick="closeModal('modalEditAuto')">Cancelar</button><button class="btn btn-primary" onclick="saveAutoEdit()"><i class="ti ti-check"></i> Salvar</button></div>
+  </div>
+</div>
+
+<!-- MODAL WHATSAPP CONNECT -->
+<div class="modal-overlay" id="modalWhatsApp">
+  <div class="modal" style="max-width:480px;">
+    <div class="modal-header">
+      <h3><i class="ti ti-brand-whatsapp" style="margin-right:8px;color:var(--gold);"></i>Conectar WhatsApp</h3>
+      <button class="btn btn-ghost btn-icon" onclick="closeModal('modalWhatsApp')"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="modal-body" id="modalWhatsAppBody">
+      <div style="text-align:center;padding:20px;">
+        <div style="width:48px;height:48px;border-radius:12px;background:var(--gold-pale);border:1px solid var(--gold-border);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;"><i class="ti ti-brand-whatsapp" style="font-size:24px;color:var(--gold);"></i></div>
+        <div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:8px;font-family:var(--font-display);">Conectar número da clínica</div>
+        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:24px;line-height:1.6;">Vamos gerar um QR Code. Abra o WhatsApp no celular da clínica → Dispositivos conectados → Conectar dispositivo → Escaneie o QR Code.</div>
+        <div id="qrCodeArea" style="display:none;margin-bottom:16px;">
+          <img id="qrCodeImg" src="" style="width:200px;height:200px;border-radius:12px;border:2px solid var(--gold-border);"/>
+          <div style="font-size:12px;color:var(--text-secondary);margin-top:8px;">Escaneie com o WhatsApp do celular da clínica</div>
+        </div>
+        <div id="waStatus" style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;"></div>
+        <button class="btn btn-primary btn-full" id="btnGerarQR" onclick="gerarQRCode()"><i class="ti ti-qrcode"></i> Gerar QR Code</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL WHATSAPP SEND -->
+<div class="modal-overlay" id="modalSendWA">
+  <div class="modal" style="max-width:460px;">
+    <div class="modal-header">
+      <h3><i class="ti ti-brand-whatsapp" style="margin-right:8px;color:var(--gold);"></i>Enviar WhatsApp</h3>
+      <button class="btn btn-ghost btn-icon" onclick="closeModal('modalSendWA')"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="sendWALeadId"/>
+      <div id="sendWALeadInfo" style="background:var(--bg-elevated);border-radius:10px;padding:12px;margin-bottom:16px;font-size:13px;color:var(--text-secondary);"></div>
+      <div class="form-group">
+        <label class="form-label">Mensagem automática</label>
+        <select class="form-select" id="sendWATemplate" onchange="updateWAPreview()">
+          <option value="boasvindas">👋 Boas-vindas ao novo lead</option>
+          <option value="confirmacao">✅ Confirmação de agendamento</option>
+          <option value="lembrete">🦷 Lembrete 24h antes</option>
+          <option value="followup">😊 Follow-up sem resposta</option>
+          <option value="posconsulta">❤️ Pós-consulta</option>
+          <option value="custom">✏️ Mensagem personalizada</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Prévia da mensagem</label>
+        <textarea class="form-textarea" id="sendWAMsg" style="font-family:var(--mono);font-size:12px;min-height:100px;"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('modalSendWA')">Cancelar</button>
+      <button class="btn btn-primary" onclick="confirmarEnvioWA()"><i class="ti ti-send"></i> Enviar agora</button>
+    </div>
+  </div>
+</div>
+
+<!-- WIZARD NOVA CLÍNICA -->
+<div class="wizard-overlay" id="wizardOverlay" style="display:none;">
+  <div class="wizard-box">
+    <div class="wizard-progress"><div class="wizard-progress-fill" id="wizardProgress" style="width:25%;"></div></div>
+    <div class="wizard-content">
+      <div class="wizard-step active" id="wStep1">
+        <div class="wizard-icon"><i class="ti ti-building-hospital"></i></div>
+        <div class="wizard-title">Dados da clínica</div>
+        <div class="wizard-sub">Informe o nome e endereço da clínica que você quer gerenciar.</div>
+        <div class="form-group"><label class="form-label">Nome da clínica *</label><input class="form-input" id="wClinicName" placeholder="Ex: Clínica Sorriso & Saúde"/></div>
+        <div class="form-group"><label class="form-label">Endereço</label><input class="form-input" id="wAddress" placeholder="Rua, número, cidade, estado"/></div>
+        <div class="form-group" style="margin-bottom:0;"><label class="form-label">Telefone</label><input class="form-input" id="wPhone" placeholder="(XX) XXXXX-XXXX"/></div>
+      </div>
+      <div class="wizard-step" id="wStep2">
+        <div class="wizard-icon"><i class="ti ti-user-circle"></i></div>
+        <div class="wizard-title">Responsável</div>
+        <div class="wizard-sub">Informe o responsável e e-mail de contato da clínica.</div>
+        <div class="form-group"><label class="form-label">Nome do responsável *</label><input class="form-input" id="wOwnerName" placeholder="Ex: Dra. Mariana Costa"/></div>
+        <div class="form-group" style="margin-bottom:0;"><label class="form-label">E-mail da clínica</label><input class="form-input" type="email" id="wEmail" placeholder="email@clinica.com.br"/></div>
+      </div>
+      <div class="wizard-step" id="wStep3">
+        <div class="wizard-icon"><i class="ti ti-list-details"></i></div>
+        <div class="wizard-title">Plano e procedimentos</div>
+        <div class="wizard-sub">Selecione o plano e os procedimentos principais da clínica.</div>
+        <div class="form-group"><label class="form-label">Plano</label>
+          <select class="form-select" id="wPlan"><option value="Básico">Básico — até 100 leads/mês</option><option value="Pro" selected>Pro — leads ilimitados + automações</option><option value="Enterprise">Enterprise — multi-usuários + API</option></select>
+        </div>
+        <div class="form-group" style="margin-bottom:0;"><label class="form-label">Procedimentos principais</label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);cursor:pointer;"><input type="checkbox" checked style="accent-color:var(--gold);"> Implante dentário</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);cursor:pointer;"><input type="checkbox" checked style="accent-color:var(--gold);"> Ortodontia</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);cursor:pointer;"><input type="checkbox" checked style="accent-color:var(--gold);"> Clareamento</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);cursor:pointer;"><input type="checkbox" style="accent-color:var(--gold);"> Lentes de contato</label>
+          </div>
+        </div>
+      </div>
+      <div class="wizard-step" id="wStep4">
+        <div class="wizard-icon" style="background:var(--gold);"><i class="ti ti-rocket" style="color:#0A0A0B;"></i></div>
+        <div class="wizard-title">Tudo pronto!</div>
+        <div class="wizard-sub">Revise e clique em "Criar clínica" para começar a gerenciar seus leads.</div>
+        <div style="background:var(--bg-elevated);border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:10px;border:1px solid var(--border);">
+          <div style="display:flex;justify-content:space-between;font-size:13px;"><span style="color:var(--text-secondary);">Clínica</span><span style="font-weight:600;" id="wSummaryName">—</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:13px;"><span style="color:var(--text-secondary);">Responsável</span><span style="font-weight:600;" id="wSummaryOwner">—</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:13px;"><span style="color:var(--text-secondary);">Plano</span><span id="wSummaryPlan">—</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:13px;"><span style="color:var(--text-secondary);">Automações WhatsApp</span><span style="color:var(--gold);font-weight:600;"><i class="ti ti-check"></i> 6 ativadas</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="wizard-footer">
+      <div class="wizard-steps-indicator"><div class="step-dot active"></div><div class="step-dot"></div><div class="step-dot"></div><div class="step-dot"></div></div>
+      <div style="display:flex;gap:10px;">
+        <button class="btn" id="wBtnBack" onclick="wizardBack()" style="display:none;"><i class="ti ti-arrow-left"></i> Voltar</button>
+        <button class="btn" onclick="closeWizard()">Cancelar</button>
+        <button class="btn btn-primary" id="wBtnNext" onclick="wizardNext()">Continuar <i class="ti ti-arrow-right"></i></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── SUPABASE ──────────────────────────────────
+const SUPABASE_URL = 'https://zcwntpkiispbhjjgidih.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_G6xEiLO4lcNaJafm9RA2tA_QLf4E2FV';
+
+// ── EVOLUTION API (WhatsApp) ──────────────────
+const EVO_URL = 'https://evolution-api-production-b649.up.railway.app';
+const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae000';
+
+async function evoRequest(method, path, body=null) {
+  const opts = {
+    method,
+    headers: { 'apikey': EVO_KEY, 'Content-Type': 'application/json' },
+  };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(EVO_URL + path, opts);
+  return r.json();
+}
+
+// Create instance for clinic
+async function createWhatsAppInstance(instanceName) {
+  return evoRequest('POST', '/instance/create', {
+    instanceName,
+    qrcode: true,
+    integration: 'WHATSAPP-BAILEYS',
+  });
+}
+
+// Get QR Code
+async function getQRCode(instanceName) {
+  return evoRequest('GET', `/instance/connect/${instanceName}`);
+}
+
+// Get instance status
+async function getInstanceStatus(instanceName) {
+  return evoRequest('GET', `/instance/connectionState/${instanceName}`);
+}
+
+// Send text message
+async function sendWhatsAppMessage(instanceName, phone, message) {
+  const cleanPhone = phone.replace(/\D/g,'');
+  return evoRequest('POST', `/message/sendText/${instanceName}`, {
+    number: '55' + cleanPhone,
+    text: message,
+  });
+}
+
+// Send automation message
+async function sendAutomation(lead, autoType) {
+  const clinic = currentClinic();
+  if (!clinic || !clinic.whatsapp_instance) return;
+  const templates = {
+    boasvindas: `Olá, ${lead.nome}! 👋 Aqui é da ${clinic.nome}. Vi que você tem interesse em ${lead.procedimento||'nossos serviços'}. Posso te ajudar a agendar uma avaliação gratuita?`,
+    confirmacao: `Ótimo, ${lead.nome}! ✅ Sua consulta está confirmada na ${clinic.nome}. Qualquer dúvida é só chamar!`,
+    lembrete: `Oi ${lead.nome}! 🦷 Lembrando que amanhã você tem consulta na ${clinic.nome}. Confirma presença? Responda SIM ou NÃO.`,
+    followup: `Oi ${lead.nome}, tudo bem? 😊 Ainda posso te ajudar a agendar sua avaliação de ${lead.procedimento||'nossos serviços'} sem compromisso. Quando seria melhor?`,
+    posconsulta: `Oi ${lead.nome}! Espero que tenha gostado da avaliação 😊 Ficou alguma dúvida sobre o tratamento? Posso te ajudar com formas de pagamento!`,
+  };
+  const msg = templates[autoType];
+  if (!msg || !lead.telefone) return;
+  try {
+    await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg);
+    toast('WhatsApp enviado para ' + lead.nome + '! ✓');
+  } catch(e) {
+    toast('Erro ao enviar WhatsApp', 'error');
+  }
+}
+const { createClient } = supabase;
+const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ── STATE ─────────────────────────────────────
+let STATE = {
+  user: null,
+  profile: null,
+  clinics: [],
+  currentClinicIdx: 0,
+  leads: [],
+  automations: [],
+};
+
+function currentClinic() { return STATE.clinics[STATE.currentClinicIdx] || null; }
+function currentLeads() {
+  const c = currentClinic();
+  if (!c) return [];
+  return STATE.leads.filter(l => l.clinic_id === c.id);
+}
+
+// ── HELPERS ───────────────────────────────────
+function fmtCurrency(v) {
+  if (!v) return 'R$ 0';
+  if (v >= 1000) return 'R$ ' + (v/1000).toFixed(1).replace('.0','') + 'k';
+  return 'R$ ' + Number(v).toLocaleString('pt-BR');
+}
+
+function fmtDate(d) {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString('pt-BR');
+}
+
+function initials(name) {
+  if (!name) return '?';
+  return name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase();
+}
+
+const AVATAR_COLORS = [
+  {bg:'rgba(201,168,76,0.15)',text:'#E8C96A'},
+  {bg:'rgba(91,141,184,0.15)',text:'#8ABBE8'},
+  {bg:'rgba(232,201,106,0.12)',text:'#E8C96A'},
+  {bg:'rgba(192,98,74,0.15)',text:'#E8907A'},
+  {bg:'rgba(139,126,200,0.15)',text:'#B8AEE8'},
+  {bg:'rgba(255,255,255,0.06)',text:'#8A8570'},
+];
+
+function avatarStyle(name) {
+  const idx = (name||'').charCodeAt(0) % AVATAR_COLORS.length;
+  const c = AVATAR_COLORS[idx];
+  return `background:${c.bg};color:${c.text};`;
+}
+
+const STATUS_CFG = {
+  novo:         {label:'Novo lead',     badge:'badge-gray'},
+  contato:      {label:'Contato feito', badge:'badge-blue'},
+  agendado:     {label:'Agendado',      badge:'badge-amber'},
+  compareceu:   {label:'Compareceu',    badge:'badge-gold'},
+  sem_resposta: {label:'Sem resposta',  badge:'badge-coral'},
+  fechado:      {label:'Fechado',       badge:'badge-gold'},
+};
+
+function badgeHtml(status) {
+  const s = STATUS_CFG[status] || {label:status,badge:'badge-gray'};
+  return `<span class="badge ${s.badge}">${s.label}</span>`;
+}
+
+const SOURCE_ICON = {
+  'WhatsApp':'ti-brand-whatsapp','Instagram':'ti-brand-instagram',
+  'Google':'ti-brand-google','Indicação':'ti-users','Facebook':'ti-brand-facebook','Site':'ti-world',
+};
+
+function toast(msg, type='success') {
+  const el = document.getElementById('toast');
+  el.className = `toast ${type}`;
+  el.innerHTML = `<i class="ti ${type==='success'?'ti-check':'ti-alert-circle'}"></i> ${msg}`;
+  el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'), 3200);
+}
+
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.addEventListener('click', e => { if(e.target.classList.contains('modal-overlay')) closeModal(e.target.id); });
+
+// ── AUTH ──────────────────────────────────────
+function showLogin() {
+  document.getElementById('loginCard').style.display = '';
+  document.getElementById('registerCard').style.display = 'none';
+}
+function showRegister() {
+  document.getElementById('loginCard').style.display = 'none';
+  document.getElementById('registerCard').style.display = '';
+}
+
+async function doLogin() {
+  const email = document.getElementById('loginEmail').value.trim();
+  const pass  = document.getElementById('loginPassword').value;
+  const errEl = document.getElementById('loginError');
+  const btn   = document.getElementById('loginBtn');
+  if (!email || !pass) { errEl.textContent='Preencha e-mail e senha.'; errEl.classList.add('show'); return; }
+  btn.innerHTML = '<i class="ti ti-loader"></i> Entrando...'; btn.disabled = true;
+  const { data, error } = await db.auth.signInWithPassword({ email, password: pass });
+  btn.innerHTML = '<i class="ti ti-login"></i> Entrar'; btn.disabled = false;
+  if (error) { errEl.textContent = error.message === 'Invalid login credentials' ? 'E-mail ou senha incorretos.' : error.message; errEl.classList.add('show'); return; }
+  errEl.classList.remove('show');
+  await loadApp(data.user);
+}
+
+async function doRegister() {
+  const name  = document.getElementById('regName').value.trim();
+  const email = document.getElementById('regEmail').value.trim();
+  const pass  = document.getElementById('regPassword').value;
+  const role  = document.getElementById('regRole').value;
+  const errEl = document.getElementById('registerError');
+  const btn   = document.getElementById('registerBtn');
+  if (!name||!email||!pass) { errEl.textContent='Preencha todos os campos.'; errEl.classList.add('show'); return; }
+  if (pass.length < 6) { errEl.textContent='Senha deve ter no mínimo 6 caracteres.'; errEl.classList.add('show'); return; }
+  btn.innerHTML = '<i class="ti ti-loader"></i> Criando...'; btn.disabled = true;
+  const { data, error } = await db.auth.signUp({ email, password: pass, options: { data: { name, role } } });
+  btn.innerHTML = '<i class="ti ti-user-plus"></i> Criar conta'; btn.disabled = false;
+  if (error) { errEl.textContent = error.message; errEl.classList.add('show'); return; }
+  errEl.classList.remove('show');
+  toast('Conta criada! Verifique seu e-mail para confirmar.');
+  showLogin();
+}
+
+async function doLogout() {
+  await db.auth.signOut();
+  STATE = { user:null, profile:null, clinics:[], currentClinicIdx:0, leads:[], automations:[] };
+  document.getElementById('appPage').style.display = 'none';
+  document.getElementById('loginPage').style.display = '';
+  showLogin();
+}
+
+// ── LOAD APP ──────────────────────────────────
+async function loadApp(user) {
+  STATE.user = user;
+  document.getElementById('loginPage').style.display = 'none';
+  document.getElementById('loadingScreen').style.display = 'flex';
+
+  // Load profile from user metadata
+  const meta = user.user_metadata || {};
+  STATE.profile = { name: meta.name || user.email, role: meta.role || 'admin' };
+
+  // Update UI
+  document.getElementById('userAvatar').textContent = initials(STATE.profile.name);
+  document.getElementById('userName').textContent = STATE.profile.name;
+  document.getElementById('userRole').textContent = STATE.profile.role === 'admin' ? 'Administrador' : STATE.profile.role === 'dentist' ? 'Dentista' : 'Recepcionista';
+
+  await loadClinics();
+  await loadLeads();
+  loadAutomations();
+
+  document.getElementById('loadingScreen').style.display = 'none';
+  document.getElementById('appPage').style.display = 'flex';
+  showPage('dashboard');
+
+  if (STATE.clinics.length === 0) {
+    setTimeout(() => openAddClinicWizard(), 500);
+  }
+}
+
+// ── SUPABASE DATA ─────────────────────────────
+async function loadClinics() {
+  const { data, error } = await db.from('clinicas').select('*').order('created_at', { ascending: true });
+  if (error) { console.error('clinicas:', error); return; }
+  STATE.clinics = data || [];
+  document.getElementById('navClinicasBadge').textContent = STATE.clinics.length;
+  renderClinicSwitcher();
+}
+
+async function loadLeads() {
+  const { data, error } = await db.from('leads').select('*').order('created_at', { ascending: false });
+  if (error) { console.error('leads:', error); return; }
+  STATE.leads = data || [];
+  document.getElementById('navLeadsBadge').textContent = STATE.leads.length;
+}
+
+function loadAutomations() {
+  STATE.automations = [
+    { id:1, title:'Boas-vindas ao novo lead', desc:'Enviada assim que um novo lead entra no sistema.', trigger:'Lead criado', icon:'ti-hand-click', active:true, msg:'Olá, {nome}! 👋 Vi que você tem interesse em {procedimento}. Posso te ajudar a agendar uma avaliação gratuita?' },
+    { id:2, title:'Confirmação de agendamento', desc:'Enviada imediatamente ao registrar a consulta.', trigger:'Consulta agendada', icon:'ti-calendar-check', active:true, msg:'Ótimo, {nome}! ✅ Sua consulta está confirmada para {data} às {hora}. Qualquer dúvida é só chamar!' },
+    { id:3, title:'Lembrete 24h antes', desc:'Enviado 24h antes para reduzir faltas.', trigger:'24h antes da consulta', icon:'ti-clock', active:true, msg:'Oi {nome}! 🦷 Lembrando que amanhã você tem consulta às {hora}. Confirma presença? Responda SIM ou NÃO.' },
+    { id:4, title:'Follow-up sem resposta', desc:'Reativa leads sem resposta após 48h.', trigger:'48h sem resposta', icon:'ti-refresh', active:true, msg:'Oi {nome}, tudo bem? 😊 Ainda posso te ajudar a agendar sua avaliação de {procedimento}. Quando seria melhor?' },
+    { id:5, title:'Pós-consulta', desc:'Enviada 2h após comparecimento.', trigger:'Status = Compareceu', icon:'ti-heart', active:true, msg:'Oi {nome}! Espero que tenha gostado da avaliação 😊 Posso te ajudar com formas de pagamento!' },
+    { id:6, title:'Reativação de lead frio', desc:'Reativa leads inativos há 7+ dias.', trigger:'7 dias sem atividade', icon:'ti-star', active:false, msg:'Oi {nome}! 🎉 Temos uma condição especial esse mês. Quer saber mais?' },
+  ];
+}
+
+// ── CLINIC SWITCHER ───────────────────────────
+function toggleClinicDropdown() {
+  document.getElementById('clinicDropdown').classList.toggle('open');
+}
+
+function renderClinicSwitcher() {
+  const c = currentClinic();
+  if (!c) {
+    document.getElementById('clinicName').textContent = 'Nenhuma clínica';
+    document.getElementById('clinicPlan').textContent = 'Adicione uma clínica';
+    document.getElementById('topbarSub').textContent = '—';
+  } else {
+    document.getElementById('clinicName').textContent = c.nome;
+    document.getElementById('clinicPlan').textContent = 'Plano ' + (c.plano || 'Pro');
+    document.getElementById('topbarSub').textContent = c.nome + ' · ' + new Date().toLocaleDateString('pt-BR', {month:'long',year:'numeric'});
+  }
+  const dd = document.getElementById('clinicDropdown');
+  dd.innerHTML = STATE.clinics.map((cl, i) => `
+    <div class="clinic-option ${i===STATE.currentClinicIdx?'active':''}" onclick="switchClinic(${i})">
+      <i class="ti ti-building-hospital"></i>
+      <span>${cl.nome}</span>
+      ${i===STATE.currentClinicIdx?'<i class="ti ti-check" style="margin-left:auto;"></i>':''}
+    </div>
+  `).join('') + `
+    <div class="clinic-add" onclick="openAddClinicWizard()">
+      <i class="ti ti-plus"></i><span>Adicionar nova clínica</span>
+    </div>`;
+}
+
+async function switchClinic(idx) {
+  STATE.currentClinicIdx = idx;
+  document.getElementById('clinicDropdown').classList.remove('open');
+  renderClinicSwitcher();
+  await loadLeads();
+  renderPage(document.querySelector('.page.active')?.id?.replace('page-','') || 'dashboard');
+  toast('Clínica: ' + currentClinic()?.nome);
+}
+
+// ── NAVIGATION ────────────────────────────────
+function showPage(id, el) {
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  const page = document.getElementById('page-'+id);
+  if (page) page.classList.add('active');
+  const btn = el || document.querySelector(`[data-page="${id}"]`);
+  if (btn) btn.classList.add('active');
+  renderPage(id);
+}
+
+function renderPage(id) {
+  switch(id) {
+    case 'dashboard':  renderDashboard(); break;
+    case 'kanban':     renderKanban(); break;
+    case 'leads':      renderLeads(); break;
+    case 'agenda':     renderAgenda(); break;
+    case 'automacoes': renderAutomacoes(); break;
+    case 'relatorios': renderRelatorios(); break;
+    case 'clinicas':   renderClinicas(); break;
+  }
+}
+
+// ── DASHBOARD ─────────────────────────────────
+function renderDashboard() {
+  const leads = currentLeads();
+  const agendados = leads.filter(l=>l.status==='agendado').length;
+  const compareceram = leads.filter(l=>l.status==='compareceu').length;
+  const potencial = leads.reduce((s,l)=>s+(l.valor||0),0);
+
+  document.getElementById('metricLeads').textContent = leads.length;
+  document.getElementById('metricAgendam').textContent = agendados;
+  document.getElementById('metricCompare').textContent = compareceram;
+  document.getElementById('metricFatur').textContent = fmtCurrency(potencial);
+
+  if (!leads.length) {
+    document.getElementById('funnelRows').innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-secondary);font-size:13px;">Nenhum lead ainda — cadastre o primeiro!</div>';
+    document.getElementById('recentLeads').innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-secondary);font-size:13px;">Nenhum lead ainda</div>';
+    return;
+  }
+
+  const total = leads.length;
+  const funnelData = [
+    {label:'Novos leads', n:total, color:'#C9A84C'},
+    {label:'Contato feito', n:leads.filter(l=>['contato','agendado','compareceu','fechado'].includes(l.status)).length, color:'#E8C96A'},
+    {label:'Agendados', n:leads.filter(l=>['agendado','compareceu','fechado'].includes(l.status)).length, color:'#5B8DB8'},
+    {label:'Compareceram', n:leads.filter(l=>['compareceu','fechado'].includes(l.status)).length, color:'#8ABBE8'},
+    {label:'Fechados', n:leads.filter(l=>l.status==='fechado').length, color:'#A07B30'},
+  ];
+  document.getElementById('funnelRows').innerHTML = funnelData.map(f=>{
+    const pct = Math.round((f.n/total)*100);
+    return `<div class="funnel-row"><span class="funnel-label">${f.label}</span><div class="funnel-track"><div class="funnel-fill" style="width:${pct}%;background:${f.color};"></div></div><span class="funnel-n">${f.n}</span><span class="funnel-pct">${pct}%</span></div>`;
+  }).join('');
+
+  document.getElementById('recentLeads').innerHTML = leads.slice(0,5).map(l=>`
+    <div class="lead-row">
+      <div class="avatar" style="${avatarStyle(l.nome)}">${initials(l.nome)}</div>
+      <div class="lead-info"><div class="lead-name">${l.nome}</div><div class="lead-sub">${l.procedimento||'—'} · ${l.origem||'—'}</div></div>
+      ${badgeHtml(l.status)}
+    </div>`).join('');
+}
+
+// ── KANBAN ────────────────────────────────────
+const KANBAN_COLS = [
+  {key:'novo', label:'Novos leads', style:'color:var(--text-secondary)', countStyle:'background:rgba(255,255,255,0.06);color:var(--text-secondary)'},
+  {key:'contato', label:'Contato feito', style:'color:#8ABBE8', countStyle:'background:var(--blue-pale);color:#8ABBE8'},
+  {key:'agendado', label:'Agendados', style:'color:var(--gold-bright)', countStyle:'background:rgba(232,201,106,0.1);color:var(--gold-bright)'},
+  {key:'compareceu', label:'Compareceram', style:'color:var(--gold)', countStyle:'background:var(--gold-pale);color:var(--gold)'},
+  {key:'fechado', label:'Fechados', style:'color:#E8907A', countStyle:'background:var(--coral-pale);color:#E8907A'},
+];
+
+function renderKanban() {
+  const leads = currentLeads();
+  if (!leads.length) {
+    document.getElementById('kanbanBoard').innerHTML = `<div style="grid-column:1/-1;"><div class="empty-state"><div class="empty-icon"><i class="ti ti-layout-kanban"></i></div><div class="empty-title">Funil vazio</div><div class="empty-desc">Cadastre o primeiro lead para ver o funil de vendas em ação.</div><button class="btn btn-primary" onclick="openNewLead()"><i class="ti ti-plus"></i> Cadastrar primeiro lead</button></div></div>`;
+    return;
+  }
+  document.getElementById('kanbanBoard').innerHTML = KANBAN_COLS.map(col=>{
+    const colLeads = leads.filter(l=>l.status===col.key);
+    return `<div class="kanban-col" data-col="${col.key}">
+      <div class="col-head"><span class="col-title" style="${col.style}">${col.label}</span><span class="col-count" style="${col.countStyle}">${colLeads.length}</span></div>
+      ${colLeads.map(l=>`
+        <div class="k-card" onclick="openLeadDetail('${l.id}')" draggable="true" data-lead="${l.id}">
+          <div class="k-card-name">${l.nome}</div>
+          <div class="k-card-proc">${l.procedimento||'—'}${l.valor?` · <span class="k-val">R$ ${Number(l.valor).toLocaleString('pt-BR')}</span>`:''}</div>
+          <div class="k-card-foot"><span class="k-source"><i class="ti ${SOURCE_ICON[l.origem]||'ti-dots'}"></i> ${l.origem||'—'}</span><div class="k-wa"><i class="ti ti-brand-whatsapp"></i></div></div>
+        </div>`).join('')||'<div style="padding:12px 0;text-align:center;font-size:11px;color:var(--text-muted);">Nenhum lead</div>'}
+    </div>`;
+  }).join('');
+  initDragDrop();
+}
+
+function initDragDrop() {
+  let draggedId = null;
+  document.querySelectorAll('.k-card').forEach(card=>{
+    card.addEventListener('dragstart', ()=>{ draggedId=card.dataset.lead; card.style.opacity='0.5'; });
+    card.addEventListener('dragend', ()=>{ card.style.opacity='1'; });
+  });
+  document.querySelectorAll('.kanban-col').forEach(col=>{
+    col.addEventListener('dragover', e=>{ e.preventDefault(); col.style.background='rgba(201,168,76,0.05)'; });
+    col.addEventListener('dragleave', ()=>{ col.style.background=''; });
+    col.addEventListener('drop', async e=>{
+      e.preventDefault(); col.style.background='';
+      const newStatus = col.dataset.col;
+      const lead = STATE.leads.find(l=>l.id===draggedId);
+      if (lead && lead.status !== newStatus) {
+        lead.status = newStatus;
+        await db.from('leads').update({status:newStatus}).eq('id', draggedId);
+        renderKanban();
+        toast(`Lead movido para: ${STATUS_CFG[newStatus]?.label}`);
+      }
+    });
+  });
+}
+
+// ── LEADS TABLE ───────────────────────────────
+function renderLeads(filter='all', search='') {
+  let leads = currentLeads();
+  if (filter !== 'all') leads = leads.filter(l=>l.status===filter);
+  if (search) leads = leads.filter(l=>(l.nome||'').toLowerCase().includes(search.toLowerCase())||(l.procedimento||'').toLowerCase().includes(search.toLowerCase()));
+  document.getElementById('leadsCount').textContent = leads.length + ' lead' + (leads.length!==1?'s':'');
+  document.getElementById('leadsTableBody').innerHTML = leads.length ? leads.map(l=>`
+    <tr>
+      <td><div style="display:flex;align-items:center;gap:10px;"><div class="avatar" style="${avatarStyle(l.nome)}">${initials(l.nome)}</div><div><div class="td-bold">${l.nome}</div><div class="td-muted">${l.telefone||'—'}</div></div></div></td>
+      <td style="color:var(--text-secondary);">${l.procedimento||'—'}</td>
+      <td>${badgeHtml(l.status)}</td>
+      <td class="td-mono">${l.valor?'R$ '+Number(l.valor).toLocaleString('pt-BR'):'—'}</td>
+      <td><span style="font-size:12px;color:var(--text-secondary);"><i class="ti ${SOURCE_ICON[l.origem]||'ti-dots'}" style="margin-right:4px;"></i>${l.origem||'—'}</span></td>
+      <td class="td-muted">${fmtDate(l.created_at)}</td>
+      <td><div style="display:flex;gap:6px;">
+        <button class="btn btn-sm btn-ghost btn-icon" title="WhatsApp" onclick="openSendWA('${l.id}')"><i class="ti ti-brand-whatsapp" style="color:var(--gold);"></i></button>
+        <button class="btn btn-sm btn-ghost btn-icon" title="Editar" onclick="openEditLead('${l.id}')"><i class="ti ti-edit"></i></button>
+        <button class="btn btn-sm btn-ghost btn-icon" title="Ver" onclick="openLeadDetail('${l.id}')"><i class="ti ti-eye"></i></button>
+      </div></td>
+    </tr>`).join('')
+    : '<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text-secondary);">Nenhum lead encontrado</td></tr>';
+}
+
+// ── AGENDA ────────────────────────────────────
+function renderAgenda() {
+  const now = new Date();
+  document.getElementById('agendaDate').textContent = now.toLocaleDateString('pt-BR', {weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  document.getElementById('agendaDaySub').textContent = now.toLocaleDateString('pt-BR', {day:'numeric',month:'long',year:'numeric'});
+  document.getElementById('calMonth').textContent = now.toLocaleDateString('pt-BR', {month:'long',year:'numeric'});
+  const agendados = currentLeads().filter(l=>l.status==='agendado');
+  document.getElementById('agendaList').innerHTML = agendados.length
+    ? agendados.map((l,i)=>`<div class="sched-item"><div class="sched-time">—</div><div class="sched-line-col"><div class="sched-dot" style="background:var(--gold);"></div>${i<agendados.length-1?'<div class="sched-connector"></div>':''}</div><div class="sched-info"><div class="sched-name">${l.nome}</div><div class="sched-proc">${l.procedimento||'—'}</div><div class="sched-acts">${badgeHtml('agendado')}<button class="btn btn-sm" onclick="toast('Confirmação enviada!')"><i class="ti ti-brand-whatsapp"></i> Confirmar</button></div></div></div>`).join('')
+    : '<div style="padding:32px;text-align:center;color:var(--text-secondary);font-size:13px;">Nenhum lead agendado ainda</div>';
+  renderCalendar();
+}
+
+function renderCalendar() {
+  const now = new Date();
+  const year = now.getFullYear(), month = now.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month+1, 0).getDate();
+  const prevDays = new Date(year, month, 0).getDate();
+  let html = '';
+  for (let i=firstDay-1; i>=0; i--) html += `<div class="cal-day other">${prevDays-i}</div>`;
+  for (let d=1; d<=daysInMonth; d++) {
+    const isToday = d===now.getDate();
+    html += `<div class="cal-day ${isToday?'today':''}">${d}</div>`;
+  }
+  document.getElementById('calGrid').innerHTML = html;
+}
+
+// ── AUTOMAÇÕES ────────────────────────────────
+function renderAutomacoes() {
+  document.getElementById('autoGrid').innerHTML = STATE.automations.map(a=>`
+    <div class="auto-card">
+      <div class="auto-card-top"><div class="auto-card-icon"><i class="ti ${a.icon}"></i></div><div class="auto-title">${a.title}</div><div class="auto-desc">${a.desc}</div></div>
+      <div class="auto-body"><div class="auto-trigger-label">Gatilho: ${a.trigger}</div><div class="auto-msg" style="margin-top:8px;">${a.msg}</div></div>
+      <div class="auto-footer">
+        <div class="toggle-wrap"><div class="toggle ${a.active?'':'off'}" onclick="toggleAuto(${a.id})"><div class="toggle-knob"></div></div><span class="toggle-label" style="color:${a.active?'var(--gold)':'var(--text-secondary)'}">${a.active?'Ativo':'Inativo'}</span></div>
+        <button class="btn btn-sm" onclick="editAuto(${a.id})"><i class="ti ti-edit"></i> Editar</button>
+      </div>
+    </div>`).join('');
+}
+
+function toggleAuto(id) {
+  const a = STATE.automations.find(x=>x.id===id);
+  if (a) { a.active=!a.active; renderAutomacoes(); toast(a.title+(a.active?' ativada':' desativada')); }
+}
+
+function editAuto(id) {
+  const a = STATE.automations.find(x=>x.id===id);
+  if (!a) return;
+  document.getElementById('editAutoId').value = id;
+  document.getElementById('editAutoTitle').textContent = a.title;
+  document.getElementById('editAutoMsg').value = a.msg;
+  openModal('modalEditAuto');
+}
+
+function saveAutoEdit() {
+  const id = parseInt(document.getElementById('editAutoId').value);
+  const a = STATE.automations.find(x=>x.id===id);
+  if (a) a.msg = document.getElementById('editAutoMsg').value;
+  closeModal('modalEditAuto');
+  renderAutomacoes();
+  toast('Mensagem atualizada!');
+}
+
+// ── RELATÓRIOS ────────────────────────────────
+function renderRelatorios() {
+  const leads = currentLeads();
+  const closed = leads.filter(l=>l.status==='fechado');
+  const potencial = leads.reduce((s,l)=>s+(l.valor||0),0);
+  const conv = leads.length ? Math.round((closed.length/leads.length)*100) : 0;
+  document.getElementById('repLeads').textContent = leads.length;
+  document.getElementById('repFechados').textContent = closed.length;
+  document.getElementById('repConv').textContent = conv+'%';
+  document.getElementById('repFatur').textContent = fmtCurrency(potencial);
+  const sources = {};
+  leads.forEach(l=>{ sources[l.origem||'Outros']=(sources[l.origem||'Outros']||0)+1; });
+  document.getElementById('repSources').innerHTML = Object.entries(sources).sort((a,b)=>b[1]-a[1]).map(([src,n])=>{
+    const pct = Math.round((n/leads.length)*100);
+    return `<div class="stat-row"><span class="stat-label"><i class="ti ${SOURCE_ICON[src]||'ti-dots'}" style="margin-right:6px;font-size:13px;"></i>${src}</span><span class="stat-val">${n} (${pct}%)</span></div>`;
+  }).join('') || '<div style="color:var(--text-secondary);font-size:13px;padding:8px 0;">Nenhum dado ainda</div>';
+  const statuses = {};
+  leads.forEach(l=>{ statuses[l.status]=(statuses[l.status]||0)+1; });
+  document.getElementById('repStatus').innerHTML = Object.entries(statuses).map(([st,n])=>`<div class="stat-row"><span class="stat-label">${STATUS_CFG[st]?.label||st}</span><span class="stat-val">${n}</span></div>`).join('') || '<div style="color:var(--text-secondary);font-size:13px;padding:8px 0;">Nenhum dado ainda</div>';
+  const activeAutos = STATE.automations.filter(a=>a.active).length;
+  document.getElementById('repAutos').innerHTML = `<div class="stat-row"><span class="stat-label">Automações ativas</span><span class="stat-val" style="color:var(--gold);">${activeAutos} de ${STATE.automations.length}</span></div><div class="stat-row"><span class="stat-label">Canal principal</span><span class="stat-val">WhatsApp</span></div>`;
+}
+
+// ── CLÍNICAS ──────────────────────────────────
+function renderClinicas() {
+  document.getElementById('clinicasList').innerHTML = STATE.clinics.length
+    ? STATE.clinics.map((c,i)=>`<tr>
+        <td><div style="display:flex;align-items:center;gap:12px;"><div class="avatar" style="${avatarStyle(c.nome)}">${initials(c.nome)}</div><div><div class="td-bold">${c.nome}</div><div class="td-muted">${c.email||'—'}</div></div></div></td>
+        <td style="color:var(--text-secondary);">${c.responsavel||'—'}</td>
+        <td class="td-muted">${c.telefone||'—'}</td>
+        <td><span class="badge ${c.plano==='Pro'?'badge-gold':'badge-gray'}">${c.plano||'Pro'}</span></td>
+        <td class="td-mono">${STATE.leads.filter(l=>l.clinic_id===c.id).length}</td>
+        <td><div style="display:flex;gap:6px;"><button class="btn btn-sm btn-primary" onclick="switchClinic(${i});showPage('dashboard')"><i class="ti ti-login"></i> Acessar</button></div></td>
+      </tr>`).join('')
+    : '<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text-secondary);">Nenhuma clínica cadastrada ainda</td></tr>';
+}
+
+// ── MODAL LEAD ────────────────────────────────
+function openLeadDetail(id) {
+  const l = STATE.leads.find(x=>x.id===id);
+  if (!l) return;
+  document.getElementById('modalLeadTitle').textContent = l.nome;
+  document.getElementById('modalLeadBody').innerHTML = `
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;">
+      <div class="avatar" style="width:44px;height:44px;font-size:15px;${avatarStyle(l.nome)}">${initials(l.nome)}</div>
+      <div><div style="font-size:16px;font-weight:700;color:var(--text-primary);">${l.nome}</div><div style="font-size:13px;color:var(--text-secondary);margin-top:2px;">${l.procedimento||'—'}</div><div style="margin-top:6px;">${badgeHtml(l.status)}</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+      <div style="background:var(--bg-elevated);border-radius:10px;padding:12px;"><div style="font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Telefone</div><div style="font-size:13px;font-weight:500;color:var(--text-primary);">${l.telefone||'—'}</div></div>
+      <div style="background:var(--bg-elevated);border-radius:10px;padding:12px;"><div style="font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Valor estimado</div><div style="font-size:13px;font-weight:700;color:var(--gold);">${l.valor?'R$ '+Number(l.valor).toLocaleString('pt-BR'):'—'}</div></div>
+      <div style="background:var(--bg-elevated);border-radius:10px;padding:12px;"><div style="font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Origem</div><div style="font-size:13px;font-weight:500;color:var(--text-primary);"><i class="ti ${SOURCE_ICON[l.origem]||'ti-dots'}" style="margin-right:6px;"></i>${l.origem||'—'}</div></div>
+      <div style="background:var(--bg-elevated);border-radius:10px;padding:12px;"><div style="font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Cadastrado em</div><div style="font-size:13px;font-weight:500;color:var(--text-primary);">${fmtDate(l.created_at)}</div></div>
+    </div>
+    ${l.observacoes?`<div style="background:var(--bg-elevated);border-radius:10px;padding:12px;margin-bottom:16px;"><div style="font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Observações</div><div style="font-size:13px;color:var(--text-primary);">${l.observacoes}</div></div>`:''}
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-primary" style="flex:1;" onclick="closeModal('modalLead');openSendWA('${l.id}')"><i class="ti ti-brand-whatsapp"></i> Enviar WhatsApp</button>
+      <button class="btn" style="flex:1;" onclick="openEditLead('${l.id}');closeModal('modalLead')"><i class="ti ti-edit"></i> Editar</button>
+    </div>`;
+  openModal('modalLead');
+}
+
+function openEditLead(id) {
+  const l = STATE.leads.find(x=>x.id===id);
+  if (!l) return;
+  document.getElementById('editLeadId').value = id;
+  document.getElementById('editLeadName').value = l.nome||'';
+  document.getElementById('editLeadPhone').value = l.telefone||'';
+  document.getElementById('editLeadProc').value = l.procedimento||'';
+  document.getElementById('editLeadValue').value = l.valor||'';
+  document.getElementById('editLeadSource').value = l.origem||'WhatsApp';
+  document.getElementById('editLeadStatus').value = l.status||'novo';
+  document.getElementById('editLeadObs').value = l.observacoes||'';
+  openModal('modalEditLead');
+}
+
+async function saveEditLead() {
+  const id = document.getElementById('editLeadId').value;
+  const updates = {
+    nome: document.getElementById('editLeadName').value,
+    telefone: document.getElementById('editLeadPhone').value,
+    procedimento: document.getElementById('editLeadProc').value,
+    valor: parseFloat(document.getElementById('editLeadValue').value)||null,
+    origem: document.getElementById('editLeadSource').value,
+    status: document.getElementById('editLeadStatus').value,
+    observacoes: document.getElementById('editLeadObs').value,
+  };
+  const { error } = await db.from('leads').update(updates).eq('id', id);
+  if (error) { toast('Erro ao salvar: '+error.message, 'error'); return; }
+  const l = STATE.leads.find(x=>x.id===id);
+  if (l) Object.assign(l, updates);
+  closeModal('modalEditLead');
+  renderPage(document.querySelector('.page.active')?.id?.replace('page-',''));
+  toast('Lead atualizado!');
+}
+
+// ── NOVO LEAD ─────────────────────────────────
+function openNewLead() {
+  if (!currentClinic()) { toast('Cadastre uma clínica primeiro!','error'); openAddClinicWizard(); return; }
+  document.getElementById('nlName').value='';
+  document.getElementById('nlPhone').value='';
+  document.getElementById('nlProc').value='';
+  document.getElementById('nlValue').value='';
+  document.getElementById('nlObs').value='';
+  openModal('modalNewLead');
+}
+
+async function saveNewLead() {
+  const nome = document.getElementById('nlName').value.trim();
+  const procedimento = document.getElementById('nlProc').value;
+  if (!nome||!procedimento) { toast('Preencha nome e procedimento','error'); return; }
+  const newLead = {
+    clinic_id: currentClinic().id,
+    nome,
+    telefone: document.getElementById('nlPhone').value,
+    procedimento,
+    origem: document.getElementById('nlSource').value,
+    valor: parseFloat(document.getElementById('nlValue').value)||null,
+    observacoes: document.getElementById('nlObs').value,
+    status: 'novo',
+  };
+  const { data, error } = await db.from('leads').insert(newLead).select().single();
+  if (error) { toast('Erro ao salvar: '+error.message,'error'); return; }
+  STATE.leads.unshift(data);
+  document.getElementById('navLeadsBadge').textContent = STATE.leads.length;
+  closeModal('modalNewLead');
+  renderPage(document.querySelector('.page.active')?.id?.replace('page-',''));
+  toast(`${nome} adicionado como novo lead! 🎉`);
+}
+
+// ── WIZARD CLÍNICA ────────────────────────────
+let wizardStep = 1;
+function openAddClinicWizard() {
+  document.getElementById('clinicDropdown').classList.remove('open');
+  wizardStep = 1;
+  updateWizard();
+  document.getElementById('wizardOverlay').style.display = 'flex';
+  document.getElementById('wClinicName').value='';
+  document.getElementById('wAddress').value='';
+  document.getElementById('wPhone').value='';
+  document.getElementById('wOwnerName').value='';
+  document.getElementById('wEmail').value='';
+}
+
+function closeWizard() { document.getElementById('wizardOverlay').style.display='none'; }
+
+function updateWizard() {
+  document.querySelectorAll('.wizard-step').forEach(s=>s.classList.remove('active'));
+  document.getElementById('wStep'+wizardStep).classList.add('active');
+  document.getElementById('wizardProgress').style.width=(wizardStep/4*100)+'%';
+  document.querySelectorAll('.step-dot').forEach((d,i)=>d.classList.toggle('active',i<wizardStep));
+  document.getElementById('wBtnBack').style.display = wizardStep===1?'none':'';
+  document.getElementById('wBtnNext').textContent = wizardStep===4?'Criar clínica ✓':'Continuar';
+}
+
+function wizardNext() {
+  if (wizardStep===1 && !document.getElementById('wClinicName').value.trim()) { toast('Informe o nome da clínica','error'); return; }
+  if (wizardStep===4) { saveNewClinic(); return; }
+  wizardStep++;
+  if (wizardStep===4) {
+    document.getElementById('wSummaryName').textContent = document.getElementById('wClinicName').value;
+    document.getElementById('wSummaryOwner').textContent = document.getElementById('wOwnerName').value||'—';
+    document.getElementById('wSummaryPlan').innerHTML = `<span class="badge badge-gold">${document.getElementById('wPlan').value}</span>`;
+  }
+  updateWizard();
+}
+
+function wizardBack() { if(wizardStep>1){wizardStep--;updateWizard();} }
+
+async function saveNewClinic() {
+  const nome = document.getElementById('wClinicName').value.trim();
+  const newClinic = {
+    nome,
+    responsavel: document.getElementById('wOwnerName').value||null,
+    email: document.getElementById('wEmail').value||null,
+    telefone: document.getElementById('wPhone').value||null,
+    endereco: document.getElementById('wAddress').value||null,
+    plano: document.getElementById('wPlan').value,
+    user_id: STATE.user.id,
+  };
+  const { data, error } = await db.from('clinicas').insert(newClinic).select().single();
+  if (error) { toast('Erro ao criar clínica: '+error.message,'error'); return; }
+  STATE.clinics.push(data);
+  STATE.currentClinicIdx = STATE.clinics.length-1;
+  document.getElementById('navClinicasBadge').textContent = STATE.clinics.length;
+  closeWizard();
+  renderClinicSwitcher();
+  showPage('clinicas');
+  toast(`Clínica "${nome}" criada! Conecte o WhatsApp em Gestão → Clínicas 🎉`);
+}
+
+// ── WHATSAPP FUNCTIONS ───────────────────────
+let currentWAInstance = null;
+let qrInterval = null;
+
+async function openWhatsAppConnect(clinicIdx) {
+  const clinic = STATE.clinics[clinicIdx];
+  if (!clinic) return;
+  currentWAInstance = clinic.nome.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,20) + '_' + clinic.id.slice(0,8);
+  document.getElementById('waStatus').textContent = '';
+  document.getElementById('qrCodeArea').style.display = 'none';
+  document.getElementById('btnGerarQR').style.display = '';
+  document.getElementById('btnGerarQR').innerHTML = '<i class="ti ti-qrcode"></i> Gerar QR Code';
+  // Check if already connected
+  try {
+    const status = await getInstanceStatus(currentWAInstance);
+    if (status?.instance?.state === 'open') {
+      document.getElementById('waStatus').innerHTML = '<span style="color:var(--gold);font-weight:600;"><i class="ti ti-check"></i> WhatsApp já conectado!</span>';
+      document.getElementById('btnGerarQR').innerHTML = '<i class="ti ti-refresh"></i> Reconectar';
+    }
+  } catch(e) {}
+  openModal('modalWhatsApp');
+}
+
+async function gerarQRCode() {
+  const btn = document.getElementById('btnGerarQR');
+  btn.innerHTML = '<i class="ti ti-loader"></i> Gerando...';
+  btn.disabled = true;
+  try {
+    // Create instance
+    await createWhatsAppInstance(currentWAInstance);
+    await new Promise(r => setTimeout(r, 2000));
+    // Get QR
+    const data = await getQRCode(currentWAInstance);
+    if (data?.base64) {
+      document.getElementById('qrCodeImg').src = data.base64;
+      document.getElementById('qrCodeArea').style.display = 'block';
+      document.getElementById('waStatus').textContent = 'Aguardando leitura do QR Code...';
+      btn.innerHTML = '<i class="ti ti-refresh"></i> Atualizar QR Code';
+      btn.disabled = false;
+      // Poll for connection
+      if (qrInterval) clearInterval(qrInterval);
+      qrInterval = setInterval(async () => {
+        try {
+          const s = await getInstanceStatus(currentWAInstance);
+          if (s?.instance?.state === 'open') {
+            clearInterval(qrInterval);
+            document.getElementById('waStatus').innerHTML = '<span style="color:var(--gold);font-weight:600;">✅ WhatsApp conectado com sucesso!</span>';
+            document.getElementById('qrCodeArea').style.display = 'none';
+            document.getElementById('btnGerarQR').style.display = 'none';
+            // Save instance name to clinic
+            const clinic = STATE.clinics.find(c => (c.nome.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,20) + '_' + c.id.slice(0,8)) === currentWAInstance);
+            if (clinic) {
+              await db.from('clinicas').update({whatsapp_instance: currentWAInstance}).eq('id', clinic.id);
+              clinic.whatsapp_instance = currentWAInstance;
+              renderClinicas();
+              toast('WhatsApp conectado! 🎉');
+            }
+          }
+        } catch(e) {}
+      }, 3000);
+    } else {
+      document.getElementById('waStatus').textContent = 'Erro ao gerar QR Code. Tente novamente.';
+      btn.innerHTML = '<i class="ti ti-qrcode"></i> Tentar novamente';
+      btn.disabled = false;
+    }
+  } catch(e) {
+    document.getElementById('waStatus').textContent = 'Erro: ' + e.message;
+    btn.innerHTML = '<i class="ti ti-qrcode"></i> Tentar novamente';
+    btn.disabled = false;
+  }
+}
+
+function openSendWA(leadId) {
+  const l = STATE.leads.find(x=>x.id===leadId);
+  if (!l) return;
+  const clinic = currentClinic();
+  if (!clinic?.whatsapp_instance) {
+    toast('Conecte o WhatsApp primeiro em Gestão → Clínicas!', 'error');
+    return;
+  }
+  if (!l.telefone) {
+    toast('Este lead não tem telefone cadastrado!', 'error');
+    return;
+  }
+  document.getElementById('sendWALeadId').value = leadId;
+  document.getElementById('sendWALeadInfo').innerHTML = `<strong style="color:var(--text-primary);">${l.nome}</strong> · ${l.telefone} · ${l.procedimento||'—'}`;
+  updateWAPreview();
+  openModal('modalSendWA');
+}
+
+function updateWAPreview() {
+  const l = STATE.leads.find(x=>x.id===document.getElementById('sendWALeadId').value);
+  const clinic = currentClinic();
+  const type = document.getElementById('sendWATemplate').value;
+  const templates = {
+    boasvindas: `Olá, ${l?.nome||'{nome}'}! 👋 Aqui é da ${clinic?.nome||'{clinica}'}. Vi que você tem interesse em ${l?.procedimento||'{procedimento}'}. Posso te ajudar a agendar uma avaliação gratuita?`,
+    confirmacao: `Ótimo, ${l?.nome||'{nome}'}! ✅ Sua consulta está confirmada na ${clinic?.nome||'{clinica}'}. Qualquer dúvida é só chamar!`,
+    lembrete: `Oi ${l?.nome||'{nome}'}! 🦷 Lembrando que amanhã você tem consulta na ${clinic?.nome||'{clinica}'}. Confirma presença? Responda SIM ou NÃO.`,
+    followup: `Oi ${l?.nome||'{nome}'}, tudo bem? 😊 Ainda posso te ajudar a agendar sua avaliação de ${l?.procedimento||'{procedimento}'} sem compromisso. Quando seria melhor?`,
+    posconsulta: `Oi ${l?.nome||'{nome}'}! Espero que tenha gostado da avaliação 😊 Ficou alguma dúvida sobre o tratamento? Posso te ajudar com formas de pagamento!`,
+    custom: '',
+  };
+  document.getElementById('sendWAMsg').value = templates[type] || '';
+}
+
+async function confirmarEnvioWA() {
+  const leadId = document.getElementById('sendWALeadId').value;
+  const l = STATE.leads.find(x=>x.id===leadId);
+  const msg = document.getElementById('sendWAMsg').value.trim();
+  const clinic = currentClinic();
+  if (!msg) { toast('Digite uma mensagem', 'error'); return; }
+  try {
+    await sendWhatsAppMessage(clinic.whatsapp_instance, l.telefone, msg);
+    closeModal('modalSendWA');
+    toast(`WhatsApp enviado para ${l.nome}! ✓`);
+  } catch(e) {
+    toast('Erro ao enviar: ' + e.message, 'error');
+  }
+}
+
+// ── INIT ──────────────────────────────────────
+document.addEventListener('DOMContentLoaded', async ()=>{
+  const { data: { session } } = await db.auth.getSession();
+  if (session?.user) {
+    await loadApp(session.user);
+  } else {
+    document.getElementById('loadingScreen').style.display = 'none';
+    document.getElementById('loginPage').style.display = '';
+  }
+  db.auth.onAuthStateChange(async (event, session) => {
+    if (event === 'SIGNED_OUT') {
+      document.getElementById('appPage').style.display = 'none';
+      document.getElementById('loginPage').style.display = '';
+    }
+  });
+});
+</script>
+</body>
+</html>
