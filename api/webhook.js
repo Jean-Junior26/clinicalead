@@ -23,45 +23,45 @@ export default async function handler(req, res) {
 
       if (!jid || jid.includes('status@broadcast')) continue;
 
-      const telefone        = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
-      const nome_de_contato = msg?.pushName || null;
+      const phone        = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
+      const contact_name = msg?.pushName || null;
 
-      let conteudo = '';
-      let tipo = 'texto';
+      let content = '';
+      let type = 'text';
       const m = msg?.message || {};
 
       if (m.conversation) {
-        conteudo = m.conversation;
+        content = m.conversation;
       } else if (m.extendedTextMessage) {
-        conteudo = m.extendedTextMessage.text || '';
+        content = m.extendedTextMessage.text || '';
       } else if (m.imageMessage) {
-        conteudo = m.imageMessage.caption || '📷 Imagem';
-        tipo = 'imagem';
+        content = m.imageMessage.caption || '📷 Imagem';
+        type = 'image';
       } else if (m.audioMessage) {
-        conteudo = '🎵 Áudio';
-        tipo = 'audio';
+        content = '🎵 Áudio';
+        type = 'audio';
       } else if (m.videoMessage) {
-        conteudo = m.videoMessage.caption || '🎥 Vídeo';
-        tipo = 'video';
+        content = m.videoMessage.caption || '🎥 Vídeo';
+        type = 'video';
       } else if (m.documentMessage) {
-        conteudo = m.documentMessage.fileName || '📄 Documento';
-        tipo = 'documento';
+        content = m.documentMessage.fileName || '📄 Documento';
+        type = 'document';
       } else if (m.stickerMessage) {
-        conteudo = '🎭 Sticker';
-        tipo = 'sticker';
+        content = '🎭 Sticker';
+        type = 'sticker';
       } else {
-        conteudo = '[mídia]';
+        content = '[mídia]';
       }
 
-      if (!telefone || !conteudo) continue;
+      if (!phone || !content) continue;
 
       const payload = {
-        telefone,
-        nome_de_contato,
-        contente: conteudo,
-        tipo,
+        phone,
+        contact_name,
+        content,
+        type,
         from_me: fromMe,
-        criado_em: new Date().toISOString(),
+        created_at: new Date().toISOString(),
       };
 
       const resp = await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
