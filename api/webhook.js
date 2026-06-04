@@ -23,8 +23,8 @@ export default async function handler(req, res) {
 
       if (!jid || jid.includes('status@broadcast')) continue;
 
-      const telefone     = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
-      const nome_contato = msg?.pushName || null;
+      const telefone        = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
+      const nome_de_contato = msg?.pushName || null;
 
       let conteudo = '';
       let tipo = 'texto';
@@ -57,8 +57,8 @@ export default async function handler(req, res) {
 
       const payload = {
         telefone,
-        nome_contato,
-        conteudo,
+        nome_de_contato,
+        contente: conteudo,
         tipo,
         from_me: fromMe,
         criado_em: new Date().toISOString(),
