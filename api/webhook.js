@@ -13,6 +13,25 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, ignorado: body?.event });
     }
 
+    // Descobre a instância que enviou
+    const instanceName = body?.instance || body?.instanceName || null;
+
+    // Busca o clinic_id baseado na instância
+    let clinic_id = null;
+    if (instanceName) {
+      const clinicResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/clinicas?whatsapp_instance=eq.${instanceName}&select=id`,
+        {
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+          },
+        }
+      );
+      const clinics = await clinicResp.json();
+      if (clinics?.length > 0) clinic_id = clinics[0].id;
+    }
+
     const messages = body?.data || [];
     const list = Array.isArray(messages) ? messages : [messages];
 
@@ -56,6 +75,7 @@ export default async function handler(req, res) {
       if (!phone || !content) continue;
 
       const payload = {
+        clinic_id,
         phone,
         contact_name,
         content,
