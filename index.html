@@ -465,6 +465,9 @@ tbody tr:hover td { background:var(--bg-elevated); }
 .notif-wrap { position:relative; }
 .notif-dot { width:8px; height:8px; border-radius:50%; background:var(--coral); position:absolute; top:5px; right:5px; border:2px solid var(--bg-surface); }
 
+.cal-day.selected { background: rgba(201,168,76,0.2) !important; color: var(--gold) !important; font-weight: 600; border: 1px solid var(--gold-border); }
+.cal-day.today.selected { background: var(--gold) !important; color: #0A0A0B !important; }
+
 /* LOADING */
 .loading-screen {
   position:fixed; inset:0; background:var(--bg-base); display:flex;
@@ -689,22 +692,38 @@ tbody tr:hover td { background:var(--bg-elevated); }
       <!-- AGENDA -->
       <div class="page" id="page-agenda">
         <div class="page-header">
-          <div class="page-header-left"><h2>Agenda</h2><p id="agendaDate">Hoje</p></div>
-          <div class="page-header-actions"><button class="btn btn-primary" onclick="toast('Em breve: agendar consulta!')"><i class="ti ti-plus"></i> Agendar</button></div>
+          <div class="page-header-left"><h2>Agenda</h2><p id="agendaDate">Selecione um dia</p></div>
+          <div class="page-header-actions">
+            <button class="btn" onclick="openConfigurarAgenda()"><i class="ti ti-settings"></i> Configurar horários</button>
+            <button class="btn btn-primary" onclick="openNovoAgendamento()"><i class="ti ti-plus"></i> Agendar consulta</button>
+          </div>
         </div>
         <div class="agenda-layout">
           <div class="mini-cal">
             <div class="cal-nav">
-              <button class="btn btn-sm btn-ghost btn-icon"><i class="ti ti-chevron-left"></i></button>
+              <button class="btn btn-sm btn-ghost btn-icon" onclick="calNavMonth(-1)"><i class="ti ti-chevron-left"></i></button>
               <span class="cal-month" id="calMonth">Junho 2025</span>
-              <button class="btn btn-sm btn-ghost btn-icon"><i class="ti ti-chevron-right"></i></button>
+              <button class="btn btn-sm btn-ghost btn-icon" onclick="calNavMonth(1)"><i class="ti ti-chevron-right"></i></button>
             </div>
             <div class="cal-grid-header"><div class="cal-dh">D</div><div class="cal-dh">S</div><div class="cal-dh">T</div><div class="cal-dh">Q</div><div class="cal-dh">Q</div><div class="cal-dh">S</div><div class="cal-dh">S</div></div>
             <div class="cal-grid" id="calGrid"></div>
+            <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);">
+              <div style="font-size:11px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Legenda</div>
+              <div style="display:flex;flex-direction:column;gap:5px;">
+                <div style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-secondary);"><div style="width:8px;height:8px;border-radius:50%;background:var(--gold);flex-shrink:0;"></div>Com consultas</div>
+                <div style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-secondary);"><div style="width:8px;height:8px;border-radius:50%;background:var(--coral);flex-shrink:0;"></div>Bloqueado</div>
+              </div>
+            </div>
           </div>
           <div class="sched-card">
-            <div class="sched-header"><div style="font-size:14px;font-weight:600;color:var(--text-primary);font-family:var(--font-display);">Consultas do dia</div><div style="font-size:12px;color:var(--text-secondary);margin-top:2px;" id="agendaDaySub">—</div></div>
-            <div id="agendaList"><div style="padding:32px;text-align:center;color:var(--text-secondary);font-size:13px;">Nenhuma consulta agendada para hoje</div></div>
+            <div class="sched-header" style="display:flex;align-items:center;justify-content:space-between;">
+              <div>
+                <div style="font-size:14px;font-weight:600;color:var(--text-primary);font-family:var(--font-display);" id="agendaDayTitle">Consultas do dia</div>
+                <div style="font-size:12px;color:var(--text-secondary);margin-top:2px;" id="agendaDaySub">Clique em um dia no calendário</div>
+              </div>
+              <div id="agendaDayActions"></div>
+            </div>
+            <div id="agendaList"><div style="padding:48px;text-align:center;color:var(--text-secondary);font-size:13px;"><div style="width:48px;height:48px;border-radius:12px;background:var(--gold-pale);border:1px solid var(--gold-border);display:flex;align-items:center;justify-content:center;margin:0 auto 12px;"><i class="ti ti-calendar" style="font-size:22px;color:var(--gold);"></i></div>Clique em um dia no calendário para ver as consultas</div></div>
           </div>
         </div>
       </div>
@@ -1371,31 +1390,254 @@ function renderLeads(filter='all', search='') {
 }
 
 // ── AGENDA ────────────────────────────────────
+// ── AGENDA STATE ─────────────────────────────
+let CAL = {
+  year: new Date().getFullYear(),
+  month: new Date().getMonth(),
+  selectedDate: null,
+  consultas: [], // {id, lead_id, data, hora, status, observacoes}
+  horariosDisponiveis: ['08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30','14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30'],
+  diasBloqueados: [], // ['2025-06-15','2025-06-16']
+};
+
 function renderAgenda() {
-  const now = new Date();
-  document.getElementById('agendaDate').textContent = now.toLocaleDateString('pt-BR', {weekday:'long',day:'numeric',month:'long',year:'numeric'});
-  document.getElementById('agendaDaySub').textContent = now.toLocaleDateString('pt-BR', {day:'numeric',month:'long',year:'numeric'});
-  document.getElementById('calMonth').textContent = now.toLocaleDateString('pt-BR', {month:'long',year:'numeric'});
-  const agendados = currentLeads().filter(l=>l.status==='agendado');
-  document.getElementById('agendaList').innerHTML = agendados.length
-    ? agendados.map((l,i)=>`<div class="sched-item"><div class="sched-time">—</div><div class="sched-line-col"><div class="sched-dot" style="background:var(--gold);"></div>${i<agendados.length-1?'<div class="sched-connector"></div>':''}</div><div class="sched-info"><div class="sched-name">${l.nome}</div><div class="sched-proc">${l.procedimento||'—'}</div><div class="sched-acts">${badgeHtml('agendado')}<button class="btn btn-sm" onclick="toast('Confirmação enviada!')"><i class="ti ti-brand-whatsapp"></i> Confirmar</button></div></div></div>`).join('')
-    : '<div style="padding:32px;text-align:center;color:var(--text-secondary);font-size:13px;">Nenhum lead agendado ainda</div>';
+  // Load consultas from Supabase
+  loadConsultas().then(() => {
+    renderCalendar();
+    if (CAL.selectedDate) {
+      renderDaySchedule(CAL.selectedDate);
+    }
+  });
+}
+
+async function loadConsultas() {
+  const clinic = currentClinic();
+  if (!clinic) return;
+  try {
+    const { data } = await db.from('consultas').select('*').eq('clinic_id', clinic.id).order('data').order('hora');
+    CAL.consultas = data || [];
+  } catch(e) { CAL.consultas = []; }
+}
+
+function calNavMonth(dir) {
+  CAL.month += dir;
+  if (CAL.month > 11) { CAL.month = 0; CAL.year++; }
+  if (CAL.month < 0) { CAL.month = 11; CAL.year--; }
   renderCalendar();
 }
 
 function renderCalendar() {
+  const { year, month } = CAL;
   const now = new Date();
-  const year = now.getFullYear(), month = now.getMonth();
+  document.getElementById('calMonth').textContent = new Date(year, month).toLocaleDateString('pt-BR', {month:'long',year:'numeric'});
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month+1, 0).getDate();
   const prevDays = new Date(year, month, 0).getDate();
   let html = '';
   for (let i=firstDay-1; i>=0; i--) html += `<div class="cal-day other">${prevDays-i}</div>`;
   for (let d=1; d<=daysInMonth; d++) {
-    const isToday = d===now.getDate();
-    html += `<div class="cal-day ${isToday?'today':''}">${d}</div>`;
+    const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const isToday = d===now.getDate() && month===now.getMonth() && year===now.getFullYear();
+    const isSelected = dateStr === CAL.selectedDate;
+    const isBloqueado = CAL.diasBloqueados.includes(dateStr);
+    const hasConsulta = CAL.consultas.some(c => c.data === dateStr);
+    let cls = 'cal-day';
+    if (isToday) cls += ' today';
+    if (isSelected && !isToday) cls += ' selected';
+    let dot = '';
+    if (isBloqueado) dot = '<span style="position:absolute;bottom:2px;left:50%;transform:translateX(-50%);width:5px;height:5px;border-radius:50%;background:var(--coral);"></span>';
+    else if (hasConsulta) dot = '<span style="position:absolute;bottom:2px;left:50%;transform:translateX(-50%);width:5px;height:5px;border-radius:50%;background:var(--gold);"></span>';
+    html += `<div class="${cls}" style="position:relative;" onclick="selectCalDay('${dateStr}')">${d}${dot}</div>`;
   }
   document.getElementById('calGrid').innerHTML = html;
+}
+
+function selectCalDay(dateStr) {
+  CAL.selectedDate = dateStr;
+  renderCalendar();
+  renderDaySchedule(dateStr);
+}
+
+function renderDaySchedule(dateStr) {
+  const date = new Date(dateStr + 'T12:00:00');
+  const label = date.toLocaleDateString('pt-BR', {weekday:'long', day:'numeric', month:'long', year:'numeric'});
+  document.getElementById('agendaDate').textContent = label;
+  document.getElementById('agendaDaySub').textContent = label;
+  document.getElementById('agendaDayTitle').textContent = 'Consultas — ' + date.toLocaleDateString('pt-BR', {day:'numeric', month:'long'});
+  const isBloqueado = CAL.diasBloqueados.includes(dateStr);
+  document.getElementById('agendaDayActions').innerHTML = isBloqueado
+    ? `<button class="btn btn-sm" style="color:var(--coral);border-color:var(--coral);" onclick="desbloquearDia('${dateStr}')"><i class="ti ti-lock-open"></i> Desbloquear dia</button>`
+    : `<button class="btn btn-sm" onclick="bloquearDia('${dateStr}')"><i class="ti ti-lock"></i> Bloquear dia</button>`;
+  if (isBloqueado) {
+    document.getElementById('agendaList').innerHTML = `<div style="padding:32px;text-align:center;"><div style="width:48px;height:48px;border-radius:12px;background:var(--coral-pale);border:1px solid var(--coral);display:flex;align-items:center;justify-content:center;margin:0 auto 12px;"><i class="ti ti-lock" style="font-size:22px;color:var(--coral);"></i></div><div style="font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:6px;">Dia bloqueado</div><div style="font-size:12px;color:var(--text-secondary);">Este dia não está disponível para agendamentos.</div><button class="btn btn-sm" style="margin-top:14px;" onclick="desbloquearDia('${dateStr}')"><i class="ti ti-lock-open"></i> Desbloquear</button></div>`;
+    return;
+  }
+  const dayConsultas = CAL.consultas.filter(c => c.data === dateStr).sort((a,b) => a.hora.localeCompare(b.hora));
+  const slotsHtml = CAL.horariosDisponiveis.map(hora => {
+    const consulta = dayConsultas.find(c => c.hora === hora);
+    if (consulta) {
+      const lead = STATE.leads.find(l => l.id === consulta.lead_id);
+      const statusColors = {agendado:'var(--gold)',confirmado:'#5B8DB8',compareceu:'var(--green)',faltou:'var(--coral)'};
+      const dotColor = statusColors[consulta.status] || 'var(--gold)';
+      return `<div class="sched-item" style="cursor:pointer;" onclick="openEditConsulta('${consulta.id}')">
+        <div class="sched-time" style="color:var(--gold);">${hora}</div>
+        <div class="sched-line-col"><div class="sched-dot" style="background:${dotColor};"></div></div>
+        <div class="sched-info">
+          <div class="sched-name">${lead?.nome || 'Paciente'}</div>
+          <div class="sched-proc">${lead?.procedimento || consulta.observacoes || '—'}</div>
+          <div class="sched-acts">
+            ${badgeHtml(consulta.status === 'confirmado' ? 'agendado' : consulta.status)}
+            <button class="btn btn-sm" onclick="event.stopPropagation();sendWAConsulta('${consulta.id}')"><i class="ti ti-brand-whatsapp"></i> Confirmar</button>
+            <button class="btn btn-sm" onclick="event.stopPropagation();marcarCompareceu('${consulta.id}')"><i class="ti ti-check"></i> Compareceu</button>
+            <button class="btn btn-sm btn-danger btn-sm" onclick="event.stopPropagation();cancelarConsulta('${consulta.id}')"><i class="ti ti-x"></i></button>
+          </div>
+        </div>
+      </div>`;
+    } else {
+      return `<div style="display:flex;align-items:center;gap:12px;padding:10px 20px;border-bottom:1px solid var(--border-subtle);opacity:0.4;cursor:pointer;transition:opacity 0.15s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.4" onclick="openNovoAgendamentoHora('${dateStr}','${hora}')">
+        <div class="sched-time" style="color:var(--text-muted);">${hora}</div>
+        <div style="font-size:12px;color:var(--text-muted);">— disponível — clique para agendar</div>
+      </div>`;
+    }
+  }).join('');
+  document.getElementById('agendaList').innerHTML = slotsHtml ||
+    '<div style="padding:32px;text-align:center;color:var(--text-secondary);font-size:13px;">Nenhum horário configurado</div>';
+}
+
+function bloquearDia(dateStr) {
+  if (!CAL.diasBloqueados.includes(dateStr)) CAL.diasBloqueados.push(dateStr);
+  renderCalendar();
+  renderDaySchedule(dateStr);
+  toast('Dia bloqueado!');
+}
+function desbloquearDia(dateStr) {
+  CAL.diasBloqueados = CAL.diasBloqueados.filter(d => d !== dateStr);
+  renderCalendar();
+  renderDaySchedule(dateStr);
+  toast('Dia desbloqueado!');
+}
+
+async function marcarCompareceu(consultaId) {
+  const c = CAL.consultas.find(x => x.id === consultaId);
+  if (!c) return;
+  c.status = 'compareceu';
+  await db.from('consultas').update({status:'compareceu'}).eq('id', consultaId);
+  // Also update lead status
+  const lead = STATE.leads.find(l => l.id === c.lead_id);
+  if (lead) { lead.status = 'compareceu'; await db.from('leads').update({status:'compareceu'}).eq('id', lead.id); }
+  renderDaySchedule(CAL.selectedDate);
+  toast('Marcado como compareceu!');
+}
+
+async function cancelarConsulta(consultaId) {
+  if (!confirm('Cancelar esta consulta?')) return;
+  await db.from('consultas').delete().eq('id', consultaId);
+  CAL.consultas = CAL.consultas.filter(c => c.id !== consultaId);
+  renderCalendar();
+  renderDaySchedule(CAL.selectedDate);
+  toast('Consulta cancelada');
+}
+
+async function sendWAConsulta(consultaId) {
+  const c = CAL.consultas.find(x => x.id === consultaId);
+  if (!c) return;
+  const lead = STATE.leads.find(l => l.id === c.lead_id);
+  const clinic = currentClinic();
+  if (!clinic?.whatsapp_instance || !lead?.telefone) { toast('Configure o WhatsApp primeiro!','error'); return; }
+  const msg = `Oi ${lead.nome}! 🦷 Lembrando que você tem consulta amanhã às ${c.hora} na ${clinic.nome}. Confirma presença? Responda SIM ou NÃO.`;
+  try {
+    await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg);
+    await db.from('consultas').update({status:'confirmado'}).eq('id', consultaId);
+    c.status = 'confirmado';
+    renderDaySchedule(CAL.selectedDate);
+    toast('Confirmação enviada por WhatsApp! ✓');
+  } catch(e) { toast('Erro ao enviar WhatsApp','error'); }
+}
+
+function openConfigurarAgenda() {
+  const html = CAL.horariosDisponiveis.join('\n');
+  document.getElementById('configHorarios').value = html;
+  openModal('modalConfigAgenda');
+}
+
+function salvarConfigAgenda() {
+  const val = document.getElementById('configHorarios').value;
+  CAL.horariosDisponiveis = val.split('\n').map(h=>h.trim()).filter(h=>/^\d{2}:\d{2}$/.test(h));
+  closeModal('modalConfigAgenda');
+  if (CAL.selectedDate) renderDaySchedule(CAL.selectedDate);
+  toast('Horários atualizados!');
+}
+
+function openNovoAgendamento() {
+  document.getElementById('naData').value = CAL.selectedDate || new Date().toISOString().split('T')[0];
+  document.getElementById('naHora').innerHTML = CAL.horariosDisponiveis.map(h=>`<option value="${h}">${h}</option>`).join('');
+  // Populate leads select
+  const leads = currentLeads();
+  document.getElementById('naLead').innerHTML = '<option value="">Selecione o paciente...</option>' + leads.map(l=>`<option value="${l.id}">${l.nome} — ${l.procedimento||'—'}</option>`).join('');
+  openModal('modalNovoAgendamento');
+}
+
+function openNovoAgendamentoHora(dateStr, hora) {
+  document.getElementById('naData').value = dateStr;
+  document.getElementById('naHora').innerHTML = CAL.horariosDisponiveis.map(h=>`<option value="${h}" ${h===hora?'selected':''}>${h}</option>`).join('');
+  const leads = currentLeads();
+  document.getElementById('naLead').innerHTML = '<option value="">Selecione o paciente...</option>' + leads.map(l=>`<option value="${l.id}">${l.nome} — ${l.procedimento||'—'}</option>`).join('');
+  openModal('modalNovoAgendamento');
+}
+
+async function salvarNovoAgendamento() {
+  const leadId = document.getElementById('naLead').value;
+  const data = document.getElementById('naData').value;
+  const hora = document.getElementById('naHora').value;
+  const obs = document.getElementById('naObs').value;
+  if (!leadId || !data || !hora) { toast('Preencha paciente, data e horário','error'); return; }
+  const clinic = currentClinic();
+  // Check if slot already taken
+  const taken = CAL.consultas.find(c => c.data===data && c.hora===hora);
+  if (taken) { toast('Este horário já está ocupado!','error'); return; }
+  const nova = { clinic_id: clinic.id, lead_id: leadId, data, hora, status:'agendado', observacoes: obs };
+  const { data: saved, error } = await db.from('consultas').insert(nova).select().single();
+  if (error) { toast('Erro: '+error.message,'error'); return; }
+  CAL.consultas.push(saved);
+  // Update lead status to agendado
+  const lead = STATE.leads.find(l=>l.id===leadId);
+  if (lead && lead.status === 'novo' || lead?.status === 'contato') {
+    lead.status = 'agendado';
+    await db.from('leads').update({status:'agendado'}).eq('id',leadId);
+  }
+  closeModal('modalNovoAgendamento');
+  CAL.selectedDate = data;
+  renderCalendar();
+  renderDaySchedule(data);
+  toast('Consulta agendada! ✓');
+  // Send WhatsApp confirmation
+  if (clinic?.whatsapp_instance && lead?.telefone) {
+    const msg = `Ótimo, ${lead.nome}! ✅ Sua consulta está confirmada para ${new Date(data+'T12:00').toLocaleDateString('pt-BR')} às ${hora} na ${clinic.nome}. Qualquer dúvida é só chamar!`;
+    try { await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg); toast('Confirmação enviada por WhatsApp! ✓'); } catch(e) {}
+  }
+}
+
+function openEditConsulta(consultaId) {
+  const c = CAL.consultas.find(x => x.id === consultaId);
+  if (!c) return;
+  const lead = STATE.leads.find(l => l.id === c.lead_id);
+  document.getElementById('editConsultaId').value = consultaId;
+  document.getElementById('editConsultaInfo').textContent = `${lead?.nome||'—'} · ${c.data} às ${c.hora}`;
+  document.getElementById('editConsultaStatus').value = c.status;
+  document.getElementById('editConsultaObs').value = c.observacoes || '';
+  openModal('modalEditConsulta');
+}
+
+async function salvarEditConsulta() {
+  const id = document.getElementById('editConsultaId').value;
+  const status = document.getElementById('editConsultaStatus').value;
+  const obs = document.getElementById('editConsultaObs').value;
+  await db.from('consultas').update({status, observacoes:obs}).eq('id', id);
+  const c = CAL.consultas.find(x=>x.id===id);
+  if (c) { c.status=status; c.observacoes=obs; }
+  closeModal('modalEditConsulta');
+  renderDaySchedule(CAL.selectedDate);
+  toast('Consulta atualizada!');
 }
 
 // ── AUTOMAÇÕES ────────────────────────────────
@@ -1762,5 +2004,58 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   });
 });
 </script>
+<!-- MODAL NOVO AGENDAMENTO -->
+<div class="modal-overlay" id="modalNovoAgendamento">
+  <div class="modal" style="max-width:480px;">
+    <div class="modal-header"><h3><i class="ti ti-calendar-plus" style="margin-right:8px;color:var(--gold);"></i>Novo Agendamento</h3><button class="btn btn-ghost btn-icon" onclick="closeModal('modalNovoAgendamento')"><i class="ti ti-x"></i></button></div>
+    <div class="modal-body">
+      <div class="form-group"><label class="form-label">Paciente (lead) *</label><select class="form-select" id="naLead"><option>Carregando...</option></select></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Data *</label><input class="form-input" type="date" id="naData"/></div>
+        <div class="form-group"><label class="form-label">Horário *</label><select class="form-select" id="naHora"></select></div>
+      </div>
+      <div class="form-group" style="margin-bottom:0;"><label class="form-label">Observações</label><textarea class="form-textarea" id="naObs" placeholder="Procedimento, observações..."></textarea></div>
+    </div>
+    <div class="modal-footer"><button class="btn" onclick="closeModal('modalNovoAgendamento')">Cancelar</button><button class="btn btn-primary" onclick="salvarNovoAgendamento()"><i class="ti ti-check"></i> Agendar</button></div>
+  </div>
+</div>
+
+<!-- MODAL EDITAR CONSULTA -->
+<div class="modal-overlay" id="modalEditConsulta">
+  <div class="modal" style="max-width:420px;">
+    <div class="modal-header"><h3><i class="ti ti-edit" style="margin-right:8px;color:var(--gold);"></i>Editar Consulta</h3><button class="btn btn-ghost btn-icon" onclick="closeModal('modalEditConsulta')"><i class="ti ti-x"></i></button></div>
+    <div class="modal-body">
+      <input type="hidden" id="editConsultaId"/>
+      <div style="background:var(--bg-elevated);border-radius:10px;padding:12px;margin-bottom:16px;font-size:13px;color:var(--text-primary);font-weight:500;" id="editConsultaInfo"></div>
+      <div class="form-group"><label class="form-label">Status</label>
+        <select class="form-select" id="editConsultaStatus">
+          <option value="agendado">Agendado</option>
+          <option value="confirmado">Confirmado</option>
+          <option value="compareceu">Compareceu</option>
+          <option value="faltou">Faltou</option>
+          <option value="cancelado">Cancelado</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:0;"><label class="form-label">Observações</label><textarea class="form-textarea" id="editConsultaObs"></textarea></div>
+    </div>
+    <div class="modal-footer"><button class="btn" onclick="closeModal('modalEditConsulta')">Cancelar</button><button class="btn btn-primary" onclick="salvarEditConsulta()"><i class="ti ti-check"></i> Salvar</button></div>
+  </div>
+</div>
+
+<!-- MODAL CONFIGURAR AGENDA -->
+<div class="modal-overlay" id="modalConfigAgenda">
+  <div class="modal" style="max-width:420px;">
+    <div class="modal-header"><h3><i class="ti ti-settings" style="margin-right:8px;color:var(--gold);"></i>Configurar Horários</h3><button class="btn btn-ghost btn-icon" onclick="closeModal('modalConfigAgenda')"><i class="ti ti-x"></i></button></div>
+    <div class="modal-body">
+      <div class="form-group" style="margin-bottom:0;">
+        <label class="form-label">Horários disponíveis</label>
+        <textarea class="form-textarea" id="configHorarios" style="min-height:200px;font-family:var(--mono);font-size:13px;"></textarea>
+        <div class="form-hint">Um horário por linha no formato HH:MM. Ex: 09:00</div>
+      </div>
+    </div>
+    <div class="modal-footer"><button class="btn" onclick="closeModal('modalConfigAgenda')">Cancelar</button><button class="btn btn-primary" onclick="salvarConfigAgenda()"><i class="ti ti-check"></i> Salvar horários</button></div>
+  </div>
+</div>
+
 </body>
 </html>
