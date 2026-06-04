@@ -1395,9 +1395,10 @@ let CAL = {
   year: new Date().getFullYear(),
   month: new Date().getMonth(),
   selectedDate: null,
-  consultas: [], // {id, lead_id, data, hora, status, observacoes}
+  consultas: [],
   horariosDisponiveis: ['08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30','14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30'],
-  diasBloqueados: [], // ['2025-06-15','2025-06-16']
+  diasBloqueados: [],    // dias inteiros bloqueados
+  horasBloqueadas: {},   // {'2025-06-15': ['09:00','10:00']}
 };
 
 function renderAgenda() {
@@ -1465,9 +1466,7 @@ function renderDaySchedule(dateStr) {
   document.getElementById('agendaDaySub').textContent = label;
   document.getElementById('agendaDayTitle').textContent = 'Consultas — ' + date.toLocaleDateString('pt-BR', {day:'numeric', month:'long'});
   const isBloqueado = CAL.diasBloqueados.includes(dateStr);
-  document.getElementById('agendaDayActions').innerHTML = isBloqueado
-    ? `<button class="btn btn-sm" style="color:var(--coral);border-color:var(--coral);" onclick="desbloquearDia('${dateStr}')"><i class="ti ti-lock-open"></i> Desbloquear dia</button>`
-    : `<button class="btn btn-sm" onclick="bloquearDia('${dateStr}')"><i class="ti ti-lock"></i> Bloquear dia</button>`;
+  document.getElementById('agendaDayActions').innerHTML = `<button class="btn btn-sm" onclick="openConfigurarAgenda()"><i class="ti ti-settings"></i> Configurar</button>`;
   if (isBloqueado) {
     document.getElementById('agendaList').innerHTML = `<div style="padding:32px;text-align:center;"><div style="width:48px;height:48px;border-radius:12px;background:var(--coral-pale);border:1px solid var(--coral);display:flex;align-items:center;justify-content:center;margin:0 auto 12px;"><i class="ti ti-lock" style="font-size:22px;color:var(--coral);"></i></div><div style="font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:6px;">Dia bloqueado</div><div style="font-size:12px;color:var(--text-secondary);">Este dia não está disponível para agendamentos.</div><button class="btn btn-sm" style="margin-top:14px;" onclick="desbloquearDia('${dateStr}')"><i class="ti ti-lock-open"></i> Desbloquear</button></div>`;
     return;
@@ -1475,6 +1474,14 @@ function renderDaySchedule(dateStr) {
   const dayConsultas = CAL.consultas.filter(c => c.data === dateStr).sort((a,b) => a.hora.localeCompare(b.hora));
   const slotsHtml = CAL.horariosDisponiveis.map(hora => {
     const consulta = dayConsultas.find(c => c.hora === hora);
+    const isBloqueadoSlot = (CAL.horasBloqueadas[dateStr] || []).includes(hora);
+    if (isBloqueadoSlot) {
+      return `<div style="display:flex;align-items:center;gap:12px;padding:10px 20px;border-bottom:1px solid var(--border-subtle);background:rgba(192,98,74,0.05);">
+        <div class="sched-time" style="color:var(--coral);opacity:0.7;">${hora}</div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--coral);opacity:0.7;"><i class="ti ti-lock" style="font-size:13px;"></i>Horário bloqueado</div>
+        <button class="btn btn-sm" style="margin-left:auto;" onclick="toggleHoraBloqueada('${dateStr}','${hora}')"><i class="ti ti-lock-open"></i></button>
+      </div>`;
+    }
     if (consulta) {
       const lead = STATE.leads.find(l => l.id === consulta.lead_id);
       const statusColors = {agendado:'var(--gold)',confirmado:'#5B8DB8',compareceu:'var(--green)',faltou:'var(--coral)'};
@@ -1494,9 +1501,10 @@ function renderDaySchedule(dateStr) {
         </div>
       </div>`;
     } else {
-      return `<div style="display:flex;align-items:center;gap:12px;padding:10px 20px;border-bottom:1px solid var(--border-subtle);opacity:0.4;cursor:pointer;transition:opacity 0.15s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.4" onclick="openNovoAgendamentoHora('${dateStr}','${hora}')">
+      return `<div style="display:flex;align-items:center;gap:12px;padding:10px 20px;border-bottom:1px solid var(--border-subtle);opacity:0.5;cursor:pointer;transition:all 0.15s;" onmouseover="this.style.opacity=1;this.style.background='rgba(201,168,76,0.03)'" onmouseout="this.style.opacity=0.5;this.style.background=''" onclick="openNovoAgendamentoHora('${dateStr}','${hora}')">
         <div class="sched-time" style="color:var(--text-muted);">${hora}</div>
-        <div style="font-size:12px;color:var(--text-muted);">— disponível — clique para agendar</div>
+        <div style="font-size:12px;color:var(--text-muted);flex:1;">— disponível — clique para agendar</div>
+        <button class="btn btn-sm" style="font-size:10px;padding:3px 8px;opacity:0;" id="blk_${dateStr}_${hora}" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0" onclick="event.stopPropagation();toggleHoraBloqueada('${dateStr}','${hora}')"><i class="ti ti-lock"></i></button>
       </div>`;
     }
   }).join('');
@@ -1506,15 +1514,23 @@ function renderDaySchedule(dateStr) {
 
 function bloquearDia(dateStr) {
   if (!CAL.diasBloqueados.includes(dateStr)) CAL.diasBloqueados.push(dateStr);
-  renderCalendar();
-  renderDaySchedule(dateStr);
-  toast('Dia bloqueado!');
+  renderCalendar(); renderDaySchedule(dateStr); toast('Dia bloqueado!');
 }
 function desbloquearDia(dateStr) {
   CAL.diasBloqueados = CAL.diasBloqueados.filter(d => d !== dateStr);
-  renderCalendar();
+  renderCalendar(); renderDaySchedule(dateStr); toast('Dia desbloqueado!');
+}
+function toggleHoraBloqueada(dateStr, hora) {
+  if (!CAL.horasBloqueadas[dateStr]) CAL.horasBloqueadas[dateStr] = [];
+  const idx = CAL.horasBloqueadas[dateStr].indexOf(hora);
+  if (idx >= 0) {
+    CAL.horasBloqueadas[dateStr].splice(idx, 1);
+    toast(hora + ' desbloqueado!');
+  } else {
+    CAL.horasBloqueadas[dateStr].push(hora);
+    toast(hora + ' bloqueado!');
+  }
   renderDaySchedule(dateStr);
-  toast('Dia desbloqueado!');
 }
 
 async function marcarCompareceu(consultaId) {
@@ -2044,16 +2060,22 @@ document.addEventListener('DOMContentLoaded', async ()=>{
 
 <!-- MODAL CONFIGURAR AGENDA -->
 <div class="modal-overlay" id="modalConfigAgenda">
-  <div class="modal" style="max-width:420px;">
-    <div class="modal-header"><h3><i class="ti ti-settings" style="margin-right:8px;color:var(--gold);"></i>Configurar Horários</h3><button class="btn btn-ghost btn-icon" onclick="closeModal('modalConfigAgenda')"><i class="ti ti-x"></i></button></div>
+  <div class="modal" style="max-width:520px;">
+    <div class="modal-header"><h3><i class="ti ti-settings" style="margin-right:8px;color:var(--gold);"></i>Configurar Disponibilidade</h3><button class="btn btn-ghost btn-icon" onclick="closeModal('modalConfigAgenda')"><i class="ti ti-x"></i></button></div>
     <div class="modal-body">
+      <div style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;line-height:1.6;">Configure os horários disponíveis e bloqueie slots específicos para o dia <strong style="color:var(--text-primary);" id="configAgendaDataLabel">selecionado</strong>.</div>
+      <div class="form-group">
+        <label class="form-label">Horários de atendimento (um por linha)</label>
+        <textarea class="form-textarea" id="configHorarios" style="min-height:140px;font-family:var(--mono);font-size:13px;"></textarea>
+        <div class="form-hint">Formato HH:MM · Ex: 08:00, 08:30, 09:00...</div>
+      </div>
       <div class="form-group" style="margin-bottom:0;">
-        <label class="form-label">Horários disponíveis</label>
-        <textarea class="form-textarea" id="configHorarios" style="min-height:200px;font-family:var(--mono);font-size:13px;"></textarea>
-        <div class="form-hint">Um horário por linha no formato HH:MM. Ex: 09:00</div>
+        <label class="form-label">Horários bloqueados neste dia</label>
+        <div id="configBloqueadosGrid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:4px;"></div>
+        <div class="form-hint" style="margin-top:6px;">Clique em um horário para bloquear/desbloquear</div>
       </div>
     </div>
-    <div class="modal-footer"><button class="btn" onclick="closeModal('modalConfigAgenda')">Cancelar</button><button class="btn btn-primary" onclick="salvarConfigAgenda()"><i class="ti ti-check"></i> Salvar horários</button></div>
+    <div class="modal-footer"><button class="btn" onclick="closeModal('modalConfigAgenda')">Cancelar</button><button class="btn btn-primary" onclick="salvarConfigAgenda()"><i class="ti ti-check"></i> Salvar</button></div>
   </div>
 </div>
 
