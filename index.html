@@ -2204,7 +2204,7 @@ async function loadInboxChats() {
     const { data: msgs, error } = await db
       .from('mensagens')
       .select('*')
-      .eq('clinic_id', clinic.id)
+     .not('phone', 'is', null)
       .order('created_at', { ascending: false })
       .limit(200);
 
