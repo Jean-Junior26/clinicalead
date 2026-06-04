@@ -1340,7 +1340,7 @@ function renderClinicSwitcher() {
       ${i===STATE.currentClinicIdx?'<i class="ti ti-check" style="margin-left:auto;"></i>':''}
     </div>
   `).join('') + `
-    <div class="clinic-add" onclick="openAddClinicWizard()">
+  ${STATE.clinics.length === 0 || STATE.profile?.role === 'admin' ? `<div class="clinic-add" onclick="openAddClinicWizard()"><i class="ti ti-plus"></i><span>Adicionar nova clínica</span></div>` : ''}
       <i class="ti ti-plus"></i><span>Adicionar nova clínica</span>
     </div>`;
 }
