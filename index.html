@@ -2139,7 +2139,9 @@ function updateWAPreview() {
   const type = document.getElementById('sendWATemplate').value;
   const templates = {
     boasvindas: `Olá, ${l?.nome||'{nome}'}! 👋 Aqui é da ${clinic?.nome||'{clinica}'}. Vi que você tem interesse em ${l?.procedimento||'{procedimento}'}. Posso te ajudar a agendar uma avaliação gratuita?`,
-    confirmacao: `Ótimo, ${l?.nome||'{nome}'}! ✅ Sua consulta está confirmada na ${clinic?.nome||'{clinica}'}. Qualquer dúvida é só chamar!`,
+  const user = supabase_client?.auth?.getUser ? (await supabase_client.auth.getUser()).data?.user : null;
+const email = user?.email || '';
+window.location.href = `/planos.html?clinic_id=${data.id}&user_id=${data.user_id}&email=${encodeURIComponent(email)}`;
     lembrete: `Oi ${l?.nome||'{nome}'}! 🦷 Lembrando que amanhã você tem consulta na ${clinic?.nome||'{clinica}'}. Confirma presença? Responda SIM ou NÃO.`,
     followup: `Oi ${l?.nome||'{nome}'}, tudo bem? 😊 Ainda posso te ajudar a agendar sua avaliação de ${l?.procedimento||'{procedimento}'} sem compromisso. Quando seria melhor?`,
     posconsulta: `Oi ${l?.nome||'{nome}'}! Espero que tenha gostado da avaliação 😊 Ficou alguma dúvida sobre o tratamento? Posso te ajudar com formas de pagamento!`,
