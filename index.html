@@ -740,7 +740,7 @@ tbody tr:hover td { background:var(--bg-elevated); }
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Clínica</th><th>Responsável</th><th>Telefone</th><th>Plano</th><th>Leads</th><th>Ações</th></tr></thead>
+            <thead><tr><th>Clínica</th><th>Responsável</th><th>Telefone</th><th>Plano</th><th>Leads</th><th>WhatsApp</th><th>Ações</th></tr></thead>
             <tbody id="clinicasList"><tr><td colspan="6" style="text-align:center;padding:32px;color:var(--text-secondary);">Nenhuma clínica ainda</td></tr></tbody>
           </table>
         </div>
@@ -824,6 +824,62 @@ tbody tr:hover td { background:var(--bg-elevated); }
   </div>
 </div>
 
+<!-- MODAL WHATSAPP CONNECT -->
+<div class="modal-overlay" id="modalWhatsApp">
+  <div class="modal" style="max-width:480px;">
+    <div class="modal-header">
+      <h3><i class="ti ti-brand-whatsapp" style="margin-right:8px;color:var(--gold);"></i>Conectar WhatsApp</h3>
+      <button class="btn btn-ghost btn-icon" onclick="closeModal('modalWhatsApp')"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="modal-body" id="modalWhatsAppBody">
+      <div style="text-align:center;padding:20px;">
+        <div style="width:48px;height:48px;border-radius:12px;background:var(--gold-pale);border:1px solid var(--gold-border);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;"><i class="ti ti-brand-whatsapp" style="font-size:24px;color:var(--gold);"></i></div>
+        <div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:8px;font-family:var(--font-display);">Conectar número da clínica</div>
+        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:24px;line-height:1.6;">Vamos gerar um QR Code. Abra o WhatsApp no celular da clínica → Dispositivos conectados → Conectar dispositivo → Escaneie o QR Code.</div>
+        <div id="qrCodeArea" style="display:none;margin-bottom:16px;">
+          <img id="qrCodeImg" src="" style="width:200px;height:200px;border-radius:12px;border:2px solid var(--gold-border);"/>
+          <div style="font-size:12px;color:var(--text-secondary);margin-top:8px;">Escaneie com o WhatsApp do celular da clínica</div>
+        </div>
+        <div id="waStatus" style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;"></div>
+        <button class="btn btn-primary btn-full" id="btnGerarQR" onclick="gerarQRCode()"><i class="ti ti-qrcode"></i> Gerar QR Code</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL WHATSAPP SEND -->
+<div class="modal-overlay" id="modalSendWA">
+  <div class="modal" style="max-width:460px;">
+    <div class="modal-header">
+      <h3><i class="ti ti-brand-whatsapp" style="margin-right:8px;color:var(--gold);"></i>Enviar WhatsApp</h3>
+      <button class="btn btn-ghost btn-icon" onclick="closeModal('modalSendWA')"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="sendWALeadId"/>
+      <div id="sendWALeadInfo" style="background:var(--bg-elevated);border-radius:10px;padding:12px;margin-bottom:16px;font-size:13px;color:var(--text-secondary);"></div>
+      <div class="form-group">
+        <label class="form-label">Mensagem automática</label>
+        <select class="form-select" id="sendWATemplate" onchange="updateWAPreview()">
+          <option value="boasvindas">👋 Boas-vindas ao novo lead</option>
+          <option value="confirmacao">✅ Confirmação de agendamento</option>
+          <option value="lembrete">🦷 Lembrete 24h antes</option>
+          <option value="followup">😊 Follow-up sem resposta</option>
+          <option value="posconsulta">❤️ Pós-consulta</option>
+          <option value="custom">✏️ Mensagem personalizada</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Prévia da mensagem</label>
+        <textarea class="form-textarea" id="sendWAMsg" style="font-family:var(--mono);font-size:12px;min-height:100px;"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('modalSendWA')">Cancelar</button>
+      <button class="btn btn-primary" onclick="confirmarEnvioWA()"><i class="ti ti-send"></i> Enviar agora</button>
+    </div>
+  </div>
+</div>
+
 <!-- WIZARD NOVA CLÍNICA -->
 <div class="wizard-overlay" id="wizardOverlay" style="display:none;">
   <div class="wizard-box">
@@ -887,6 +943,69 @@ tbody tr:hover td { background:var(--bg-elevated); }
 // ── SUPABASE ──────────────────────────────────
 const SUPABASE_URL = 'https://zcwntpkiispbhjjgidih.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_G6xEiLO4lcNaJafm9RA2tA_QLf4E2FV';
+
+// ── EVOLUTION API (WhatsApp) ──────────────────
+const EVO_URL = 'https://evolution-api-production-b649.up.railway.app';
+const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae000';
+
+async function evoRequest(method, path, body=null) {
+  const opts = {
+    method,
+    headers: { 'apikey': EVO_KEY, 'Content-Type': 'application/json' },
+  };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(EVO_URL + path, opts);
+  return r.json();
+}
+
+// Create instance for clinic
+async function createWhatsAppInstance(instanceName) {
+  return evoRequest('POST', '/instance/create', {
+    instanceName,
+    qrcode: true,
+    integration: 'WHATSAPP-BAILEYS',
+  });
+}
+
+// Get QR Code
+async function getQRCode(instanceName) {
+  return evoRequest('GET', `/instance/connect/${instanceName}`);
+}
+
+// Get instance status
+async function getInstanceStatus(instanceName) {
+  return evoRequest('GET', `/instance/connectionState/${instanceName}`);
+}
+
+// Send text message
+async function sendWhatsAppMessage(instanceName, phone, message) {
+  const cleanPhone = phone.replace(/\D/g,'');
+  return evoRequest('POST', `/message/sendText/${instanceName}`, {
+    number: '55' + cleanPhone,
+    text: message,
+  });
+}
+
+// Send automation message
+async function sendAutomation(lead, autoType) {
+  const clinic = currentClinic();
+  if (!clinic || !clinic.whatsapp_instance) return;
+  const templates = {
+    boasvindas: `Olá, ${lead.nome}! 👋 Aqui é da ${clinic.nome}. Vi que você tem interesse em ${lead.procedimento||'nossos serviços'}. Posso te ajudar a agendar uma avaliação gratuita?`,
+    confirmacao: `Ótimo, ${lead.nome}! ✅ Sua consulta está confirmada na ${clinic.nome}. Qualquer dúvida é só chamar!`,
+    lembrete: `Oi ${lead.nome}! 🦷 Lembrando que amanhã você tem consulta na ${clinic.nome}. Confirma presença? Responda SIM ou NÃO.`,
+    followup: `Oi ${lead.nome}, tudo bem? 😊 Ainda posso te ajudar a agendar sua avaliação de ${lead.procedimento||'nossos serviços'} sem compromisso. Quando seria melhor?`,
+    posconsulta: `Oi ${lead.nome}! Espero que tenha gostado da avaliação 😊 Ficou alguma dúvida sobre o tratamento? Posso te ajudar com formas de pagamento!`,
+  };
+  const msg = templates[autoType];
+  if (!msg || !lead.telefone) return;
+  try {
+    await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg);
+    toast('WhatsApp enviado para ' + lead.nome + '! ✓');
+  } catch(e) {
+    toast('Erro ao enviar WhatsApp', 'error');
+  }
+}
 const { createClient } = supabase;
 const db = createClient(SUPABASE_URL, SUPABASE_KEY);
 
@@ -1243,7 +1362,7 @@ function renderLeads(filter='all', search='') {
       <td><span style="font-size:12px;color:var(--text-secondary);"><i class="ti ${SOURCE_ICON[l.origem]||'ti-dots'}" style="margin-right:4px;"></i>${l.origem||'—'}</span></td>
       <td class="td-muted">${fmtDate(l.created_at)}</td>
       <td><div style="display:flex;gap:6px;">
-        <button class="btn btn-sm btn-ghost btn-icon" title="WhatsApp" onclick="toast('Abrindo WhatsApp...')"><i class="ti ti-brand-whatsapp" style="color:var(--gold);"></i></button>
+        <button class="btn btn-sm btn-ghost btn-icon" title="WhatsApp" onclick="openSendWA('${l.id}')"><i class="ti ti-brand-whatsapp" style="color:var(--gold);"></i></button>
         <button class="btn btn-sm btn-ghost btn-icon" title="Editar" onclick="openEditLead('${l.id}')"><i class="ti ti-edit"></i></button>
         <button class="btn btn-sm btn-ghost btn-icon" title="Ver" onclick="openLeadDetail('${l.id}')"><i class="ti ti-eye"></i></button>
       </div></td>
@@ -1349,7 +1468,7 @@ function renderClinicas() {
         <td class="td-mono">${STATE.leads.filter(l=>l.clinic_id===c.id).length}</td>
         <td><div style="display:flex;gap:6px;"><button class="btn btn-sm btn-primary" onclick="switchClinic(${i});showPage('dashboard')"><i class="ti ti-login"></i> Acessar</button></div></td>
       </tr>`).join('')
-    : '<tr><td colspan="6" style="text-align:center;padding:32px;color:var(--text-secondary);">Nenhuma clínica cadastrada ainda</td></tr>';
+    : '<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text-secondary);">Nenhuma clínica cadastrada ainda</td></tr>';
 }
 
 // ── MODAL LEAD ────────────────────────────────
@@ -1370,7 +1489,7 @@ function openLeadDetail(id) {
     </div>
     ${l.observacoes?`<div style="background:var(--bg-elevated);border-radius:10px;padding:12px;margin-bottom:16px;"><div style="font-size:10px;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Observações</div><div style="font-size:13px;color:var(--text-primary);">${l.observacoes}</div></div>`:''}
     <div style="display:flex;gap:8px;">
-      <button class="btn btn-primary" style="flex:1;" onclick="toast('Abrindo WhatsApp...');closeModal('modalLead')"><i class="ti ti-brand-whatsapp"></i> WhatsApp</button>
+      <button class="btn btn-primary" style="flex:1;" onclick="closeModal('modalLead');openSendWA('${l.id}')"><i class="ti ti-brand-whatsapp"></i> Enviar WhatsApp</button>
       <button class="btn" style="flex:1;" onclick="openEditLead('${l.id}');closeModal('modalLead')"><i class="ti ti-edit"></i> Editar</button>
     </div>`;
   openModal('modalLead');
@@ -1501,8 +1620,128 @@ async function saveNewClinic() {
   document.getElementById('navClinicasBadge').textContent = STATE.clinics.length;
   closeWizard();
   renderClinicSwitcher();
-  showPage('dashboard');
-  toast(`Clínica "${nome}" criada com sucesso! 🎉`);
+  showPage('clinicas');
+  toast(`Clínica "${nome}" criada! Conecte o WhatsApp em Gestão → Clínicas 🎉`);
+}
+
+// ── WHATSAPP FUNCTIONS ───────────────────────
+let currentWAInstance = null;
+let qrInterval = null;
+
+async function openWhatsAppConnect(clinicIdx) {
+  const clinic = STATE.clinics[clinicIdx];
+  if (!clinic) return;
+  currentWAInstance = clinic.nome.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,20) + '_' + clinic.id.slice(0,8);
+  document.getElementById('waStatus').textContent = '';
+  document.getElementById('qrCodeArea').style.display = 'none';
+  document.getElementById('btnGerarQR').style.display = '';
+  document.getElementById('btnGerarQR').innerHTML = '<i class="ti ti-qrcode"></i> Gerar QR Code';
+  // Check if already connected
+  try {
+    const status = await getInstanceStatus(currentWAInstance);
+    if (status?.instance?.state === 'open') {
+      document.getElementById('waStatus').innerHTML = '<span style="color:var(--gold);font-weight:600;"><i class="ti ti-check"></i> WhatsApp já conectado!</span>';
+      document.getElementById('btnGerarQR').innerHTML = '<i class="ti ti-refresh"></i> Reconectar';
+    }
+  } catch(e) {}
+  openModal('modalWhatsApp');
+}
+
+async function gerarQRCode() {
+  const btn = document.getElementById('btnGerarQR');
+  btn.innerHTML = '<i class="ti ti-loader"></i> Gerando...';
+  btn.disabled = true;
+  try {
+    // Create instance
+    await createWhatsAppInstance(currentWAInstance);
+    await new Promise(r => setTimeout(r, 2000));
+    // Get QR
+    const data = await getQRCode(currentWAInstance);
+    if (data?.base64) {
+      document.getElementById('qrCodeImg').src = data.base64;
+      document.getElementById('qrCodeArea').style.display = 'block';
+      document.getElementById('waStatus').textContent = 'Aguardando leitura do QR Code...';
+      btn.innerHTML = '<i class="ti ti-refresh"></i> Atualizar QR Code';
+      btn.disabled = false;
+      // Poll for connection
+      if (qrInterval) clearInterval(qrInterval);
+      qrInterval = setInterval(async () => {
+        try {
+          const s = await getInstanceStatus(currentWAInstance);
+          if (s?.instance?.state === 'open') {
+            clearInterval(qrInterval);
+            document.getElementById('waStatus').innerHTML = '<span style="color:var(--gold);font-weight:600;">✅ WhatsApp conectado com sucesso!</span>';
+            document.getElementById('qrCodeArea').style.display = 'none';
+            document.getElementById('btnGerarQR').style.display = 'none';
+            // Save instance name to clinic
+            const clinic = STATE.clinics.find(c => (c.nome.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,20) + '_' + c.id.slice(0,8)) === currentWAInstance);
+            if (clinic) {
+              await db.from('clinicas').update({whatsapp_instance: currentWAInstance}).eq('id', clinic.id);
+              clinic.whatsapp_instance = currentWAInstance;
+              renderClinicas();
+              toast('WhatsApp conectado! 🎉');
+            }
+          }
+        } catch(e) {}
+      }, 3000);
+    } else {
+      document.getElementById('waStatus').textContent = 'Erro ao gerar QR Code. Tente novamente.';
+      btn.innerHTML = '<i class="ti ti-qrcode"></i> Tentar novamente';
+      btn.disabled = false;
+    }
+  } catch(e) {
+    document.getElementById('waStatus').textContent = 'Erro: ' + e.message;
+    btn.innerHTML = '<i class="ti ti-qrcode"></i> Tentar novamente';
+    btn.disabled = false;
+  }
+}
+
+function openSendWA(leadId) {
+  const l = STATE.leads.find(x=>x.id===leadId);
+  if (!l) return;
+  const clinic = currentClinic();
+  if (!clinic?.whatsapp_instance) {
+    toast('Conecte o WhatsApp primeiro em Gestão → Clínicas!', 'error');
+    return;
+  }
+  if (!l.telefone) {
+    toast('Este lead não tem telefone cadastrado!', 'error');
+    return;
+  }
+  document.getElementById('sendWALeadId').value = leadId;
+  document.getElementById('sendWALeadInfo').innerHTML = `<strong style="color:var(--text-primary);">${l.nome}</strong> · ${l.telefone} · ${l.procedimento||'—'}`;
+  updateWAPreview();
+  openModal('modalSendWA');
+}
+
+function updateWAPreview() {
+  const l = STATE.leads.find(x=>x.id===document.getElementById('sendWALeadId').value);
+  const clinic = currentClinic();
+  const type = document.getElementById('sendWATemplate').value;
+  const templates = {
+    boasvindas: `Olá, ${l?.nome||'{nome}'}! 👋 Aqui é da ${clinic?.nome||'{clinica}'}. Vi que você tem interesse em ${l?.procedimento||'{procedimento}'}. Posso te ajudar a agendar uma avaliação gratuita?`,
+    confirmacao: `Ótimo, ${l?.nome||'{nome}'}! ✅ Sua consulta está confirmada na ${clinic?.nome||'{clinica}'}. Qualquer dúvida é só chamar!`,
+    lembrete: `Oi ${l?.nome||'{nome}'}! 🦷 Lembrando que amanhã você tem consulta na ${clinic?.nome||'{clinica}'}. Confirma presença? Responda SIM ou NÃO.`,
+    followup: `Oi ${l?.nome||'{nome}'}, tudo bem? 😊 Ainda posso te ajudar a agendar sua avaliação de ${l?.procedimento||'{procedimento}'} sem compromisso. Quando seria melhor?`,
+    posconsulta: `Oi ${l?.nome||'{nome}'}! Espero que tenha gostado da avaliação 😊 Ficou alguma dúvida sobre o tratamento? Posso te ajudar com formas de pagamento!`,
+    custom: '',
+  };
+  document.getElementById('sendWAMsg').value = templates[type] || '';
+}
+
+async function confirmarEnvioWA() {
+  const leadId = document.getElementById('sendWALeadId').value;
+  const l = STATE.leads.find(x=>x.id===leadId);
+  const msg = document.getElementById('sendWAMsg').value.trim();
+  const clinic = currentClinic();
+  if (!msg) { toast('Digite uma mensagem', 'error'); return; }
+  try {
+    await sendWhatsAppMessage(clinic.whatsapp_instance, l.telefone, msg);
+    closeModal('modalSendWA');
+    toast(`WhatsApp enviado para ${l.nome}! ✓`);
+  } catch(e) {
+    toast('Erro ao enviar: ' + e.message, 'error');
+  }
 }
 
 // ── INIT ──────────────────────────────────────
