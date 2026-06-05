@@ -2818,7 +2818,7 @@ function startInboxPolling() {
       await loadInboxChats();
       if (INBOX.activeChat) await loadChatMessages(INBOX.activeChat);
     }
-  }, 8000);
+}, 3000);
 }
 
 function openNewChatModal() {
