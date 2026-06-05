@@ -94,7 +94,7 @@ console.log('[webhook] evento detectado:', evento);
           'Authorization': `Bearer ${SUPABASE_KEY}`,
           'Prefer': 'return=minimal',
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, message_id: msgId }),
       });
 
       if (!resp.ok) {
