@@ -2611,20 +2611,78 @@ function renderMessages(msgs, chat) {
       lastDate = dateStr;
     }
     const timeStr = ts.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
-    const text = m.message?.conversation || m.message?.extendedTextMessage?.text || '';
-    const imgUrl = m.message?.imageMessage ? '📷 Imagem' : '';
-    const audioMsg = m.message?.audioMessage;
+    const msg = m.message || {};
     let bubbleContent = '';
-    if (audioMsg) {
-      const bars = Array.from({length:20}, (_,i) => `<div class="audio-bar" style="height:${6+Math.sin(i*0.8)*8}px;"></div>`).join('');
-      bubbleContent = `<div class="msg-audio"><button class="audio-play" onclick="toast('Áudio — baixe o app para ouvir')"><i class="ti ti-player-play"></i></button><div class="audio-wave">${bars}</div><span style="font-size:10px;opacity:0.7;">Áudio</span></div>`;
-    } else if (imgUrl) {
-      bubbleContent = `<div style="font-size:12px;"><i class="ti ti-photo" style="margin-right:4px;"></i>${imgUrl}</div>`;
-    } else if (text) {
-      bubbleContent = `<div>${text.replace(/\n/g,'<br>').replace(/\*(.*?)\*/g,'<strong>$1</strong>')}</div>`;
-    } else {
-      bubbleContent = '<div style="opacity:0.5;font-size:11px;">📎 Mídia</div>';
+
+    // IMAGEM
+    if (msg.imageMessage) {
+      const caption = msg.imageMessage.caption || '';
+      const url = msg.imageMessage.url || '';
+      if (url) {
+        bubbleContent = `<div class="msg-media"><img src="${url}" style="max-width:240px;max-height:240px;border-radius:8px;display:block;cursor:pointer;" onclick="window.open('${url}','_blank')" onerror="this.style.display='none'"/>${caption ? `<div style="font-size:13px;margin-top:4px;">${caption}</div>` : ''}</div>`;
+      } else {
+        bubbleContent = `<div style="font-size:12px;opacity:0.6;">🖼️ Imagem</div>`;
+      }
     }
+    // VÍDEO
+    else if (msg.videoMessage) {
+      const caption = msg.videoMessage.caption || '';
+      const url = msg.videoMessage.url || '';
+      if (url) {
+        bubbleContent = `<div class="msg-media"><video controls style="max-width:240px;max-height:200px;border-radius:8px;display:block;"><source src="${url}"></video>${caption ? `<div style="font-size:13px;margin-top:4px;">${caption}</div>` : ''}</div>`;
+      } else {
+        bubbleContent = `<div style="font-size:12px;opacity:0.6;">🎬 Vídeo</div>`;
+      }
+    }
+    // ÁUDIO
+    else if (msg.audioMessage) {
+      const url = msg.audioMessage.url || '';
+      if (url) {
+        bubbleContent = `<div class="msg-audio-player"><audio controls style="width:200px;height:36px;"><source src="${url}"></audio></div>`;
+      } else {
+        const bars = Array.from({length:20}, (_,i) => `<div class="audio-bar" style="height:${6+Math.sin(i*0.8)*8}px;"></div>`).join('');
+        bubbleContent = `<div class="msg-audio"><button class="audio-play" onclick="toast('Áudio — baixe o app para ouvir')"><i class="ti ti-player-play"></i></button><div class="audio-wave">${bars}</div><span style="font-size:10px;opacity:0.6;">🎵</span></div>`;
+      }
+    }
+    // STICKER (FIGURINHA)
+    else if (msg.stickerMessage) {
+      const url = msg.stickerMessage.url || '';
+      if (url) {
+        bubbleContent = `<div class="msg-media"><img src="${url}" style="width:120px;height:120px;object-fit:contain;" onerror="this.parentElement.innerHTML='😄 Figurinha'"/></div>`;
+      } else {
+        bubbleContent = `<div style="font-size:12px;opacity:0.6;">😄 Figurinha</div>`;
+      }
+    }
+    // DOCUMENTO
+    else if (msg.documentMessage) {
+      const fileName = msg.documentMessage.fileName || 'Documento';
+      const url = msg.documentMessage.url || '';
+      bubbleContent = `<div class="msg-document" style="display:flex;align-items:center;gap:10px;padding:8px;background:rgba(255,255,255,0.05);border-radius:8px;min-width:180px;">
+        <i class="ti ti-file" style="font-size:28px;color:var(--gold);"></i>
+        <div style="flex:1;min-width:0;"><div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${fileName}</div>
+        ${url ? `<a href="${url}" target="_blank" style="font-size:11px;color:var(--gold);">Baixar</a>` : '<span style="font-size:11px;opacity:0.5;">Indisponível</span>'}</div></div>`;
+    }
+    // LOCALIZAÇÃO
+    else if (msg.locationMessage) {
+      const lat = msg.locationMessage.degreesLatitude;
+      const lng = msg.locationMessage.degreesLongitude;
+      bubbleContent = `<div class="msg-media"><a href="https://maps.google.com/?q=${lat},${lng}" target="_blank"><img src="https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=15&size=240x120&markers=${lat},${lng}&key=nokey" style="max-width:240px;border-radius:8px;" onerror="this.parentElement.innerHTML='📍 <a href=https://maps.google.com/?q=${lat},${lng} target=_blank>Ver localização</a>'"/></a></div>`;
+    }
+    // TEXTO
+    else {
+      const text = msg.conversation || msg.extendedTextMessage?.text || '';
+      if (text) {
+        const formatted = text
+          .replace(/\n/g,'<br>')
+          .replace(/\*(.*?)\*/g,'<strong>$1</strong>')
+          .replace(/_(.*?)_/g,'<em>$1</em>')
+          .replace(/~(.*?)~/g,'<del>$1</del>');
+        bubbleContent = `<div>${formatted}</div>`;
+      } else {
+        bubbleContent = `<div style="opacity:0.5;font-size:11px;">📎 Mídia</div>`;
+      }
+    }
+
     html += `<div class="msg-row ${isSent?'sent':''}">
       <div class="msg-bubble ${isSent?'sent':'received'}">${bubbleContent}<div class="msg-time">${timeStr}${isSent?' ✓✓':''}</div></div>
     </div>`;
