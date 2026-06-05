@@ -1,6 +1,6 @@
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(200).json({ ok: true });
-  const MP_TOKEN = 'TEST-7839675538724549-060416-8256bbabfed334fce2b267ac5d425236-299839061';
+  APP_USR-7839675538724549-060416-116d0894224118f6f2cd89fcc457d0e7-299839061
   const SUPABASE_URL = 'https://zcwntpkiispbhjjgidih.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_G6xEiLO4lcNaJafm9RA2tA_QLf4E2FV';
   try {
