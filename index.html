@@ -1342,8 +1342,13 @@ function showExpiringBanner() {
     font-size:13px;font-weight:600;font-family:var(--font);
   `;
   banner.innerHTML = `
-    ⚠️ Sua assinatura vence em
-
+⚠️ Sua assinatura vence em breve! Renove agora para não perder o acesso.
+    <a href="/planos.html" style="background:#0A0A0B;color:#C9A84C;padding:4px 12px;border-radius:6px;text-decoration:none;font-size:12px;">Renovar →</a>
+    <button onclick="this.parentElement.remove();document.getElementById('appPage').style.marginTop=''" style="background:none;border:none;cursor:pointer;margin-left:8px;font-size:16px;color:#0A0A0B;">×</button>
+  `;
+  document.body.prepend(banner);
+  document.getElementById('appPage').style.marginTop = '42px';
+}
 // ── SUPABASE DATA ─────────────────────────────
 async function loadClinics() {
   const { data, error } = await db.from('clinicas').select('*').order('created_at', { ascending: true });
