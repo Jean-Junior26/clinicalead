@@ -2423,10 +2423,7 @@ async function loadInboxChats() {
           unread: 0,
           lead,
           messages: [],
-        });
-      }
-   
-    }
+
     const totalUnread = INBOX.chats.reduce((s,c) => s + c.unread, 0);
     const badge = document.getElementById('inboxUnreadBadge');
     if (badge) { badge.textContent = totalUnread; badge.style.display = totalUnread > 0 ? '' : 'none'; }
