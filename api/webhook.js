@@ -8,7 +8,9 @@ export default async function handler(req, res) {
     const body = req.body;
 
     // Aceita "messages.upsert" E "MESSAGES_UPSERT"
-    const evento = (body?.event || body?.type || '').toLowerCase().replace('.', '_');
+console.log('[webhook] body recebido:', JSON.stringify(body).slice(0, 500));
+const evento = (body?.event || body?.type || '').toLowerCase().replace('.', '_');
+console.log('[webhook] evento detectado:', evento);
     if (evento !== 'messages_upsert') {
       return res.status(200).json({ ok: true, ignorado: body?.event });
     }
