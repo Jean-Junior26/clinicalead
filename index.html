@@ -2776,7 +2776,25 @@ function createLeadFromChat(chatId) {
   openModal('modalNewLead');
 }
 
-// ── WEBHOOK AUTO SETUP ───────────────────────
+async function reconectarWhatsApp(instanceName) {
+  toast('Gerando QR code...');
+  try {
+    const data = await evoRequest('GET', `/instance/connect/${instanceName}`);
+    if (data.base64) {
+      const img = document.createElement('img');
+      img.src = data.base64;
+      img.style = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;width:300px;height:300px;background:white;padding:16px;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.8);cursor:pointer;';
+      img.title = 'Clique para fechar';
+      img.onclick = () => img.remove();
+      document.body.appendChild(img);
+      toast('Escaneie o QR code com o WhatsApp!');
+    } else {
+      toast('Instância já conectada!');
+    }
+  } catch(e) {
+    toast('Erro ao gerar QR code', 'error');
+  }
+}// ── WEBHOOK AUTO SETUP ───────────────────────
 async function setupWebhookManual(instanceName) {
   toast('Configurando webhook...');
   try {
