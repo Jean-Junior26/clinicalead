@@ -2,7 +2,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(200).json({ ok: true });
 
   const SUPABASE_URL = 'https://zcwntpkiispbhjjgidih.supabase.co';
-  const SUPABASE_KEY = 'sb_publishable_G6xEiLO4lcNaJafm9RA2tA_QLf4E2FV';
+const SUPABASE_KEY = 'sb_secret_LyMbc41HZWqYB--Xz8MsWA_M8gC_xSD';
 
   try {
     const body = req.body;
