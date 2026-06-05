@@ -99,7 +99,7 @@ const msgId = key?.id || null;
           'Authorization': `Bearer ${SUPABASE_KEY}`,
          'Prefer': 'return=minimal,resolution=ignore-duplicates',
         },
-        body: JSON.stringify({ ...payload, message_id: msgId }),
+       JSON.stringify({ ...payload, ...payload_extra, message_id: msgId }),
       });
 
       if (!resp.ok) {
