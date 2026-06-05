@@ -55,7 +55,8 @@ console.log('[webhook] evento detectado:', evento);
         content = m.conversation;
       } else if (m.extendedTextMessage) {
         content = m.extendedTextMessage.text || '';
-  } else if (m.imageMessage) {
+let payload_extra = {};
+      } else if (m.imageMessage) {
         content = m.imageMessage.caption || '📷 Imagem';
         type = 'image';
         payload_extra = { media_url: m.imageMessage.url || null };
