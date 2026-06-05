@@ -4,14 +4,26 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>ClinicaLead — Escolha seu Plano</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Segoe UI', sans-serif; background: #0a0a0a; color: #fff; min-height: 100vh; }
+  .loading-screen { position: fixed; inset: 0; background: #0a0a0a; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 16px; z-index: 9999; }
+  .loading-logo { width: 52px; height: 52px; border-radius: 14px; background: #d4af37; display: flex; align-items: center; justify-content: center; font-size: 26px; animation: pulse 1.5s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{box-shadow:0 0 20px rgba(212,175,55,0.3)} 50%{box-shadow:0 0 40px rgba(212,175,55,0.6)} }
+  .loading-text { font-size: 14px; color: #666; }
   .header { text-align: center; padding: 48px 20px 24px; }
   .logo { font-size: 28px; font-weight: 800; color: #fff; }
   .logo span { color: #d4af37; }
   .subtitle { color: #888; margin-top: 8px; font-size: 15px; }
   .trial-badge { display: inline-block; background: #d4af37; color: #000; font-weight: 700; padding: 6px 18px; border-radius: 20px; font-size: 13px; margin-top: 12px; }
+  .user-bar { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 10px 20px; background: rgba(212,175,55,0.05); border-bottom: 1px solid rgba(212,175,55,0.15); font-size: 13px; color: #888; }
+  .user-bar strong { color: #d4af37; }
+  .user-bar a { color: #666; cursor: pointer; text-decoration: underline; font-size: 12px; }
+  .msg-banner { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 12px 20px; margin: 16px auto; max-width: 600px; border-radius: 10px; font-size: 13px; font-weight: 500; }
+  .msg-banner.info { background: rgba(91,141,184,0.15); border: 1px solid rgba(91,141,184,0.3); color: #8ABBE8; }
+  .msg-banner.success { background: rgba(212,175,55,0.1); border: 1px solid rgba(212,175,55,0.3); color: #d4af37; }
+  .msg-banner.error { background: rgba(192,98,74,0.12); border: 1px solid rgba(192,98,74,0.3); color: #E8907A; }
   .periodo-tabs { display: flex; justify-content: center; gap: 8px; margin: 32px 20px 0; }
   .periodo-btn { padding: 10px 24px; border-radius: 8px; border: 1px solid #333; background: transparent; color: #888; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s; }
   .periodo-btn.active { background: #d4af37; color: #000; border-color: #d4af37; }
@@ -34,10 +46,33 @@
   .btn-plan.primary:hover { background: #c9a227; }
   .btn-plan.secondary { background: transparent; border: 1px solid #333; color: #fff; }
   .btn-plan.secondary:hover { border-color: #d4af37; color: #d4af37; }
-  .loading { display: none; text-align: center; padding: 20px; color: #888; }
+  .btn-plan:disabled { opacity: 0.6; cursor: not-allowed; }
+  .current-plan-badge { position: absolute; top: -12px; right: 16px; background: #1c1c20; border: 1px solid rgba(212,175,55,0.4); color: #d4af37; font-size: 10px; font-weight: 700; padding: 3px 10px; border-radius: 20px; }
+  .toast { position: fixed; bottom: 24px; right: 24px; background: #1c1c20; color: #fff; border: 1px solid rgba(212,175,55,0.3); padding: 12px 18px; border-radius: 10px; font-size: 13px; font-weight: 500; box-shadow: 0 8px 32px rgba(0,0,0,0.6); z-index: 3000; transform: translateY(80px); opacity: 0; transition: all 0.3s ease; }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .faq { max-width: 700px; margin: 0 auto 60px; padding: 0 20px; }
+  .faq h3 { text-align: center; font-size: 20px; font-weight: 700; margin-bottom: 24px; color: #fff; }
+  .faq-item { border-bottom: 1px solid #1e1e1e; padding: 16px 0; }
+  .faq-item summary { cursor: pointer; font-size: 14px; font-weight: 600; color: #ccc; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+  .faq-item summary::after { content: '+'; color: #d4af37; font-size: 18px; }
+  .faq-item[open] summary::after { content: '−'; }
+  .faq-item p { margin-top: 10px; font-size: 13px; color: #666; line-height: 1.7; }
 </style>
 </head>
 <body>
+
+<div class="loading-screen" id="loadingScreen">
+  <div class="loading-logo">🦷</div>
+  <div class="loading-text">Verificando sua conta...</div>
+</div>
+
+<div class="user-bar" id="userBar" style="display:none;">
+  Logado como <strong id="userEmail">—</strong>
+  <a onclick="fazerLogout()">Sair</a>
+</div>
+
+<div id="msgBanner"></div>
+
 <div class="header">
   <div class="logo">Clínica<span>Lead</span></div>
   <div class="subtitle">Escolha o plano ideal para sua clínica</div>
@@ -64,7 +99,7 @@
       <li>Agenda integrada</li>
       <li>Automações</li>
     </ul>
-    <button class="btn-plan secondary" onclick="assinar('solo')">Começar grátis</button>
+    <button class="btn-plan secondary" id="btn-solo" onclick="assinar('solo')">Começar grátis</button>
   </div>
 
   <div class="plan-card popular" id="card-clinica">
@@ -81,7 +116,7 @@
       <li>Agenda integrada</li>
       <li>Automações</li>
     </ul>
-    <button class="btn-plan primary" onclick="assinar('clinica')">Começar grátis</button>
+    <button class="btn-plan primary" id="btn-clinica" onclick="assinar('clinica')">Começar grátis</button>
   </div>
 
   <div class="plan-card" id="card-rede">
@@ -97,13 +132,38 @@
       <li>Agenda integrada</li>
       <li>Automações</li>
     </ul>
-    <button class="btn-plan secondary" onclick="assinar('rede')">Começar grátis</button>
+    <button class="btn-plan secondary" id="btn-rede" onclick="assinar('rede')">Começar grátis</button>
   </div>
 </div>
+
+<div class="faq">
+  <h3>Dúvidas frequentes</h3>
+  <details class="faq-item">
+    <summary>Como funciona o período gratuito?</summary>
+    <p>Você tem 7 dias para testar o plano escolhido sem cobrança. Pode cancelar a qualquer momento antes do fim do período e não será cobrado nada.</p>
+  </details>
+  <details class="faq-item">
+    <summary>Posso mudar de plano depois?</summary>
+    <p>Sim! Você pode fazer upgrade ou downgrade do plano a qualquer momento pelo seu painel de assinatura.</p>
+  </details>
+  <details class="faq-item">
+    <summary>Quais formas de pagamento são aceitas?</summary>
+    <p>Aceitamos cartão de crédito, boleto e Pix via Mercado Pago, de forma 100% segura.</p>
+  </details>
+  <details class="faq-item">
+    <summary>O que acontece se eu não pagar?</summary>
+    <p>Sua conta fica suspensa temporariamente. Você pode regularizar o pagamento a qualquer momento para reativar o acesso.</p>
+  </details>
+</div>
+
+<div class="toast" id="toast"></div>
 
 <script>
 const SUPABASE_URL = 'https://zcwntpkiispbhjjgidih.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_G6xEiLO4lcNaJafm9RA2tA_QLf4E2FV';
+
+const { createClient } = supabase;
+const db = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const precos = {
   solo:    { mensal: 119.90, semestral: 109.90, anual: 89.90 },
@@ -118,13 +178,142 @@ const totais = {
 };
 
 let periodoAtual = 'mensal';
-let userData = null;
-let clinicData = null;
+let currentUser = null;
 
 async function init() {
-  // Pega sessão do Supabase
-  const sessionStr = Object.keys(localStorage).find(k => k.includes('auth-token'));
-  if (!sessionStr) { window.location.href = '/'; return; }
+  const { data: { session } } = await db.auth.getSession();
+
+  if (!session) {
+    window.location.href = '/?redirect=planos';
+    return;
+  }
+
+  currentUser = session.user;
+  document.getElementById('userBar').style.display = 'flex';
+  document.getElementById('userEmail').textContent = currentUser.email;
 
   const params = new URLSearchParams(window.location.search);
-  const c
+  const reason = params.get('reason');
+  const isNew = params.get('new');
+  const paymentStatus = params.get('payment');
+
+  if (paymentStatus === 'success') {
+    showBanner('🎉 Pagamento confirmado! Redirecionando para o sistema...', 'success');
+    setTimeout(() => window.location.href = '/', 3000);
+  } else if (paymentStatus === 'pending') {
+    showBanner('⏳ Pagamento pendente. Assim que confirmado, seu acesso será liberado.', 'info');
+  } else if (paymentStatus === 'failure') {
+    showBanner('❌ Houve um problema com o pagamento. Tente novamente abaixo.', 'error');
+  } else if (reason === 'expired') {
+    showBanner('⚠️ Sua assinatura expirou. Renove para continuar usando o ClinicaLead.', 'error');
+  } else if (reason === 'none') {
+    showBanner('👋 Escolha um plano para começar a usar o ClinicaLead!', 'info');
+  } else if (isNew) {
+    showBanner('🎉 Conta criada! Agora escolha seu plano para começar.', 'success');
+  }
+
+  await carregarAssinaturaAtual();
+  document.getElementById('loadingScreen').style.display = 'none';
+}
+
+async function carregarAssinaturaAtual() {
+  try {
+    const { data } = await db
+      .from('assinaturas')
+      .select('*')
+      .eq('user_id', currentUser.id)
+      .in('status', ['active', 'authorized', 'pending'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (data) marcarPlanoAtual(data.plano);
+  } catch(e) {}
+}
+
+function marcarPlanoAtual(plano) {
+  const p = (plano || '').toLowerCase();
+  ['solo','clinica','rede'].forEach(nome => {
+    const card = document.getElementById('card-' + nome);
+    const btn = document.getElementById('btn-' + nome);
+    const old = card.querySelector('.current-plan-badge');
+    if (old) old.remove();
+    if (p === nome || p.includes(nome)) {
+      const badge = document.createElement('div');
+      badge.className = 'current-plan-badge';
+      badge.textContent = '✓ Plano atual';
+      card.appendChild(badge);
+      btn.textContent = 'Gerenciar plano';
+      btn.onclick = () => window.open('https://www.mercadopago.com.br/subscriptions', '_blank');
+    }
+  });
+}
+
+function setPeriodo(p) {
+  periodoAtual = p;
+  document.querySelectorAll('.periodo-btn').forEach((btn, i) => {
+    btn.classList.toggle('active', ['mensal','semestral','anual'][i] === p);
+  });
+  ['solo','clinica','rede'].forEach(plano => {
+    document.getElementById('price-' + plano).textContent = 'R$ ' + precos[plano][p].toFixed(2).replace('.',',');
+    document.getElementById('total-' + plano).textContent = totais[plano][p];
+  });
+}
+
+async function assinar(plano) {
+  const btn = document.getElementById('btn-' + plano);
+  btn.disabled = true;
+  btn.textContent = '⏳ Aguarde...';
+
+  try {
+    const resp = await fetch('/api/create-subscription', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: currentUser.id,
+        email: currentUser.email,
+        plano,
+        periodo: periodoAtual,
+        valor: precos[plano][periodoAtual],
+        back_urls: {
+          success: window.location.origin + '/planos.html?payment=success',
+          failure: window.location.origin + '/planos.html?payment=failure',
+          pending: window.location.origin + '/planos.html?payment=pending',
+        }
+      }),
+    });
+
+    const data = await resp.json();
+
+    if (data.init_point || data.sandbox_init_point) {
+      window.location.href = data.init_point || data.sandbox_init_point;
+    } else {
+      throw new Error('Link não encontrado');
+    }
+  } catch(e) {
+    toast('Erro ao processar. Tente novamente.');
+    btn.disabled = false;
+    btn.textContent = 'Começar grátis';
+  }
+}
+
+async function fazerLogout() {
+  await db.auth.signOut();
+  window.location.href = '/';
+}
+
+function showBanner(msg, type = 'info') {
+  document.getElementById('msgBanner').innerHTML = `<div class="msg-banner ${type}">${msg}</div>`;
+}
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 3500);
+}
+
+init();
+</script>
+</body>
+</html>
