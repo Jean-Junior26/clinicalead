@@ -285,8 +285,8 @@ async function assinar(plano) {
 
     const data = await resp.json();
 
-    if (data.init_point || data.sandbox_init_point) {
-      window.location.href = data.init_point || data.sandbox_init_point;
+  if (data.url || data.init_point || data.sandbox_init_point) {
+          window.location.href = data.url || data.init_point || data.sandbox_init_point;
     } else {
       throw new Error('Link não encontrado');
     }
