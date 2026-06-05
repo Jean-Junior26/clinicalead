@@ -2502,6 +2502,25 @@ async function openChat(chatId) {
   renderInboxList();
   renderChatHeader(chat);
   await loadChatMessages(chat);
+  // Busca foto de perfil só quando abre a conversa
+  if (!chat.profilePic && chat.phone) {
+    const clinic2 = currentClinic();
+    if (clinic2?.whatsapp_instance) {
+      try {
+        const r = await fetch(`https://evolution-api-production-b649.up.railway.app/chat/fetchProfilePictureUrl/${clinic2.whatsapp_instance}`, {
+          method: 'POST',
+          headers: { 'apikey': '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae000', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ number: chat.phone })
+        });
+        const d = await r.json();
+        if (d?.profilePictureUrl) {
+          chat.profilePic = d.profilePictureUrl;
+          renderInboxList();
+          renderChatHeader(chat);
+        }
+      } catch(e) {}
+    }
+  }
 }
 
 function renderChatHeader(chat) {
