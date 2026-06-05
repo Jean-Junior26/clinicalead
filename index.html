@@ -2059,7 +2059,7 @@ function renderClinicas() {
         <td class="td-muted">${c.telefone||'—'}</td>
         <td><span class="badge ${c.plano==='Pro'?'badge-gold':'badge-gray'}">${c.plano||'Pro'}</span></td>
         <td class="td-mono">${STATE.leads.filter(l=>l.clinic_id===c.id).length}</td>
-        <td>${c.whatsapp_instance ? '<span class="badge badge-gold"><i class="ti ti-check"></i> Conectado</span>' : '<button class="btn btn-sm" onclick="openWhatsAppConnect('+i+')"><i class="ti ti-brand-whatsapp"></i> Conectar</button>'}</td>
+        <td>${c.whatsapp_instance ? `<span class="badge badge-gold"><i class="ti ti-check"></i> Conectado</span> <button class="btn btn-sm" onclick="reconectarWhatsApp('${c.whatsapp_instance}')" title="Reconectar"><i class="ti ti-refresh"></i></button>` : '<button class="btn btn-sm" onclick="openWhatsAppConnect('+i+')"><i class="ti ti-brand-whatsapp"></i> Conectar</button>'}</td>
         <td><div style="display:flex;gap:6px;">
   <button class="btn btn-sm btn-primary" onclick="switchClinic(${i});showPage('dashboard')"><i class="ti ti-login"></i> Acessar</button>
   ${c.whatsapp_instance ? `<button class="btn btn-sm" onclick="setupWebhookManual('${c.whatsapp_instance}')" title="Configurar webhook"><i class="ti ti-webhook"></i></button>` : ''}
