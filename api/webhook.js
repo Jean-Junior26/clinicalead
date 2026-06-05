@@ -75,7 +75,7 @@ console.log('[webhook] evento detectado:', evento);
       }
 
       if (!phone || !content) continue;
-
+const msgId = key?.id || null;
       const payload = {
         clinic_id,
         phone,
