@@ -1975,7 +1975,81 @@ function renderRelatorios() {
   document.getElementById('repAutos').innerHTML = `<div class="stat-row"><span class="stat-label">Automações ativas</span><span class="stat-val" style="color:var(--gold);">${activeAutos} de ${STATE.automations.length}</span></div><div class="stat-row"><span class="stat-label">Canal principal</span><span class="stat-val">WhatsApp</span></div>`;
 }
 
-// ── CLÍNICAS ──────────────────────────────────
+// ── MEU PLANO ─────────────────────────────────
+async function renderMeuPlano() {
+  const planoNomes = { solo: 'Solo', clinica: 'Clínica', rede: 'Rede' };
+  const planoRecursosList = {
+    solo:    ['1 usuário', '1 clínica', 'Inbox WhatsApp', 'Funil de leads', 'Agenda integrada', 'Automações'],
+    clinica: ['Até 3 usuários', '1 clínica', 'Inbox WhatsApp', 'Funil de leads', 'Agenda integrada', 'Automações'],
+    rede:    ['Usuários ilimitados', 'Múltiplas clínicas', 'Inbox WhatsApp', 'Funil de leads', 'Agenda integrada', 'Automações'],
+  };
+  try {
+    const { data, error } = await db
+      .from('assinaturas')
+      .select('*')
+      .eq('user_id', STATE.user.id)
+      .order('created_at', { ascending: false })
+      .limit(5);
+
+    if (error || !data || data.length === 0) {
+      document.getElementById('planoNome').textContent = 'Sem plano ativo';
+      document.getElementById('planoStatus').textContent = 'Assine um plano para continuar usando o ClinicaLead';
+      document.getElementById('planoBadge').innerHTML = '<a href="/planos.html" class="btn btn-primary">Ver planos →</a>';
+      document.getElementById('planoRecursos').innerHTML = '<div style="color:var(--text-secondary);font-size:13px;">Sem plano ativo</div>';
+      document.getElementById('planoHistorico').innerHTML = '<div style="color:var(--text-secondary);font-size:13px;">Nenhum pagamento encontrado</div>';
+      return;
+    }
+
+    const assinatura = data[0];
+    const plano = assinatura.plano || 'clinica';
+    const periodo = assinatura.periodo || 'mensal';
+    const status = assinatura.status;
+    const expires = assinatura.expires_at ? new Date(assinatura.expires_at) : null;
+    const daysLeft = expires ? Math.ceil((expires - new Date()) / (1000 * 60 * 60 * 24)) : null;
+
+    document.getElementById('planoNome').textContent = 'Plano ' + (planoNomes[plano] || plano);
+    document.getElementById('planoStatus').textContent = expires ? 'Vence em ' + expires.toLocaleDateString('pt-BR') : 'Ativo';
+    document.getElementById('planoPeriodo').textContent = periodo.charAt(0).toUpperCase() + periodo.slice(1);
+    document.getElementById('planoVencimento').textContent = expires ? expires.toLocaleDateString('pt-BR') : '—';
+
+    let statusHtml = '';
+    if (status === 'active' || status === 'active') {
+      if (daysLeft !== null && daysLeft <= 7) {
+        statusHtml = `<span class="badge badge-coral">Vence em ${daysLeft} dias</span>`;
+      } else {
+        statusHtml = '<span class="badge badge-gold">✓ Ativo</span>';
+      }
+    } else if (status === 'pending') {
+      statusHtml = '<span class="badge badge-amber">⏳ Pendente</span>';
+    } else {
+      statusHtml = '<span class="badge badge-coral">Inativo</span>';
+    }
+    document.getElementById('planoStatusBadge').innerHTML = statusHtml;
+    document.getElementById('planoBadge').innerHTML = statusHtml;
+
+    const recursos = planoRecursosList[plano] || planoRecursosList.clinica;
+    document.getElementById('planoRecursos').innerHTML = recursos.map(r =>
+      `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border-subtle);font-size:13px;color:var(--text-primary);">
+        <i class="ti ti-check" style="color:var(--gold);font-size:15px;"></i>${r}
+      </div>`
+    ).join('');
+
+    document.getElementById('planoHistorico').innerHTML = data.map(a =>
+      `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border-subtle);font-size:13px;">
+        <div>
+          <div style="font-weight:500;color:var(--text-primary);">Plano ${planoNomes[a.plano]||a.plano} — ${a.periodo}</div>
+          <div style="font-size:11px;color:var(--text-secondary);margin-top:2px;">${new Date(a.created_at).toLocaleDateString('pt-BR')}</div>
+        </div>
+        <span class="badge ${a.status==='active'?'badge-gold':'badge-gray'}">${a.status==='active'?'Ativo':a.status}</span>
+      </div>`
+    ).join('');
+
+  } catch(e) {
+    document.getElementById('planoNome').textContent = 'Erro ao carregar';
+    console.error(e);
+  }
+}
+  // ── CLÍNICAS ──────────────────────────────────
 function renderClinicas() {
   document.getElementById('clinicasList').innerHTML = STATE.clinics.length
     ? STATE.clinics.map((c,i)=>`<tr>
