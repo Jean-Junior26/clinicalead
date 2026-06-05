@@ -92,7 +92,7 @@ const msgId = key?.id || null;
           'Content-Type': 'application/json',
           'apikey': SUPABASE_KEY,
           'Authorization': `Bearer ${SUPABASE_KEY}`,
-          'Prefer': 'return=minimal',
+         'Prefer': 'return=minimal,resolution=ignore-duplicates',
         },
         body: JSON.stringify({ ...payload, message_id: msgId }),
       });
