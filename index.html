@@ -2425,9 +2425,7 @@ async function loadInboxChats() {
           messages: [],
         });
       }
-    });
-
-      }));
+   
     }
     const totalUnread = INBOX.chats.reduce((s,c) => s + c.unread, 0);
     const badge = document.getElementById('inboxUnreadBadge');
