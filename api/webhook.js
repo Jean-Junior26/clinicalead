@@ -78,8 +78,7 @@ console.log('[webhook] evento detectado:', evento);
       } else {
         content = '[mídia]';
       }
-let payload_extra = {};
-    let payload_extra = {};  if (!phone || !content) continue;
+if (!phone || !content) continue;
 const msgId = key?.id || null;
       const payload = {
         clinic_id,
