@@ -1243,8 +1243,10 @@ const role = document.getElementById('regEmail').value.trim() === 'jeanjunior.di
   btn.innerHTML = '<i class="ti ti-user-plus"></i> Criar conta'; btn.disabled = false;
   if (error) { errEl.textContent = error.message; errEl.classList.add('show'); return; }
   errEl.classList.remove('show');
-  toast('Conta criada! Verifique seu e-mail para confirmar.');
-  showLogin();
+toast('Conta criada! Redirecionando para escolha de plano...');
+  setTimeout(() => {
+    window.location.href = '/planos.html?new=1&email=' + encodeURIComponent(email);
+  }, 1500);
 }
 
 async function doLogout() {
@@ -1270,18 +1272,77 @@ async function loadApp(user) {
   document.getElementById('userName').textContent = STATE.profile.name;
   document.getElementById('userRole').textContent = STATE.profile.role === 'admin' ? 'Administrador' : STATE.profile.role === 'dentist' ? 'Dentista' : 'Recepcionista';
 
-  await loadClinics();
+await loadClinics();
   await loadLeads();
   loadAutomations();
 
+  // ── VERIFICAR ASSINATURA ──────────────────
+  const subscriptionStatus = await checkSubscription(user.id);
+
   document.getElementById('loadingScreen').style.display = 'none';
+
+  if (subscriptionStatus === 'none' || subscriptionStatus === 'expired') {
+    window.location.href = '/planos.html?reason=' + subscriptionStatus;
+    return;
+  }
+
   document.getElementById('appPage').style.display = 'flex';
   showPage('dashboard');
+
+  if (subscriptionStatus === 'expiring_soon') {
+    showExpiringBanner();
+  }
 
   if (STATE.clinics.length === 0) {
     setTimeout(() => openAddClinicWizard(), 500);
   }
 }
+
+// ── CHECK SUBSCRIPTION ────────────────────────
+async function checkSubscription(userId) {
+  if (STATE.profile?.role === 'admin') return 'active';
+  try {
+    const { data, error } = await db
+      .from('assinaturas')
+      .select('*')
+      .eq('user_id', userId)
+      .in('status', ['active', 'authorized', 'pending'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error || !data) return 'none';
+
+    const now = new Date();
+    const expires = data.expires_at ? new Date(data.expires_at) : null;
+
+    if (expires && expires < now) return 'expired';
+
+    if (expires) {
+      const daysLeft = Math.ceil((expires - now) / (1000 * 60 * 60 * 24));
+      if (daysLeft <= 3) return 'expiring_soon';
+    }
+
+    return 'active';
+  } catch (e) {
+    return 'active';
+  }
+}
+
+// ── BANNER VENCIMENTO ─────────────────────────
+function showExpiringBanner() {
+  if (document.getElementById('expiringBanner')) return;
+  const banner = document.createElement('div');
+  banner.id = 'expiringBanner';
+  banner.style.cssText = `
+    position:fixed;top:0;left:0;right:0;z-index:9998;
+    background:linear-gradient(90deg,#C9A84C,#E8C96A);
+    color:#0A0A0B;padding:10px 20px;
+    display:flex;align-items:center;justify-content:center;gap:12px;
+    font-size:13px;font-weight:600;font-family:var(--font);
+  `;
+  banner.innerHTML = `
+    ⚠️ Sua assinatura vence em
 
 // ── SUPABASE DATA ─────────────────────────────
 async function loadClinics() {
