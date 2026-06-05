@@ -2413,7 +2413,7 @@ async function loadInboxChats() {
     STATE.leads.filter(l => l.telefone).forEach(lead => {
       const phone = lead.telefone.replace(/\D/g,'');
       const exists = INBOX.chats.find(c => c.phone.endsWith(phone.slice(-8)));
-      if (!exists) {
+     if (!exists) {
         INBOX.chats.push({
           id: phone + '@s.whatsapp.net',
           phone,
@@ -2423,6 +2423,9 @@ async function loadInboxChats() {
           unread: 0,
           lead,
           messages: [],
+        });
+      }
+    });
 
     const totalUnread = INBOX.chats.reduce((s,c) => s + c.unread, 0);
     const badge = document.getElementById('inboxUnreadBadge');
