@@ -45,7 +45,7 @@ console.log('[webhook] evento detectado:', evento);
       if (!jid || jid.includes('status@broadcast') || jid.includes('@g.us')) continue;
 
       const phone        = jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
-      const contact_name = msg?.pushName || null;
+      const contact_name = fromMe ? null : (msg?.pushName || null);
 
       let content = '';
       let type = 'text';
