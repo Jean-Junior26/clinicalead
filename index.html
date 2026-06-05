@@ -861,7 +861,44 @@ tbody tr:hover td { background:var(--bg-elevated); }
           </table>
         </div>
       </div>
-
+      <!-- MEU PLANO -->
+      <div class="page" id="page-meu-plano">
+        <div class="page-header">
+          <div class="page-header-left"><h2>Meu Plano</h2><p>Gerencie sua assinatura do ClinicaLead</p></div>
+          <div class="page-header-actions">
+            <button class="btn btn-primary" onclick="window.location.href='/planos.html'"><i class="ti ti-arrow-up"></i> Fazer upgrade</button>
+          </div>
+        </div>
+        <div id="meuPlanoContent" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+          <div class="card">
+            <div class="card-header"><h3><i class="ti ti-credit-card" style="margin-right:6px;color:var(--gold);"></i>Plano atual</h3></div>
+            <div class="card-body">
+              <div style="text-align:center;padding:20px 0;">
+                <div style="font-size:32px;font-weight:800;color:var(--gold);font-family:var(--font-display);" id="planoNome">Carregando...</div>
+                <div style="font-size:13px;color:var(--text-secondary);margin-top:4px;" id="planoStatus">—</div>
+                <div style="margin-top:16px;" id="planoBadge"></div>
+              </div>
+              <div style="border-top:1px solid var(--border);padding-top:16px;display:flex;flex-direction:column;gap:10px;">
+                <div style="display:flex;justify-content:space-between;font-size:13px;"><span style="color:var(--text-secondary);">Período</span><span style="font-weight:600;" id="planoPeriodo">—</span></div>
+                <div style="display:flex;justify-content:space-between;font-size:13px;"><span style="color:var(--text-secondary);">Vencimento</span><span style="font-weight:600;" id="planoVencimento">—</span></div>
+                <div style="display:flex;justify-content:space-between;font-size:13px;"><span style="color:var(--text-secondary);">Status</span><span id="planoStatusBadge">—</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3><i class="ti ti-shield-check" style="margin-right:6px;color:var(--gold);"></i>Recursos incluídos</h3></div>
+            <div class="card-body" id="planoRecursos">
+              <div style="color:var(--text-secondary);font-size:13px;">Carregando...</div>
+            </div>
+          </div>
+          <div class="card" style="grid-column:1/-1;">
+            <div class="card-header"><h3><i class="ti ti-history" style="margin-right:6px;color:var(--gold);"></i>Histórico de pagamentos</h3></div>
+            <div class="card-body" id="planoHistorico">
+              <div style="color:var(--text-secondary);font-size:13px;">Carregando...</div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
