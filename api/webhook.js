@@ -55,21 +55,26 @@ console.log('[webhook] evento detectado:', evento);
         content = m.conversation;
       } else if (m.extendedTextMessage) {
         content = m.extendedTextMessage.text || '';
-      } else if (m.imageMessage) {
+  } else if (m.imageMessage) {
         content = m.imageMessage.caption || '📷 Imagem';
         type = 'image';
+        payload_extra = { media_url: m.imageMessage.url || null };
       } else if (m.audioMessage) {
         content = '🎵 Áudio';
         type = 'audio';
+        payload_extra = { media_url: m.audioMessage.url || null };
       } else if (m.videoMessage) {
         content = m.videoMessage.caption || '🎥 Vídeo';
         type = 'video';
+        payload_extra = { media_url: m.videoMessage.url || null };
       } else if (m.documentMessage) {
         content = m.documentMessage.fileName || '📄 Documento';
         type = 'document';
+        payload_extra = { media_url: m.documentMessage.url || null };
       } else if (m.stickerMessage) {
         content = '🎭 Sticker';
         type = 'sticker';
+        payload_extra = { media_url: m.stickerMessage.url || null };
       } else {
         content = '[mídia]';
       }
