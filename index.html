@@ -2408,7 +2408,7 @@ async function loadInboxChats() {
     });
 
     Object.values(chatMap).forEach(chat => {
-      chat.messages.sort((a, b) => new Date(a.criado_em) - new Date(b.criado_em));
+      chat.messages.sort((a, b) => new Date(a.created_at) - new Date(b.criado_em));
       const last = chat.messages[chat.messages.length - 1];
       chat.lastMsg = formatLastMsg(last);
       chat.time = new Date(last.criado_em);
@@ -2621,7 +2621,7 @@ function renderMessages(msgs, chat) {
     return;
   }
 
-  const sorted = [...msgs].sort((a, b) => new Date(a.criado_em) - new Date(b.criado_em));
+  const sorted = [...msgs].sort((a, b) => new Date(a.created_at) - new Date(b.criado_em));
   let html = '';
   let lastDate = '';
 
