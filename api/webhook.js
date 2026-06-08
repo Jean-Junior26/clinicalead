@@ -56,65 +56,65 @@ export default async function handler(req, res) {
 
         if (!jid || jid.includes('status@broadcast') || jid.includes('@g.us')) continue;
 
-        const telefone = jid.replace('@s.whatsapp.net', '').replace('@c.us', '');
-        const nome_contato = fromMe ? null : (msg?.pushName || null);
+        const phone = jid.replace('@s.whatsapp.net', '').replace('@c.us', '');
+        const contact_name = fromMe ? null : (msg?.pushName || null);
         const message_id = key?.id || null;
-        const criado_em = msg?.messageTimestamp
+        const created_at = msg?.messageTimestamp
           ? new Date(Number(msg.messageTimestamp) * 1000).toISOString()
           : new Date().toISOString();
 
-        let conteudo = '';
-        let tipo = 'texto';
+        let content = '';
+        let type = 'text';
         let media_url = null;
         const m = msg?.message || {};
 
         if (m.conversation) {
-          conteudo = m.conversation;
-          tipo = 'texto';
+          content = m.conversation;
+          type = 'text';
         } else if (m.extendedTextMessage) {
-          conteudo = m.extendedTextMessage?.text || '';
-          tipo = 'texto';
+          content = m.extendedTextMessage?.text || '';
+          type = 'text';
         } else if (m.imageMessage) {
-          conteudo = m.imageMessage?.caption || '📷 Imagem';
-          tipo = 'imagem';
+          content = m.imageMessage?.caption || '📷 Imagem';
+          type = 'image';
           media_url = m.imageMessage?.url || null;
         } else if (m.audioMessage) {
-          conteudo = '🎵 Áudio';
-          tipo = 'audio';
+          content = '🎵 Áudio';
+          type = 'audio';
           media_url = m.audioMessage?.url || null;
         } else if (m.videoMessage) {
-          conteudo = m.videoMessage?.caption || '🎥 Vídeo';
-          tipo = 'video';
+          content = m.videoMessage?.caption || '🎥 Vídeo';
+          type = 'video';
           media_url = m.videoMessage?.url || null;
         } else if (m.documentMessage) {
-          conteudo = m.documentMessage?.fileName || '📄 Documento';
-          tipo = 'documento';
+          content = m.documentMessage?.fileName || '📄 Documento';
+          type = 'document';
           media_url = m.documentMessage?.url || null;
         } else if (m.stickerMessage) {
-          conteudo = '🖼️ Sticker';
-          tipo = 'sticker';
+          content = '🖼️ Sticker';
+          type = 'sticker';
         } else if (m.locationMessage) {
-          conteudo = `📍 Localização: ${m.locationMessage?.degreesLatitude}, ${m.locationMessage?.degreesLongitude}`;
-          tipo = 'localizacao';
+          content = `📍 Localização: ${m.locationMessage?.degreesLatitude}, ${m.locationMessage?.degreesLongitude}`;
+          type = 'location';
         } else if (m.contactMessage) {
-          conteudo = `👤 Contato: ${m.contactMessage?.displayName || ''}`;
-          tipo = 'contato';
+          content = `👤 Contato: ${m.contactMessage?.displayName || ''}`;
+          type = 'contact';
         } else {
-          conteudo = '[mídia]';
-          tipo = 'desconhecido';
+          content = '[mídia]';
+          type = 'unknown';
           console.warn('[webhook] Tipo não mapeado:', Object.keys(m));
         }
 
         const payload = {
           clinic_id,
-          telefone,
-          nome_contato,
-          'conteúdo': conteudo,
-          tipo,
+          phone,
+          contact_name,
+          content,
+          type,
           from_me: fromMe,
           media_url,
           message_id,
-          criado_em,
+          created_at,
         };
 
         const insertResp = await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
@@ -131,10 +131,10 @@ export default async function handler(req, res) {
         if (!insertResp.ok) {
           const errText = await insertResp.text();
           console.error('[webhook] Erro ao inserir mensagem:', insertResp.status, errText);
-          erros.push({ telefone, erro: errText });
+          erros.push({ phone, erro: errText });
         } else {
-          console.log('[webhook] Mensagem salva — telefone:', telefone, '| tipo:', tipo);
-          insertados.push(telefone);
+          console.log('[webhook] Mensagem salva — phone:', phone, '| type:', type);
+          insertados.push(phone);
         }
       } catch (msgErr) {
         console.error('[webhook] Erro ao processar msg:', msgErr.message);
