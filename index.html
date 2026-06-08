@@ -2822,14 +2822,7 @@ function createLeadFromChat(chatId) {
 function startInboxPolling() {
   // Substituído pelo Realtime — mantido para compatibilidade
 }
-  if (INBOX.polling) clearInterval(INBOX.polling);
-  INBOX.polling = setInterval(async () => {
-    if (document.getElementById('page-inbox')?.classList.contains('active')) {
-      await loadInboxChats();
-      if (INBOX.activeChat) await loadChatMessages(INBOX.activeChat);
-    }
-}, 3000);
-}
+ 
 
 function openNewChatModal() {
   const phone = prompt('Digite o número do WhatsApp (com DDD, sem +55):');
