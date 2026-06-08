@@ -28,6 +28,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, ignorado: rawEvento });
     }
 
+    // Buscar clinic_id pela instância
     const instanceName = body?.instance || body?.instanceName || null;
     let clinic_id = null;
 
@@ -69,39 +70,30 @@ export default async function handler(req, res) {
         const m = msg?.message || {};
 
         if (m.conversation) {
-          content = m.conversation;
-          type = 'text';
+          content = m.conversation; type = 'text';
         } else if (m.extendedTextMessage) {
-          content = m.extendedTextMessage?.text || '';
-          type = 'text';
+          content = m.extendedTextMessage?.text || ''; type = 'text';
         } else if (m.imageMessage) {
-          content = m.imageMessage?.caption || '📷 Imagem';
-          type = 'image';
+          content = m.imageMessage?.caption || '📷 Imagem'; type = 'image';
           media_url = m.imageMessage?.url || null;
         } else if (m.audioMessage) {
-          content = '🎵 Áudio';
-          type = 'audio';
+          content = '🎵 Áudio'; type = 'audio';
           media_url = m.audioMessage?.url || null;
         } else if (m.videoMessage) {
-          content = m.videoMessage?.caption || '🎥 Vídeo';
-          type = 'video';
+          content = m.videoMessage?.caption || '🎥 Vídeo'; type = 'video';
           media_url = m.videoMessage?.url || null;
         } else if (m.documentMessage) {
-          content = m.documentMessage?.fileName || '📄 Documento';
-          type = 'document';
+          content = m.documentMessage?.fileName || '📄 Documento'; type = 'document';
           media_url = m.documentMessage?.url || null;
         } else if (m.stickerMessage) {
-          content = '🖼️ Sticker';
-          type = 'sticker';
+          content = '🖼️ Sticker'; type = 'sticker';
         } else if (m.locationMessage) {
           content = `📍 Localização: ${m.locationMessage?.degreesLatitude}, ${m.locationMessage?.degreesLongitude}`;
           type = 'location';
         } else if (m.contactMessage) {
-          content = `👤 Contato: ${m.contactMessage?.displayName || ''}`;
-          type = 'contact';
+          content = `👤 Contato: ${m.contactMessage?.displayName || ''}`; type = 'contact';
         } else {
-          content = '[mídia]';
-          type = 'unknown';
+          content = '[mídia]'; type = 'unknown';
           console.warn('[webhook] Tipo não mapeado:', Object.keys(m));
         }
 
