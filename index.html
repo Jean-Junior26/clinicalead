@@ -2348,27 +2348,27 @@ async function confirmarEnvioWA() {
 }
 
 // ── INBOX WHATSAPP ─────────────────────────────
+// ── INBOX WHATSAPP ─────────────────────────────────
 let INBOX = {
   chats: [],
   activeChat: null,
   messages: {},
   filter: 'all',
   search: '',
-  polling: null,
+  realtimeChannel: null,
 };
 
 async function renderInbox() {
   const clinic = currentClinic();
+  const banner = document.getElementById('inboxNoBanner');
+  if (banner) banner.style.display = clinic?.whatsapp_instance ? 'none' : 'flex';
   if (!clinic) {
     document.getElementById('inboxStatusText').textContent = 'Selecione uma clínica';
     return;
   }
-  // Show banner if WhatsApp not connected but don't block
-  const banner = document.getElementById('inboxNoBanner');
-  if (banner) banner.style.display = clinic.whatsapp_instance ? 'none' : 'flex';
   document.getElementById('inboxStatusText').textContent = 'Carregando conversas...';
   await loadInboxChats();
-  startInboxPolling();
+  startRealtimeInbox();
 }
 
 async function loadInboxChats() {
@@ -2376,28 +2376,28 @@ async function loadInboxChats() {
   if (!clinic) return;
 
   try {
-    // Load messages from Supabase (stored via webhook)
     const { data: msgs, error } = await db
       .from('mensagens')
       .select('*')
-     .not('phone', 'is', null)
-      .order('created_at', { ascending: false })
-      .limit(200);
+      .order('criado_em', { ascending: false })
+      .limit(500);
 
     if (error) throw error;
 
-    // Group by phone number to build chat list
     const chatMap = {};
     (msgs || []).forEach(m => {
-      const phone = m.phone || '';
+      const phone = (m.telefone || '').replace(/\D/g, '');
+      if (!phone) return;
       if (!chatMap[phone]) {
-        const lead = STATE.leads.find(l => l.telefone && l.telefone.replace(/\D/g,'').slice(-8) === phone.slice(-8));
+        const lead = STATE.leads.find(l =>
+          l.telefone && l.telefone.replace(/\D/g, '').slice(-9) === phone.slice(-9)
+        );
         chatMap[phone] = {
-          id: phone + '@s.whatsapp.net',
+          id: phone,
           phone,
-          name: m.contact_name || lead?.nome || phone,
-          lastMsg: m.content || '📎 Mídia',
-          time: new Date(m.created_at),
+          name: m.nome_contato || lead?.nome || phone,
+          lastMsg: '',
+          time: new Date(m.criado_em),
           unread: 0,
           lead,
           messages: [],
@@ -2407,66 +2407,131 @@ async function loadInboxChats() {
       if (!m.from_me && !m.read_at) chatMap[phone].unread++;
     });
 
-    INBOX.chats = Object.values(chatMap).sort((a,b) => b.time - a.time);
+    Object.values(chatMap).forEach(chat => {
+      chat.messages.sort((a, b) => new Date(a.criado_em) - new Date(b.criado_em));
+      const last = chat.messages[chat.messages.length - 1];
+      chat.lastMsg = formatLastMsg(last);
+      chat.time = new Date(last.criado_em);
+    });
 
-    // Also include leads with phone that have no messages yet
+    INBOX.chats = Object.values(chatMap).sort((a, b) => b.time - a.time);
+
     STATE.leads.filter(l => l.telefone).forEach(lead => {
-      const phone = lead.telefone.replace(/\D/g,'');
-      const exists = INBOX.chats.find(c => c.phone.endsWith(phone.slice(-8)));
-     if (!exists) {
+      const phone = lead.telefone.replace(/\D/g, '');
+      const exists = INBOX.chats.find(c => c.phone.slice(-9) === phone.slice(-9));
+      if (!exists) {
         INBOX.chats.push({
-          id: phone + '@s.whatsapp.net',
+          id: phone,
           phone,
           name: lead.nome,
           lastMsg: 'Nenhuma mensagem ainda',
           time: new Date(lead.created_at || Date.now()),
           unread: 0,
           lead,
+          messages: [],
         });
       }
     });
 
-    const totalUnread = INBOX.chats.reduce((s,c) => s + c.unread, 0);
+    const totalUnread = INBOX.chats.reduce((s, c) => s + c.unread, 0);
     const badge = document.getElementById('inboxUnreadBadge');
-    if (badge) { badge.textContent = totalUnread; badge.style.display = totalUnread > 0 ? '' : 'none'; }
-    document.getElementById('inboxStatusText').textContent = INBOX.chats.length + ' conversa' + (INBOX.chats.length !== 1 ? 's' : '');
+    if (badge) {
+      badge.textContent = totalUnread;
+      badge.style.display = totalUnread > 0 ? '' : 'none';
+    }
+    document.getElementById('inboxStatusText').textContent =
+      INBOX.chats.length + ' conversa' + (INBOX.chats.length !== 1 ? 's' : '');
+
     renderInboxList();
 
-  } catch(e) {
-    console.error('inbox error:', e);
-    // Fallback: show leads as chats even without messages
-    INBOX.chats = STATE.leads.filter(l => l.telefone).map(l => ({
-      id: l.telefone.replace(/\D/g,'') + '@s.whatsapp.net',
-      phone: l.telefone.replace(/\D/g,''),
-      name: l.nome,
-      lastMsg: 'Clique para enviar mensagem',
-      time: new Date(l.created_at || Date.now()),
-      unread: 0,
-      lead: l,
-      messages: [],
-    }));
-    document.getElementById('inboxStatusText').textContent = INBOX.chats.length + ' lead' + (INBOX.chats.length !== 1 ? 's' : '') + ' — configure webhook para ver mensagens';
-    renderInboxList();
+    if (INBOX.activeChat) {
+      const updated = INBOX.chats.find(c => c.id === INBOX.activeChat.id);
+      if (updated) {
+        INBOX.activeChat = updated;
+        renderMessages(updated.messages, updated);
+      }
+    }
+
+  } catch (e) {
+    console.error('Erro ao carregar inbox:', e);
+    document.getElementById('inboxStatusText').textContent = 'Erro ao carregar conversas';
   }
+}
+
+function formatLastMsg(m) {
+  if (!m) return '';
+  if (m.tipo === 'image' || m.tipo === 'imageMessage') return '🖼️ Imagem';
+  if (m.tipo === 'audio' || m.tipo === 'audioMessage') return '🎵 Áudio';
+  if (m.tipo === 'video' || m.tipo === 'videoMessage') return '🎬 Vídeo';
+  if (m.tipo === 'document' || m.tipo === 'documentMessage') return '📄 Documento';
+  if (m.tipo === 'sticker' || m.tipo === 'stickerMessage') return '😄 Figurinha';
+  return m.conteudo || '📎 Mídia';
+}
+
+function startRealtimeInbox() {
+  if (INBOX.realtimeChannel) {
+    db.removeChannel(INBOX.realtimeChannel);
+    INBOX.realtimeChannel = null;
+  }
+
+  INBOX.realtimeChannel = db
+    .channel('mensagens-realtime')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'mensagens' },
+      async (payload) => {
+        console.log('Nova mensagem recebida:', payload);
+        await loadInboxChats();
+        playNotificationSound();
+      }
+    )
+    .subscribe((status) => {
+      console.log('Realtime status:', status);
+      if (status === 'SUBSCRIBED') {
+        const el = document.getElementById('inboxStatusText');
+        if (el) el.textContent =
+          INBOX.chats.length + ' conversa' + (INBOX.chats.length !== 1 ? 's' : '') + ' • 🟢 ao vivo';
+      }
+    });
+}
+
+function playNotificationSound() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.setValueAtTime(1100, ctx.currentTime + 0.1);
+    gain.gain.setValueAtTime(0.1, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.3);
+  } catch (e) {}
 }
 
 function renderInboxList() {
   let chats = INBOX.chats;
   if (INBOX.filter === 'leads') chats = chats.filter(c => c.lead);
   if (INBOX.filter === 'unread') chats = chats.filter(c => c.unread > 0);
-  if (INBOX.search) chats = chats.filter(c => c.name.toLowerCase().includes(INBOX.search.toLowerCase()) || c.phone.includes(INBOX.search));
+  if (INBOX.search) chats = chats.filter(c =>
+    c.name.toLowerCase().includes(INBOX.search.toLowerCase()) ||
+    c.phone.includes(INBOX.search)
+  );
+
   if (!chats.length) {
-    document.getElementById('inboxList').innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary);font-size:13px;">Nenhuma conversa encontrada</div>';
+    document.getElementById('inboxList').innerHTML =
+      '<div style="padding:24px;text-align:center;color:var(--text-secondary);font-size:13px;">Nenhuma conversa encontrada</div>';
     return;
   }
+
   document.getElementById('inboxList').innerHTML = chats.map(c => {
     const isActive = INBOX.activeChat?.id === c.id;
     const timeStr = formatMsgTime(c.time);
-    const initials2 = c.name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase();
-    return `<div class="inbox-item ${isActive?'active':''} ${c.lead?'is-lead':''}" onclick="openChat('${c.id}')">
-    <div class="inbox-avatar" style="${c.profilePic ? `background-image:url('${c.profilePic}');background-size:cover;background-position:center;` : ''}">${c.profilePic ? '' : initials2}</div>
-  ${c.profilePic ? '' : initials2}
-</div>
+    const ini = c.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+    return `<div class="inbox-item ${isActive ? 'active' : ''} ${c.lead ? 'is-lead' : ''}" onclick="openChat('${c.id}')">
+      <div class="inbox-avatar">${ini}</div>
       <div class="inbox-item-info">
         <div class="inbox-item-name">
           ${c.name}
@@ -2483,12 +2548,13 @@ function renderInboxList() {
 }
 
 function formatMsgTime(date) {
+  if (!date) return '';
   const now = new Date();
   const diff = now - date;
   if (diff < 60000) return 'agora';
-  if (diff < 3600000) return Math.floor(diff/60000) + 'min';
-  if (diff < 86400000) return date.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
-  return date.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'});
+  if (diff < 3600000) return Math.floor(diff / 60000) + 'min';
+  if (diff < 86400000) return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 }
 
 async function openChat(chatId) {
@@ -2498,72 +2564,133 @@ async function openChat(chatId) {
   chat.unread = 0;
   renderInboxList();
   renderChatHeader(chat);
-  await loadChatMessages(chat);
-  // Busca foto de perfil só quando abre a conversa
-  if (!chat.profilePic && chat.phone) {
-    const clinic2 = currentClinic();
-    if (clinic2?.whatsapp_instance) {
-      try {
-        const r = await fetch(`https://evolution-api-production-b649.up.railway.app/chat/fetchProfilePictureUrl/${clinic2.whatsapp_instance}`, {
-          method: 'POST',
-          headers: { 'apikey': '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae000', 'Content-Type': 'application/json' },
-          body: JSON.stringify({ number: chat.phone })
-        });
-        const d = await r.json();
-        if (d?.profilePictureUrl) {
-          chat.profilePic = d.profilePictureUrl;
-          renderInboxList();
-          renderChatHeader(chat);
-        }
-      } catch(e) {}
-    }
+  renderMessages(chat.messages, chat);
+
+  const clinic = currentClinic();
+  if (clinic) {
+    db.from('mensagens')
+      .update({ read_at: new Date().toISOString() })
+      .eq('telefone', chat.phone)
+      .is('read_at', null)
+      .eq('from_me', false)
+      .then(() => {});
   }
 }
 
 function renderChatHeader(chat) {
-  const initials2 = chat.name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase();
+  const ini = chat.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
   document.getElementById('inboxChat').innerHTML = `
     <div class="chat-header">
-      <div class="chat-header-avatar">${initials2}</div>
+      <div class="chat-header-avatar">${ini}</div>
       <div class="chat-header-info">
         <div class="chat-header-name">${chat.name} ${chat.lead ? '<span class="inbox-lead-badge">LEAD</span>' : ''}</div>
-        <div class="chat-header-status">${chat.phone}${chat.lead ? ' · ' + (chat.lead.procedimento||'') : ''}</div>
+        <div class="chat-header-status">${chat.phone}${chat.lead ? ' · ' + (chat.lead.procedimento || '') : ''}</div>
       </div>
       <div class="chat-header-actions">
-        ${chat.lead ? `<button class="btn btn-sm btn-primary" onclick="showPage('leads')"><i class="ti ti-user"></i> Ver lead</button>` : `<button class="btn btn-sm" onclick="createLeadFromChat('${chat.id}')"><i class="ti ti-user-plus"></i> Criar lead</button>`}
-        <button class="btn btn-sm" onclick="openSendWA('${chat.lead?.id||''}')"><i class="ti ti-template"></i> Templates</button>
+        ${chat.lead
+          ? `<button class="btn btn-sm btn-primary" onclick="showPage('leads')"><i class="ti ti-user"></i> Ver lead</button>`
+          : `<button class="btn btn-sm" onclick="createLeadFromChat('${chat.id}')"><i class="ti ti-user-plus"></i> Criar lead</button>`
+        }
       </div>
     </div>
-    <div class="chat-messages" id="chatMessages"><div style="text-align:center;padding:20px;color:var(--text-secondary);font-size:12px;"><i class="ti ti-loader"></i> Carregando...</div></div>
+    <div class="chat-messages" id="chatMessages"></div>
     <div class="chat-quick-replies" id="chatQuickReplies"></div>
     <div class="chat-input-area">
       <div class="chat-input-row">
-        <textarea class="chat-input" id="chatInput" placeholder="Digite uma mensagem..." rows="1" onkeydown="handleChatKeydown(event)" oninput="autoResizeInput(this)"></textarea>
+        <textarea class="chat-input" id="chatInput" placeholder="Digite uma mensagem..." rows="1"
+          onkeydown="handleChatKeydown(event)" oninput="autoResizeInput(this)"></textarea>
         <div class="chat-input-btns">
           <label class="chat-input-btn" title="Imagem" style="cursor:pointer;">
             <i class="ti ti-photo"></i>
             <input type="file" accept="image/*" style="display:none;" onchange="sendImageMsg(event)"/>
           </label>
-          <label class="chat-input-btn" title="Áudio" style="cursor:pointer;">
-            <i class="ti ti-microphone"></i>
-            <input type="file" accept="audio/*" style="display:none;" onchange="sendAudioMsg(event)"/>
-          </label>
         </div>
         <button class="chat-send-btn" onclick="sendChatMessage()"><i class="ti ti-send"></i></button>
       </div>
     </div>`;
+  renderMessages(chat.messages, chat);
   renderQuickReplies(chat);
 }
 
+function renderMessages(msgs, chat) {
+  const el = document.getElementById('chatMessages');
+  if (!el) return;
+
+  if (!msgs || !msgs.length) {
+    el.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-secondary);font-size:13px;">Nenhuma mensagem ainda.<br>Envie a primeira! 👋</div>';
+    return;
+  }
+
+  const sorted = [...msgs].sort((a, b) => new Date(a.criado_em) - new Date(b.criado_em));
+  let html = '';
+  let lastDate = '';
+
+  sorted.forEach(m => {
+    const isSent = m.from_me;
+    const ts = m.criado_em ? new Date(m.criado_em) : new Date();
+    const dateStr = ts.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+    const timeStr = ts.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+    if (dateStr !== lastDate) {
+      html += `<div class="date-separator"><span>${dateStr}</span></div>`;
+      lastDate = dateStr;
+    }
+
+    let bubbleContent = '';
+    const tipo = m.tipo || 'text';
+
+    if (tipo === 'image' || tipo === 'imageMessage') {
+      bubbleContent = m.media_url
+        ? `<div><img src="${m.media_url}" style="max-width:240px;max-height:240px;border-radius:8px;display:block;cursor:pointer;" onclick="window.open('${m.media_url}','_blank')" onerror="this.style.display='none'"/>${m.conteudo ? `<div style="font-size:13px;margin-top:4px;">${m.conteudo}</div>` : ''}</div>`
+        : `<div style="font-size:12px;opacity:0.6;">🖼️ Imagem</div>`;
+    } else if (tipo === 'audio' || tipo === 'audioMessage') {
+      bubbleContent = m.media_url
+        ? `<audio controls style="width:200px;height:36px;"><source src="${m.media_url}"></audio>`
+        : `<div style="font-size:12px;opacity:0.6;">🎵 Áudio</div>`;
+    } else if (tipo === 'video' || tipo === 'videoMessage') {
+      bubbleContent = m.media_url
+        ? `<video controls style="max-width:240px;max-height:200px;border-radius:8px;"><source src="${m.media_url}"></video>`
+        : `<div style="font-size:12px;opacity:0.6;">🎬 Vídeo</div>`;
+    } else if (tipo === 'document' || tipo === 'documentMessage') {
+      bubbleContent = `<div style="display:flex;align-items:center;gap:8px;">
+        <i class="ti ti-file" style="font-size:24px;color:var(--gold);"></i>
+        <div>${m.conteudo || 'Documento'}${m.media_url ? `<br><a href="${m.media_url}" target="_blank" style="font-size:11px;color:var(--gold);">Baixar</a>` : ''}</div>
+      </div>`;
+    } else if (tipo === 'sticker' || tipo === 'stickerMessage') {
+      bubbleContent = m.media_url
+        ? `<img src="${m.media_url}" style="width:100px;height:100px;object-fit:contain;" onerror="this.parentElement.innerHTML='😄'"/>`
+        : `<div style="font-size:12px;opacity:0.6;">😄 Figurinha</div>`;
+    } else {
+      const text = m.conteudo || '';
+      if (text) {
+        const formatted = text
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+          .replace(/\n/g, '<br>')
+          .replace(/\*(.*?)\*/g, '<strong>$1</strong>')
+          .replace(/_(.*?)_/g, '<em>$1</em>');
+        bubbleContent = `<div>${formatted}</div>`;
+      } else {
+        bubbleContent = `<div style="opacity:0.5;font-size:11px;">📎 Mídia</div>`;
+      }
+    }
+
+    html += `<div class="msg-row ${isSent ? 'sent' : ''}">
+      <div class="msg-bubble ${isSent ? 'sent' : 'received'}">
+        ${bubbleContent}
+        <div class="msg-time">${timeStr}${isSent ? ' ✓✓' : ''}</div>
+      </div>
+    </div>`;
+  });
+
+  el.innerHTML = html;
+  el.scrollTop = el.scrollHeight;
+}
+
 function renderQuickReplies(chat) {
-  const replies = [
-    '👋 Boas-vindas',
-    '📅 Confirmar consulta',
-    '⏰ Lembrete 24h',
-    '😊 Pós-consulta',
-    '📍 Enviar endereço',
-  ];
-  document.getElementById('chatQuickReplies').innerHTML = replies.map(r =>
+  const el = document.getElementById('chatQuickReplies');
+  if (!el) return;
+  const replies = ['👋 Boas-vindas', '📅 Confirmar consulta', '⏰ Lembrete 24h', '😊 Pós-consulta', '📍 Endereço'];
+  el.innerHTML = replies.map(r =>
     `<button class="quick-reply" onclick="setQuickReply('${r}','${chat.id}')">${r}</button>`
   ).join('');
 }
@@ -2571,149 +2698,16 @@ function renderQuickReplies(chat) {
 function setQuickReply(type, chatId) {
   const chat = INBOX.chats.find(c => c.id === chatId);
   const clinic = currentClinic();
-  const lead = chat?.lead;
-  const nome = lead?.nome || chat?.name || 'cliente';
+  const nome = chat?.lead?.nome || chat?.name || 'cliente';
   const msgs = {
     '👋 Boas-vindas': `Olá, ${nome}! 😊 Aqui é da *${clinic?.nome}*! Como posso te ajudar hoje?`,
     '📅 Confirmar consulta': `Oi ${nome}! 🦷 Sua consulta está confirmada. Qualquer dúvida é só chamar!`,
-    '⏰ Lembrete 24h': `Oi ${nome}! 👋 Lembrando que amanhã você tem consulta conosco.\n\n📍 R. Rui Barbosa, 483 - Centro, Araguari - MG\n🗺️ https://share.google/aBRk2BmdSOHL2iN9X\n\nConfirma? Responda *SIM* ou *NÃO* 😊`,
-    '😊 Pós-consulta': `Oi ${nome}! Foi um prazer te receber hoje na *${clinic?.nome}*! 😊 Ficou com alguma dúvida?`,
-    '📍 Enviar endereço': `📍 *Endereço:* R. Rui Barbosa, 483 - Centro, Araguari - MG\n🗺️ https://share.google/aBRk2BmdSOHL2iN9X`,
+    '⏰ Lembrete 24h': `Oi ${nome}! 👋 Lembrando que amanhã você tem consulta conosco. Confirma? Responda *SIM* ou *NÃO* 😊`,
+    '😊 Pós-consulta': `Oi ${nome}! Foi um prazer te receber 😊 Ficou com alguma dúvida?`,
+    '📍 Endereço': `📍 *Endereço:* R. Rui Barbosa, 483 - Centro, Araguari - MG\n🗺️ https://share.google/aBRk2BmdSOHL2iN9X`,
   };
   const input = document.getElementById('chatInput');
   if (input) { input.value = msgs[type] || ''; input.focus(); autoResizeInput(input); }
-}
-
-async function loadChatMessages(chat) {
-  const clinic = currentClinic();
-  if (!clinic) return;
-
-  // Use messages already loaded in chat object or fetch from Supabase
-  try {
-    const { data: msgs } = await db
-      .from('mensagens')
-      .select('*')
-     .not('phone', 'is', null)
-      .eq('phone', chat.phone)
-      .order('created_at', { ascending: true })
-      .limit(80);
-
-    const formatted = (msgs || chat.messages || []).map(m => ({
-      key: { fromMe: m.from_me },
-      message: { conversation: m.content },
-      messageTimestamp: new Date(m.created_at).getTime() / 1000,
-      type: m.type || 'text',
-    }));
-
-    INBOX.messages[chat.id] = formatted;
-    renderMessages(formatted, chat);
-
-    // Mark as read
-    if (msgs?.length) {
-      await db.from('mensagens').update({ read_at: new Date().toISOString() })
-        .eq('clinic_id', clinic.id).eq('phone', chat.phone).is('read_at', null).eq('from_me', false);
-    }
-
-  } catch(e) {
-    // Show empty state with send option
-    const msgsEl = document.getElementById('chatMessages');
-    if (msgsEl) msgsEl.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-secondary);font-size:13px;"><i class="ti ti-message-circle" style="font-size:32px;display:block;margin-bottom:8px;color:var(--gold);opacity:0.4;"></i>Nenhuma mensagem ainda.<br>Envie a primeira mensagem abaixo! 👋</div>';
-  }
-}
-
-function renderMessages(msgs, chat) {
-  const el = document.getElementById('chatMessages');
-  if (!el) return;
-  if (!msgs.length) { el.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-secondary);font-size:13px;">Nenhuma mensagem ainda.<br>Envie a primeira mensagem! 👋</div>'; return; }
-  let html = '';
-  let lastDate = '';
-  msgs.forEach(m => {
-    const isSent = m.key?.fromMe;
-    const ts = m.messageTimestamp ? new Date(m.messageTimestamp * 1000) : new Date();
-    const dateStr = ts.toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long'});
-    if (dateStr !== lastDate) {
-      html += `<div class="date-separator"><span>${dateStr}</span></div>`;
-      lastDate = dateStr;
-    }
-    const timeStr = ts.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
-    const msg = m.message || {};
-    let bubbleContent = '';
-
-    // IMAGEM
-    if (msg.imageMessage) {
-      const caption = msg.imageMessage.caption || '';
-      const url = msg.imageMessage.url || '';
-      if (url) {
-        bubbleContent = `<div class="msg-media"><img src="${url}" style="max-width:240px;max-height:240px;border-radius:8px;display:block;cursor:pointer;" onclick="window.open('${url}','_blank')" onerror="this.style.display='none'"/>${caption ? `<div style="font-size:13px;margin-top:4px;">${caption}</div>` : ''}</div>`;
-      } else {
-        bubbleContent = `<div style="font-size:12px;opacity:0.6;">🖼️ Imagem</div>`;
-      }
-    }
-    // VÍDEO
-    else if (msg.videoMessage) {
-      const caption = msg.videoMessage.caption || '';
-      const url = msg.videoMessage.url || '';
-      if (url) {
-        bubbleContent = `<div class="msg-media"><video controls style="max-width:240px;max-height:200px;border-radius:8px;display:block;"><source src="${url}"></video>${caption ? `<div style="font-size:13px;margin-top:4px;">${caption}</div>` : ''}</div>`;
-      } else {
-        bubbleContent = `<div style="font-size:12px;opacity:0.6;">🎬 Vídeo</div>`;
-      }
-    }
-    // ÁUDIO
-    else if (msg.audioMessage) {
-      const url = msg.audioMessage.url || '';
-      if (url) {
-        bubbleContent = `<div class="msg-audio-player"><audio controls style="width:200px;height:36px;"><source src="${url}"></audio></div>`;
-      } else {
-        const bars = Array.from({length:20}, (_,i) => `<div class="audio-bar" style="height:${6+Math.sin(i*0.8)*8}px;"></div>`).join('');
-        bubbleContent = `<div class="msg-audio"><button class="audio-play" onclick="toast('Áudio — baixe o app para ouvir')"><i class="ti ti-player-play"></i></button><div class="audio-wave">${bars}</div><span style="font-size:10px;opacity:0.6;">🎵</span></div>`;
-      }
-    }
-    // STICKER (FIGURINHA)
-    else if (msg.stickerMessage) {
-      const url = msg.stickerMessage.url || '';
-      if (url) {
-        bubbleContent = `<div class="msg-media"><img src="${url}" style="width:120px;height:120px;object-fit:contain;" onerror="this.parentElement.innerHTML='😄 Figurinha'"/></div>`;
-      } else {
-        bubbleContent = `<div style="font-size:12px;opacity:0.6;">😄 Figurinha</div>`;
-      }
-    }
-    // DOCUMENTO
-    else if (msg.documentMessage) {
-      const fileName = msg.documentMessage.fileName || 'Documento';
-      const url = msg.documentMessage.url || '';
-      bubbleContent = `<div class="msg-document" style="display:flex;align-items:center;gap:10px;padding:8px;background:rgba(255,255,255,0.05);border-radius:8px;min-width:180px;">
-        <i class="ti ti-file" style="font-size:28px;color:var(--gold);"></i>
-        <div style="flex:1;min-width:0;"><div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${fileName}</div>
-        ${url ? `<a href="${url}" target="_blank" style="font-size:11px;color:var(--gold);">Baixar</a>` : '<span style="font-size:11px;opacity:0.5;">Indisponível</span>'}</div></div>`;
-    }
-    // LOCALIZAÇÃO
-    else if (msg.locationMessage) {
-      const lat = msg.locationMessage.degreesLatitude;
-      const lng = msg.locationMessage.degreesLongitude;
-      bubbleContent = `<div class="msg-media"><a href="https://maps.google.com/?q=${lat},${lng}" target="_blank"><img src="https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lng}&zoom=15&size=240x120&markers=${lat},${lng}&key=nokey" style="max-width:240px;border-radius:8px;" onerror="this.parentElement.innerHTML='📍 <a href=https://maps.google.com/?q=${lat},${lng} target=_blank>Ver localização</a>'"/></a></div>`;
-    }
-    // TEXTO
-    else {
-      const text = msg.conversation || msg.extendedTextMessage?.text || '';
-      if (text) {
-        const formatted = text
-          .replace(/\n/g,'<br>')
-          .replace(/\*(.*?)\*/g,'<strong>$1</strong>')
-          .replace(/_(.*?)_/g,'<em>$1</em>')
-          .replace(/~(.*?)~/g,'<del>$1</del>');
-        bubbleContent = `<div>${formatted}</div>`;
-      } else {
-        bubbleContent = `<div style="opacity:0.5;font-size:11px;">📎 Mídia</div>`;
-      }
-    }
-
-    html += `<div class="msg-row ${isSent?'sent':''}">
-      <div class="msg-bubble ${isSent?'sent':'received'}">${bubbleContent}<div class="msg-time">${timeStr}${isSent?' ✓✓':''}</div></div>
-    </div>`;
-  });
-  el.innerHTML = html;
-  el.scrollTop = el.scrollHeight;
 }
 
 async function sendChatMessage() {
@@ -2724,38 +2718,30 @@ async function sendChatMessage() {
   input.value = '';
   autoResizeInput(input);
 
-  // Add message locally immediately (optimistic UI)
-  const localMsg = { key: { fromMe: true }, message: { conversation: text }, messageTimestamp: Date.now()/1000 };
-  if (!INBOX.messages[INBOX.activeChat.id]) INBOX.messages[INBOX.activeChat.id] = [];
-  INBOX.messages[INBOX.activeChat.id].push(localMsg);
-  renderMessages(INBOX.messages[INBOX.activeChat.id], INBOX.activeChat);
-  INBOX.activeChat.lastMsg = text;
-  INBOX.activeChat.time = new Date();
-  renderInboxList();
+  const novaMensagem = {
+    clinic_id: clinic?.id || null,
+    telefone: INBOX.activeChat.phone,
+    nome_contato: INBOX.activeChat.name,
+    conteudo: text,
+    tipo: 'text',
+    from_me: true,
+    criado_em: new Date().toISOString(),
+  };
 
-  // Save to Supabase
-  try {
-    await db.from('mensagens').insert({
-      clinic_id: clinic.id,
-      phone: INBOX.activeChat.phone,
-      contact_name: INBOX.activeChat.name,
-      content: text,
-      type: 'text',
-      from_me: true,
-      created_at: new Date().toISOString(),
-    });
-  } catch(e) { console.error('save msg error:', e); }
+  const { data: saved } = await db.from('mensagens').insert(novaMensagem).select().single();
+  if (saved) {
+    INBOX.activeChat.messages.push(saved);
+    renderMessages(INBOX.activeChat.messages, INBOX.activeChat);
+    INBOX.activeChat.lastMsg = text;
+    renderInboxList();
+  }
 
-  // Send via Evolution API if connected
   if (clinic?.whatsapp_instance) {
     try {
       await sendWhatsAppMessage(clinic.whatsapp_instance, INBOX.activeChat.phone, text);
-      toast('Mensagem enviada! ✓');
-    } catch(e) {
-      toast('Salvo localmente — WhatsApp offline', 'error');
+    } catch (e) {
+      toast('Salvo localmente — erro ao enviar WhatsApp', 'error');
     }
-  } else {
-    toast('Mensagem salva — conecte o WhatsApp para enviar');
   }
 }
 
@@ -2763,43 +2749,21 @@ async function sendImageMsg(event) {
   const file = event.target.files[0];
   if (!file || !INBOX.activeChat) return;
   const clinic = currentClinic();
-  if (!clinic?.whatsapp_instance) return;
+  if (!clinic?.whatsapp_instance) { toast('Conecte o WhatsApp primeiro!', 'error'); return; }
   toast('Enviando imagem...');
   const reader = new FileReader();
   reader.onload = async (e) => {
     const base64 = e.target.result.split(',')[1];
     try {
       await evoRequest('POST', `/message/sendMedia/${clinic.whatsapp_instance}`, {
-        number: '55' + INBOX.activeChat.phone.replace(/\D/g,''),
+        number: '55' + INBOX.activeChat.phone.replace(/\D/g, ''),
         mediatype: 'image',
         media: base64,
         fileName: file.name,
       });
       toast('Imagem enviada! ✓');
-      await loadChatMessages(INBOX.activeChat);
-    } catch(e) { toast('Erro ao enviar imagem','error'); }
-  };
-  reader.readAsDataURL(file);
-}
-
-async function sendAudioMsg(event) {
-  const file = event.target.files[0];
-  if (!file || !INBOX.activeChat) return;
-  const clinic = currentClinic();
-  toast('Enviando áudio...');
-  const reader = new FileReader();
-  reader.onload = async (e) => {
-    const base64 = e.target.result.split(',')[1];
-    try {
-      await evoRequest('POST', `/message/sendMedia/${clinic.whatsapp_instance}`, {
-        number: '55' + INBOX.activeChat.phone.replace(/\D/g,''),
-        mediatype: 'audio',
-        media: base64,
-        fileName: file.name,
-      });
-      toast('Áudio enviado! ✓');
-      await loadChatMessages(INBOX.activeChat);
-    } catch(e) { toast('Erro ao enviar áudio','error'); }
+      await loadInboxChats();
+    } catch (e) { toast('Erro ao enviar imagem', 'error'); }
   };
   reader.readAsDataURL(file);
 }
@@ -2811,6 +2775,12 @@ function handleChatKeydown(e) {
 function autoResizeInput(el) {
   el.style.height = 'auto';
   el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+async function refreshInbox() {
+  toast('Atualizando...');
+  await loadInboxChats();
+  toast('Atualizado! ✓');
 }
 
 function filterInboxTab(tab, btn) {
@@ -2825,13 +2795,33 @@ function filterInboxChats(val) {
   renderInboxList();
 }
 
-async function refreshInbox() {
-  toast('Atualizando conversas...');
-  await loadInboxChats();
-  toast('Atualizado!');
+function openNewChatModal() {
+  const phone = prompt('Digite o número (com DDD, sem +55):');
+  if (!phone) return;
+  const cleanPhone = phone.replace(/\D/g, '');
+  const lead = STATE.leads.find(l => l.telefone?.replace(/\D/g, '').slice(-9) === cleanPhone.slice(-9));
+  const chat = {
+    id: cleanPhone, phone: cleanPhone,
+    name: lead?.nome || cleanPhone,
+    lastMsg: '', time: new Date(),
+    unread: 0, lead, messages: [],
+  };
+  INBOX.chats.unshift(chat);
+  renderInboxList();
+  openChat(chat.id);
+}
+
+function createLeadFromChat(chatId) {
+  const chat = INBOX.chats.find(c => c.id === chatId);
+  if (!chat) return;
+  document.getElementById('nlName').value = chat.name !== chat.phone ? chat.name : '';
+  document.getElementById('nlPhone').value = chat.phone;
+  openModal('modalNewLead');
 }
 
 function startInboxPolling() {
+  // Substituído pelo Realtime — mantido para compatibilidade
+}
   if (INBOX.polling) clearInterval(INBOX.polling);
   INBOX.polling = setInterval(async () => {
     if (document.getElementById('page-inbox')?.classList.contains('active')) {
