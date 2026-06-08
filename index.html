@@ -2379,14 +2379,14 @@ async function loadInboxChats() {
     const { data: msgs, error } = await db
       .from('mensagens')
       .select('*')
-      .order('criado_em', { ascending: false })
+      .order('created_at', { ascending: false })
       .limit(500);
 
     if (error) throw error;
 
     const chatMap = {};
     (msgs || []).forEach(m => {
-      const phone = (m.telefone || '').replace(/\D/g, '');
+      const phone = (m.phone || '').replace(/\D/g, '');
       if (!phone) return;
       if (!chatMap[phone]) {
         const lead = STATE.leads.find(l =>
@@ -2395,9 +2395,9 @@ async function loadInboxChats() {
         chatMap[phone] = {
           id: phone,
           phone,
-          name: m.nome_contato || lead?.nome || phone,
+          name: m.contact_name || lead?.nome || phone,
           lastMsg: '',
-          time: new Date(m.criado_em),
+          time: new Date(m.created_at),
           unread: 0,
           lead,
           messages: [],
