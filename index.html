@@ -1394,7 +1394,15 @@ function showExpiringBanner() {
 }
 // ── SUPABASE DATA ─────────────────────────────
 async function loadClinics() {
-  const { data, error } = await db.from('clinicas').select('*').order('created_at', { ascending: true });
+  const isAdmin = STATE.profile?.role === 'admin' || STATE.profile?.role === 'administrador';
+  let query = db.from('clinicas').select('*').order('created_at', { ascending: true });
+  
+  // Não admin vê só as suas clínicas
+  if (!isAdmin) {
+    query = query.eq('user_id', STATE.user.id);
+  }
+  
+  const { data, error } = await query;
   if (error) { console.error('clinicas:', error); return; }
   STATE.clinics = data || [];
   document.getElementById('navClinicasBadge').textContent = STATE.clinics.length;
