@@ -20,7 +20,9 @@ export default async function handler(req, res) {
   }
 
   // Faz download de mídia e salva no Supabase Storage
-  async function salvarMidia(url, tipo, phone) {
+async function salvarMidia(url, tipo, phone) {
+  return url || null;
+}
     if (!url) return null;
     try {
       const resp = await fetch(url);
