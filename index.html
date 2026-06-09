@@ -2910,7 +2910,7 @@ async function enviarAudioGravado(audioBlob) {
     const reader = new FileReader();
     reader.onload = async (e) => {
       const base64 = e.target.result.split(',')[1];
-     const base64 = e.target.result.split(',')[1];
+    
       try {
         await evoRequest('POST', `/message/sendWhatsAppAudio/${clinic.whatsapp_instance}`, {
           number: '55' + INBOX.activeChat.phone.replace(/\D/g, ''),
