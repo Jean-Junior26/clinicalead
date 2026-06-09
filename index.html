@@ -2100,7 +2100,7 @@ async function toggleBloquearClinica(clinicId, bloqueadoAtual) {
   const { error } = await db.from('clinicas').update({ bloqueado: novo }).eq('id', clinicId);
   if (error) { toast('Erro ao atualizar: ' + error.message, 'error'); return; }
   toast(novo ? '🔒 Clínica bloqueada!' : '🔓 Clínica liberada!');
-  renderClinicas();
+  await renderClinicas();
 }
 
 async function switchClinicById(clinicId) {
