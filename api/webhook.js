@@ -4,7 +4,7 @@ module.exports = async function handler(req, res) {
   const SUPABASE_URL = process.env.SUPABASE_URL || 'https://zcwntpkiispbhjjgidih.supabase.co';
   const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
   const EVO_URL = 'https://evolution-api-production-b649.up.railway.app';
-  const EVO_KEY = 'EF8CB101-7B4D-40D5-9884-5931D5B9FB10';
+const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae000';
 
   if (!SUPABASE_KEY) return res.status(500).json({ error: 'Configuração ausente' });
 
