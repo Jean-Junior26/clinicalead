@@ -2841,7 +2841,90 @@ async function sendImageMsg(event) {
   };
   reader.readAsDataURL(file);
 }
+let mediaRecorder = null;
+let audioChunks = [];
+let isRecording = false;
 
+async function toggleGravarAudio() {
+  if (isRecording) {
+    pararGravacao();
+  } else {
+    iniciarGravacao();
+  }
+}
+
+async function iniciarGravacao() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream);
+    audioChunks = [];
+    isRecording = true;
+
+    // Muda ícone para parar
+    const btn = document.getElementById('btnGravarAudio');
+    if (btn) {
+      btn.innerHTML = '<i class="ti ti-player-stop" style="color:var(--coral);"></i>';
+      btn.title = 'Parar gravação';
+      btn.style.background = 'var(--coral-pale)';
+    }
+    toast('🎙️ Gravando... clique novamente para enviar');
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunks.push(e.data);
+    };
+
+    mediaRecorder.onstop = async () => {
+      const audioBlob = new Blob(audioChunks, { type: 'audio/ogg; codecs=opus' });
+      await enviarAudioGravado(audioBlob);
+      stream.getTracks().forEach(t => t.stop());
+      isRecording = false;
+
+      // Restaura ícone
+      const btn = document.getElementById('btnGravarAudio');
+      if (btn) {
+        btn.innerHTML = '<i class="ti ti-microphone"></i>';
+        btn.title = 'Gravar áudio';
+        btn.style.background = '';
+      }
+    };
+
+    mediaRecorder.start();
+  } catch (e) {
+    toast('Erro ao acessar microfone: ' + e.message, 'error');
+  }
+}
+
+function pararGravacao() {
+  if (mediaRecorder && isRecording) {
+    mediaRecorder.stop();
+    toast('Enviando áudio...');
+  }
+}
+
+async function enviarAudioGravado(audioBlob) {
+  const clinic = currentClinic();
+  if (!clinic?.whatsapp_instance) { toast('Conecte o WhatsApp primeiro!', 'error'); return; }
+  if (!INBOX.activeChat) { toast('Selecione uma conversa!', 'error'); return; }
+
+  try {
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const base64 = e.target.result.split(',')[1];
+      await evoRequest('POST', `/message/sendMedia/${clinic.whatsapp_instance}`, {
+        number: '55' + INBOX.activeChat.phone.replace(/\D/g, ''),
+        mediatype: 'audio',
+        media: base64,
+        fileName: 'audio.ogg',
+        mimetype: 'audio/ogg; codecs=opus',
+      });
+      toast('🎵 Áudio enviado! ✓');
+      await loadInboxChats();
+    };
+    reader.readAsDataURL(audioBlob);
+  } catch (e) {
+    toast('Erro ao enviar áudio: ' + e.message, 'error');
+  }
+}
 function handleChatKeydown(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(); }
 }
