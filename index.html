@@ -2684,6 +2684,7 @@ function renderMessages(msgs, chat) {
   el.innerHTML = html;
   el.scrollTop = el.scrollHeight;
 }
+ function setQuickReply(type, chatId) {
   const chat = INBOX.chats.find(c => c.id === chatId);
   const clinic = currentClinic();
   const nome = chat?.lead?.nome || chat?.name || 'cliente';
