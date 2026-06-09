@@ -2902,21 +2902,19 @@ function pararGravacao() {
 }
 
 async function enviarAudioGravado(audioBlob) {
-const clinic = currentClinic();
+  const clinic = currentClinic();
   if (!clinic?.whatsapp_instance) { toast('Conecte o WhatsApp primeiro!', 'error'); return; }
   if (!INBOX.activeChat) { toast('Selecione uma conversa!', 'error'); return; }
 
   try {
     const reader = new FileReader();
     reader.onload = async (e) => {
-    const base64 = e.target.result.split(',')[1];
+      const base64 = e.target.result.split(',')[1];
       try {
-        const resp = await evoRequest('POST', `/message/sendMedia/${clinic.whatsapp_instance}`, {
-          number: '55' + INBOX.activeChat.phone.replace(/\D/g, ''),
-          mediatype: 'audio',
-          media: `data:audio/webm;base64,${base64}`,
-          fileName: 'audio.webm',
-          mimetype: 'audio/webm',
+        const phone = '55' + INBOX.activeChat.phone.replace(/\D/g, '');
+        const resp = await evoRequest('POST', `/message/sendWhatsAppAudio/${clinic.whatsapp_instance}`, {
+          number: phone,
+          audio: `data:audio/webm;base64,${base64}`,
           delay: 1000,
         });
         console.log('Resposta envio áudio:', JSON.stringify(resp));
@@ -2926,14 +2924,12 @@ const clinic = currentClinic();
         console.error('Erro envio áudio:', err);
         toast('Erro ao enviar áudio: ' + err.message, 'error');
       }
-    
     };
     reader.readAsDataURL(audioBlob);
   } catch (e) {
     console.error('ERRO AUDIO:', e);
     toast('Erro ao enviar áudio: ' + e.message, 'error');
   }
-
 }
 function handleChatKeydown(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(); }
