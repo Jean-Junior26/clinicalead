@@ -5,7 +5,6 @@ module.exports = async function handler(req, res) {
   const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
   if (!SUPABASE_KEY) {
-    console.error('[webhook] SUPABASE_SERVICE_KEY não configurada');
     return res.status(500).json({ error: 'Configuração ausente' });
   }
 
@@ -19,41 +18,11 @@ module.exports = async function handler(req, res) {
     return res.status(400).json({ error: 'Body vazio' });
   }
 
-  // Faz download de mídia e salva no Supabase Storage
-async function salvarMidia(url, tipo, phone) {
-  return url || null;
-}
-    if (!url) return null;
-    try {
-      const resp = await fetch(url);
-      if (!resp.ok) return null;
-      const buffer = await resp.arrayBuffer();
-      const ext = tipo === 'audio' ? 'ogg' : tipo === 'image' ? 'jpg' : tipo === 'video' ? 'mp4' : 'bin';
-      const fileName = `${tipo}_${phone}_${Date.now()}.${ext}`;
-      const bucket = tipo === 'audio' ? 'audios' : 'midias';
-      const uploadResp = await fetch(`${SUPABASE_URL}/storage/v1/object/${bucket}/${fileName}`, {
-        method: 'POST',
-        headers: {
-          apikey: SUPABASE_KEY,
-          Authorization: `Bearer ${SUPABASE_KEY}`,
-          'Content-Type': resp.headers.get('content-type') || 'application/octet-stream',
-        },
-        body: buffer,
-      });
-      if (!uploadResp.ok) return url; // fallback para URL original
-      return `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${fileName}`;
-    } catch (e) {
-      console.error('[webhook] Erro ao salvar mídia:', e.message);
-      return url; // fallback para URL original
-    }
-  }
-
   try {
     const rawEvento = body?.event || body?.type || '';
     const evento = rawEvento.toLowerCase().replace('.', '_');
 
     if (evento !== 'messages_upsert') {
-      console.log('[webhook] Evento ignorado:', rawEvento);
       return res.status(200).json({ ok: true, ignorado: rawEvento });
     }
 
@@ -72,4 +41,87 @@ async function salvarMidia(url, tipo, phone) {
     }
 
     const rawMessages = body?.data || body?.messages || [];
-    const list = Array.isArray
+    const list = Array.isArray(rawMessages) ? rawMessages : [rawMessages];
+    const insertados = [];
+    const erros = [];
+
+    for (const msg of list) {
+      try {
+        const key = msg?.key || {};
+        const jid = key?.remoteJid || '';
+        const fromMe = key?.fromMe ?? false;
+
+        if (!jid || jid.includes('status@broadcast') || jid.includes('@g.us')) continue;
+
+        const phone = jid.replace('@s.whatsapp.net', '').replace('@c.us', '');
+        const contact_name = fromMe ? null : (msg?.pushName || null);
+        const message_id = key?.id || null;
+        const created_at = msg?.messageTimestamp
+          ? new Date(Number(msg.messageTimestamp) * 1000).toISOString()
+          : new Date().toISOString();
+
+        let content = '';
+        let type = 'text';
+        let media_url = null;
+        const m = msg?.message || {};
+
+        if (m.conversation) {
+          content = m.conversation; type = 'text';
+        } else if (m.extendedTextMessage) {
+          content = m.extendedTextMessage?.text || ''; type = 'text';
+        } else if (m.imageMessage) {
+          content = m.imageMessage?.caption || '📷 Imagem'; type = 'image';
+          media_url = m.imageMessage?.url || null;
+        } else if (m.audioMessage) {
+          content = '🎵 Áudio'; type = 'audio';
+          media_url = m.audioMessage?.url || null;
+        } else if (m.videoMessage) {
+          content = m.videoMessage?.caption || '🎥 Vídeo'; type = 'video';
+          media_url = m.videoMessage?.url || null;
+        } else if (m.documentMessage) {
+          content = m.documentMessage?.fileName || '📄 Documento'; type = 'document';
+          media_url = m.documentMessage?.url || null;
+        } else if (m.stickerMessage) {
+          content = '🖼️ Sticker'; type = 'sticker';
+        } else if (m.locationMessage) {
+          content = `📍 ${m.locationMessage?.degreesLatitude}, ${m.locationMessage?.degreesLongitude}`;
+          type = 'location';
+        } else if (m.contactMessage) {
+          content = `👤 ${m.contactMessage?.displayName || ''}`; type = 'contact';
+        } else {
+          content = '[mídia]'; type = 'unknown';
+        }
+
+        const payload = {
+          clinic_id, phone, contact_name, content, type,
+          from_me: fromMe, media_url, message_id, created_at,
+        };
+
+        const insertResp = await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
+          method: 'POST',
+          headers: {
+            apikey: SUPABASE_KEY,
+            Authorization: `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json',
+            Prefer: 'return=minimal',
+          },
+          body: JSON.stringify(payload),
+        });
+
+        if (!insertResp.ok) {
+          const errText = await insertResp.text();
+          erros.push({ phone, erro: errText });
+        } else {
+          insertados.push(phone);
+        }
+      } catch (msgErr) {
+        erros.push({ erro: msgErr.message });
+      }
+    }
+
+    return res.status(200).json({ ok: true, processadas: insertados.length, erros: erros.length });
+
+  } catch (err) {
+    return res.status(500).json({ error: 'Erro interno', message: err.message });
+  }
+}
