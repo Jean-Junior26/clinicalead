@@ -2056,26 +2056,69 @@ async function renderMeuPlano() {
   }
 }
   // ── CLÍNICAS ──────────────────────────────────
-function renderClinicas() {
-  document.getElementById('clinicasList').innerHTML = STATE.clinics.length
-    ? STATE.clinics.map((c,i)=>`<tr>
-        <td><div style="display:flex;align-items:center;gap:12px;"><div class="avatar" style="${avatarStyle(c.nome)}">${initials(c.nome)}</div><div><div class="td-bold">${c.nome}</div><div class="td-muted">${c.email||'—'}</div></div></div></td>
-        <td style="color:var(--text-secondary);">${c.responsavel||'—'}</td>
-        <td class="td-muted">${c.telefone||'—'}</td>
-        <td><span class="badge ${c.plano==='Pro'?'badge-gold':'badge-gray'}">${c.plano||'Pro'}</span></td>
-        <td class="td-mono">${STATE.leads.filter(l=>l.clinic_id===c.id).length}</td>
-        <td>${c.whatsapp_instance ? `<span class="badge badge-gold"><i class="ti ti-check"></i> Conectado</span> <button class="btn btn-sm" onclick="reconectarWhatsApp('${c.whatsapp_instance}')" title="Reconectar"><i class="ti ti-refresh"></i></button>` : '<button class="btn btn-sm" onclick="openWhatsAppConnect('+i+')"><i class="ti ti-brand-whatsapp"></i> Conectar</button>'}</td>
+async function renderClinicas() {
+  const isAdmin = STATE.profile?.role === 'admin';
+
+  // Admin vê todas as clínicas
+  let clinics = STATE.clinics;
+  if (isAdmin) {
+    const { data } = await db.from('clinicas').select('*').order('created_at', { ascending: false });
+    clinics = data || [];
+  }
+
+  document.getElementById('clinicasList').innerHTML = clinics.length
+    ? clinics.map((c, i) => `<tr style="${c.bloqueado ? 'opacity:0.5;' : ''}">
+        <td><div style="display:flex;align-items:center;gap:12px;">
+          <div class="avatar" style="${avatarStyle(c.nome)}">${initials(c.nome)}</div>
+          <div>
+            <div class="td-bold">${c.nome} ${c.bloqueado ? '<span class="badge badge-coral">Bloqueado</span>' : ''}</div>
+            <div class="td-muted">${c.email || '—'}</div>
+          </div>
+        </div></td>
+        <td style="color:var(--text-secondary);">${c.responsavel || '—'}</td>
+        <td class="td-muted">${c.telefone || '—'}</td>
+        <td><span class="badge ${c.plano === 'Pro' ? 'badge-gold' : 'badge-gray'}">${c.plano || 'Pro'}</span></td>
+        <td class="td-mono">${STATE.leads.filter(l => l.clinic_id === c.id).length}</td>
+        <td>${c.whatsapp_instance
+          ? `<span class="badge badge-gold"><i class="ti ti-check"></i> Conectado</span>`
+          : '<span class="badge badge-gray">Não conectado</span>'}</td>
         <td><div style="display:flex;gap:6px;">
-  <button class="btn btn-sm btn-primary" onclick="switchClinic(${i});showPage('dashboard')"><i class="ti ti-login"></i> Acessar</button>
-  ${c.whatsapp_instance ? `<button class="btn btn-sm" onclick="setupWebhookManual('${c.whatsapp_instance}')" title="Configurar webhook"><i class="ti ti-webhook"></i></button>` : ''}
-</div></td>
+          ${isAdmin ? `
+            <button class="btn btn-sm ${c.bloqueado ? 'btn-primary' : 'btn-danger'}" onclick="toggleBloquearClinica('${c.id}', ${c.bloqueado})">
+              <i class="ti ti-${c.bloqueado ? 'lock-open' : 'lock'}"></i> ${c.bloqueado ? 'Liberar' : 'Bloquear'}
+            </button>` : ''}
+          <button class="btn btn-sm btn-primary" onclick="switchClinicById('${c.id}')">
+            <i class="ti ti-login"></i> Acessar
+          </button>
+        </div></td>
       </tr>`).join('')
     : '<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text-secondary);">Nenhuma clínica cadastrada ainda</td></tr>';
 }
 
-// ── MODAL LEAD ────────────────────────────────
-function openLeadDetail(id) {
-  const l = STATE.leads.find(x=>x.id===id);
+async function toggleBloquearClinica(clinicId, bloqueadoAtual) {
+  const novo = !bloqueadoAtual;
+  const { error } = await db.from('clinicas').update({ bloqueado: novo }).eq('id', clinicId);
+  if (error) { toast('Erro ao atualizar: ' + error.message, 'error'); return; }
+  toast(novo ? '🔒 Clínica bloqueada!' : '🔓 Clínica liberada!');
+  renderClinicas();
+}
+
+async function switchClinicById(clinicId) {
+  const idx = STATE.clinics.findIndex(c => c.id === clinicId);
+  if (idx >= 0) {
+    switchClinic(idx);
+  } else {
+    const { data } = await db.from('clinicas').select('*').eq('id', clinicId).single();
+    if (data) {
+      STATE.clinics.push(data);
+      STATE.currentClinicIdx = STATE.clinics.length - 1;
+      renderClinicSwitcher();
+      await loadLeads();
+      showPage('dashboard');
+      toast('Clínica: ' + data.nome);
+    }
+  }
+}
   if (!l) return;
   document.getElementById('modalLeadTitle').textContent = l.nome;
   document.getElementById('modalLeadBody').innerHTML = `
