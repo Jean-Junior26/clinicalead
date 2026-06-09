@@ -2926,9 +2926,7 @@ const clinic = currentClinic();
         console.error('Erro envio áudio:', err);
         toast('Erro ao enviar áudio: ' + err.message, 'error');
       }
-        console.error('Erro envio áudio:', err);
-        toast('Erro ao enviar áudio: ' + err.message, 'error');
-      }
+    
     };
     reader.readAsDataURL(audioBlob);
   } catch (e) {
