@@ -2960,6 +2960,7 @@ function autoResizeInput(el) {
 async function refreshInbox() {
   toast('Atualizando...');
   await loadInboxChats();
+  startRealtimeInbox();
   toast('Atualizado! ✓');
 }
 
