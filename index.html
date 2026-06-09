@@ -2380,7 +2380,7 @@ async function loadInboxChats() {
    .from('mensagens')
     .select('*')
   
-    .order('criado_em', { ascending: false })
+    .order('created_at', { ascending: false })
     .limit(500);
 
     if (error) throw error;
