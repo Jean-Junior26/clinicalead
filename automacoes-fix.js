@@ -1,9 +1,8 @@
 // ============================================================
 // CLINICALEAD — FUNÇÕES DE AUTOMAÇÕES CORRIGIDAS
-// Substitui as funções correspondentes no index.html
 // ============================================================
 
-// ── HELPER: salvar mensagem no Inbox (tabela mensagens) ──────
+// ── HELPER: salvar mensagem no Inbox ────────────────────────
 async function salvarMensagemInbox(clinic, phone, contactName, content) {
   if (!clinic?.id || !phone || !content) return;
   try {
@@ -38,48 +37,42 @@ async function loadAutomations() {
   const defaults = [
     {
       id: 1, tipo: 'boasvindas',
-      titulo: 'Boas-vindas ao novo lead',
-      title: 'Boas-vindas ao novo lead',
+      titulo: 'Boas-vindas ao novo lead', title: 'Boas-vindas ao novo lead',
       desc: 'Enviada assim que um novo lead entra no sistema.',
       trigger: 'Lead criado', icon: 'ti-hand-click', active: true, ativo: true,
       msg: 'Olá, {nome}! 😊 Tudo bem?\n\nAqui é da *{clinica}*! Vi que você tem interesse em *{procedimento}* e adoraria te ajudar nessa jornada.\n\nPosso te agendar uma *avaliação gratuita e sem compromisso*? É rapidinho, a gente te explica tudo pessoalmente! 🦷\n\nQual o melhor dia pra você?',
     },
     {
       id: 2, tipo: 'confirmacao',
-      titulo: 'Confirmação de agendamento',
-      title: 'Confirmação de agendamento',
+      titulo: 'Confirmação de agendamento', title: 'Confirmação de agendamento',
       desc: 'Enviada imediatamente ao registrar a consulta.',
       trigger: 'Consulta agendada', icon: 'ti-calendar-check', active: true, ativo: true,
       msg: 'Olá, {nome}! 🎉 Sua consulta está *confirmada*!\n\n📅 *Data:* {data}\n⏰ *Horário:* {hora}\n📍 *Endereço:* R. Rui Barbosa, 483 - Centro, Araguari - MG\n🗺️ https://share.google/aBRk2BmdSOHL2iN9X\n\nQualquer dúvida, é só chamar aqui! Te esperamos 😊',
     },
     {
       id: 3, tipo: 'lembrete',
-      titulo: 'Lembrete 24h antes',
-      title: 'Lembrete 24h antes',
+      titulo: 'Lembrete 24h antes', title: 'Lembrete 24h antes',
       desc: 'Enviado 24h antes para reduzir faltas.',
       trigger: '24h antes da consulta', icon: 'ti-clock', active: true, ativo: true,
       msg: 'Oi {nome}! 👋 Passando para lembrar que *amanhã* você tem consulta conosco!\n\n⏰ *Horário:* {hora}\n📍 *Endereço:* R. Rui Barbosa, 483 - Centro, Araguari - MG\n🗺️ https://share.google/aBRk2BmdSOHL2iN9X\n\nConfirma sua presença? Responda *SIM* ou *NÃO* 😊',
     },
     {
       id: 4, tipo: 'followup',
-      titulo: 'Follow-up sem resposta',
-      title: 'Follow-up sem resposta',
+      titulo: 'Follow-up sem resposta', title: 'Follow-up sem resposta',
       desc: 'Reativa leads sem resposta após 48h.',
       trigger: '48h sem resposta', icon: 'ti-refresh', active: true, ativo: true,
       msg: 'Oi {nome}, tudo bem? 😊\n\nVi que ainda não conseguimos conversar sobre *{procedimento}* e queria saber se ainda posso te ajudar!\n\nTemos horários disponíveis essa semana para uma *avaliação gratuita*. Seria ótimo te conhecer pessoalmente 🦷\n\nQual o melhor momento pra você?',
     },
     {
       id: 5, tipo: 'posconsulta',
-      titulo: 'Pós-consulta',
-      title: 'Pós-consulta',
+      titulo: 'Pós-consulta', title: 'Pós-consulta',
       desc: 'Enviada 2h após comparecimento.',
       trigger: 'Status = Compareceu', icon: 'ti-heart', active: true, ativo: true,
       msg: 'Oi {nome}! 😊 Foi um prazer te receber hoje na *{clinica}*!\n\nEspero que tenha gostado da avaliação e que tenha tirado todas as suas dúvidas.\n\nCaso queira dar continuidade ao tratamento de *{procedimento}*, temos condições especiais de pagamento e parcelamento. Posso te passar mais detalhes? 💛',
     },
     {
       id: 6, tipo: 'reativacao',
-      titulo: 'Reativação de lead frio',
-      title: 'Reativação de lead frio',
+      titulo: 'Reativação de lead frio', title: 'Reativação de lead frio',
       desc: 'Reativa leads inativos há 7+ dias.',
       trigger: '7 dias sem atividade', icon: 'ti-star', active: false, ativo: false,
       msg: 'Oi {nome}! 🌟 Tudo bem?\n\nPassei aqui porque lembrei de você e queria saber se ainda tem interesse em cuidar do seu sorriso com a gente! 😊\n\nEsse mês temos uma *condição especial* para *{procedimento}* com formas facilitadas de pagamento.\n\nPosso te contar mais detalhes? É por tempo limitado! 🦷',
@@ -91,13 +84,11 @@ async function loadAutomations() {
     return;
   }
 
-  // Busca automações salvas desta clínica no Supabase
   const { data: salvas } = await db
     .from('automacoes')
     .select('*')
     .eq('clinic_id', clinic.id);
 
-  // Merge: usa versão salva se existir, senão usa padrão
   STATE.automations = defaults.map(def => {
     const salva = (salvas || []).find(s => s.tipo === def.tipo);
     if (salva) {
@@ -196,7 +187,7 @@ async function sendAutomation(lead, autoTipo) {
   }
 }
 
-// ── saveNewLead (versão com automação de boas-vindas) ─────────
+// ── saveNewLead ──────────────────────────────────────────────
 async function saveNewLead() {
   const nome = document.getElementById('nlName').value.trim();
   const procedimento = document.getElementById('nlProc').value;
@@ -222,13 +213,12 @@ async function saveNewLead() {
   renderPage(document.querySelector('.page.active')?.id?.replace('page-', ''));
   toast(`${nome} adicionado como novo lead! 🎉`);
 
-  // Dispara automação de boas-vindas
   if (data.telefone) {
     await sendAutomation(data, 'boasvindas');
   }
 }
 
-// ── salvarNovoAgendamento (com confirmação salva no Inbox) ────
+// ── salvarNovoAgendamento ────────────────────────────────────
 async function salvarNovoAgendamento() {
   const leadId = document.getElementById('naLead').value;
   const data = document.getElementById('naData').value;
@@ -259,7 +249,6 @@ async function salvarNovoAgendamento() {
   renderDaySchedule(data);
   toast('Consulta agendada! ✓');
 
-  // Envia automação de confirmação com data e hora reais
   if (clinic?.whatsapp_instance && lead?.telefone) {
     const auto = STATE.automations.find(a => a.tipo === 'confirmacao');
     if (auto?.active) {
@@ -278,7 +267,7 @@ async function salvarNovoAgendamento() {
   }
 }
 
-// ── sendWAConsulta (lembrete com msg personalizada) ───────────
+// ── sendWAConsulta ───────────────────────────────────────────
 async function sendWAConsulta(consultaId) {
   const c = CAL.consultas.find(x => x.id === consultaId);
   if (!c) return;
@@ -311,7 +300,7 @@ async function sendWAConsulta(consultaId) {
   }
 }
 
-// ── marcarCompareceu (com automação pós-consulta) ─────────────
+// ── marcarCompareceu ─────────────────────────────────────────
 async function marcarCompareceu(consultaId) {
   const c = CAL.consultas.find(x => x.id === consultaId);
   if (!c) return;
@@ -328,13 +317,12 @@ async function marcarCompareceu(consultaId) {
   renderDaySchedule(CAL.selectedDate);
   toast('Marcado como compareceu!');
 
-  // Dispara automação pós-consulta
   if (lead) {
     await sendAutomation(lead, 'posconsulta');
   }
 }
 
-// ── confirmarEnvioWA (salva no Inbox) ─────────────────────────
+// ── confirmarEnvioWA ─────────────────────────────────────────
 async function confirmarEnvioWA() {
   const leadId = document.getElementById('sendWALeadId').value;
   const l = STATE.leads.find(x => x.id === leadId);
@@ -353,14 +341,13 @@ async function confirmarEnvioWA() {
   }
 }
 
-// ── updateWAPreview (usa msg personalizada da clínica) ────────
+// ── updateWAPreview ──────────────────────────────────────────
 function updateWAPreview() {
   const leadId = document.getElementById('sendWALeadId').value;
   const l = STATE.leads.find(x => x.id === leadId);
   const clinic = currentClinic();
   const type = document.getElementById('sendWATemplate').value;
 
-  // Tenta usar automação personalizada da clínica
   const autoMap = {
     boasvindas: 'boasvindas',
     confirmacao: 'confirmacao',
@@ -378,12 +365,10 @@ function updateWAPreview() {
     }
   }
 
-  // Fallback para custom
   document.getElementById('sendWAMsg').value = '';
 }
 
-// ── switchClinic: recarrega automações ao trocar de clínica ───
-const _originalSwitchClinic = typeof switchClinic === 'function' ? switchClinic : null;
+// ── switchClinic: corrigido — limpa agenda ao trocar clínica ─
 async function switchClinic(idx) {
   const clinic = STATE.clinics[idx];
   const isAdmin = STATE.profile?.role === 'admin' || STATE.profile?.role === 'administrador';
@@ -397,7 +382,9 @@ async function switchClinic(idx) {
   document.getElementById('clinicDropdown').classList.remove('open');
   renderClinicSwitcher();
   await loadLeads();
-  await loadAutomations(); // recarrega automações da nova clínica
+  await loadAutomations();
+  CAL.consultas = []; // limpa agenda da clínica anterior
+  CAL.selectedDate = null; // limpa dia selecionado
   renderPage(document.querySelector('.page.active')?.id?.replace('page-', '') || 'dashboard');
   toast('Clínica: ' + currentClinic()?.nome);
 }
