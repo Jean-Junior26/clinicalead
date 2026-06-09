@@ -1343,29 +1343,9 @@ await loadClinics();
 
 // ── CHECK SUBSCRIPTION ────────────────────────
 async function checkSubscription(userId) {
-  if (STATE.profile?.role === 'admin') return 'active';
-  try {
-    const { data, error } = await db
-      .from('assinaturas')
-      .select('*')
-      .eq('user_id', userId)
-      .in('status', ['active', 'authorized', 'pending'])
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
-
-    if (error || !data) return 'none';
-
-    const now = new Date();
-    const expires = data.expires_at ? new Date(data.expires_at) : null;
-
-    if (expires && expires < now) return 'expired';
-
-    if (expires) {
-      const daysLeft = Math.ceil((expires - now) / (1000 * 60 * 60 * 24));
-      if (daysLeft <= 3) return 'expiring_soon';
-    }
-
+  // Verificação de planos desativada — controle manual pelo admin
+  return 'active';
+}
     return 'active';
   } catch (e) {
     return 'active';
