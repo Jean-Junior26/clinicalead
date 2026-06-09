@@ -2909,9 +2909,9 @@ const clinic = currentClinic();
   try {
     const reader = new FileReader();
     reader.onload = async (e) => {
-      const base64 = e.target.result.split(',')[1];
-    try {
-      const resp = await evoRequest('POST', `/message/sendMedia/${clinic.whatsapp_instance}`, {
+    const base64 = e.target.result.split(',')[1];
+      try {
+        const resp = await evoRequest('POST', `/message/sendMedia/${clinic.whatsapp_instance}`, {
           number: '55' + INBOX.activeChat.phone.replace(/\D/g, ''),
           mediatype: 'audio',
           media: `data:audio/webm;base64,${base64}`,
@@ -2919,10 +2919,13 @@ const clinic = currentClinic();
           mimetype: 'audio/webm',
           delay: 1000,
         });
-        console.log('Resposta envio áudio:', resp);
+        console.log('Resposta envio áudio:', JSON.stringify(resp));
         toast('🎵 Áudio enviado! ✓');
         await loadInboxChats();
       } catch(err) {
+        console.error('Erro envio áudio:', err);
+        toast('Erro ao enviar áudio: ' + err.message, 'error');
+      }
         console.error('Erro envio áudio:', err);
         toast('Erro ao enviar áudio: ' + err.message, 'error');
       }
