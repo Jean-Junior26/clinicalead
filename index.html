@@ -2567,11 +2567,12 @@ async function openChat(chatId) {
   renderChatHeader(chat);
   renderMessages(chat.messages, chat);
 
-  const clinic = currentClinic();
+
+ const clinic = currentClinic();
   if (clinic) {
     db.from('mensagens')
       .update({ read_at: new Date().toISOString() })
-      .eq('telefone', chat.phone)
+      .eq('phone', chat.phone)
       .is('read_at', null)
       .eq('from_me', false)
       .then(() => {});
