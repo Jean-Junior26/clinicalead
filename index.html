@@ -1466,6 +1466,15 @@ async function switchClinic(idx) {
 
 // ── NAVIGATION ────────────────────────────────
 function showPage(id, el) {
+  const isAdmin = STATE.profile?.role === 'admin' || STATE.profile?.role === 'administrador';
+  const clinic = currentClinic();
+  
+  // Bloqueia acesso se clínica bloqueada e não é admin
+  if (!isAdmin && clinic?.bloqueado) {
+    toast('Acesso bloqueado! Entre em contato com o suporte.', 'error');
+    return;
+  }
+
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   const page = document.getElementById('page-'+id);
