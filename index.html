@@ -2678,11 +2678,7 @@ function renderMessages(msgs, chat) {
         bubbleContent = `<div style="opacity:0.5;font-size:11px;">📎 Mídia</div>`;
       }
     };
-        bubbleContent = `<div>${formatted}</div>`;
-      } else {
-        bubbleContent = `<div style="opacity:0.5;font-size:11px;">📎 Mídia</div>`;
-      }
-    }
+    
     html += `<div class="msg-row ${isSent ? 'sent' : ''}">
       <div class="msg-bubble ${isSent ? 'sent' : 'received'}">
         ${bubbleContent}
