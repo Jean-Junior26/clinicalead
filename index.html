@@ -1448,6 +1448,14 @@ ${STATE.clinics.length === 0 || STATE.profile?.role === 'admin' ? `<div class="c
 }
 
 async function switchClinic(idx) {
+  const clinic = STATE.clinics[idx];
+  const isAdmin = STATE.profile?.role === 'admin' || STATE.profile?.role === 'administrador';
+  
+  if (!isAdmin && clinic?.bloqueado) {
+    toast('Esta clínica está bloqueada!', 'error');
+    return;
+  }
+  
   STATE.currentClinicIdx = idx;
   document.getElementById('clinicDropdown').classList.remove('open');
   renderClinicSwitcher();
