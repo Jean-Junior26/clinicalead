@@ -2931,9 +2931,7 @@ const clinic = currentClinic();
     console.error('ERRO AUDIO:', e);
     toast('Erro ao enviar áudio: ' + e.message, 'error');
   }
-    toast('Erro ao enviar áudio: ' + e.message, 'error');
-  }
-  }
+
 }
 function handleChatKeydown(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(); }
