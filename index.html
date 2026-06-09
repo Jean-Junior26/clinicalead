@@ -2902,7 +2902,7 @@ function pararGravacao() {
 }
 
 async function enviarAudioGravado(audioBlob) {
-  const clinic = currentClinic();
+const clinic = currentClinic();
   if (!clinic?.whatsapp_instance) { toast('Conecte o WhatsApp primeiro!', 'error'); return; }
   if (!INBOX.activeChat) { toast('Selecione uma conversa!', 'error'); return; }
 
@@ -2910,26 +2910,27 @@ async function enviarAudioGravado(audioBlob) {
     const reader = new FileReader();
     reader.onload = async (e) => {
       const base64 = e.target.result.split(',')[1];
-    
       try {
-        await evoRequest('POST', `/message/sendMedia/${clinic.whatsapp_instance}`, {
+        const resp = await evoRequest('POST', `/message/sendMedia/${clinic.whatsapp_instance}`, {
           number: '55' + INBOX.activeChat.phone.replace(/\D/g, ''),
           mediatype: 'audio',
           media: base64,
           fileName: 'audio.webm',
           mimetype: 'audio/webm',
         });
-          number: '55' + INBOX.activeChat.phone.replace(/\D/g, ''),
-         
+        console.log('Resposta envio áudio:', resp);
+        toast('🎵 Áudio enviado! ✓');
         await loadInboxChats();
       } catch(err) {
+        console.error('Erro envio áudio:', err);
         toast('Erro ao enviar áudio: ' + err.message, 'error');
       }
     };
     reader.readAsDataURL(audioBlob);
   } catch (e) {
-   } catch (e) {
     console.error('ERRO AUDIO:', e);
+    toast('Erro ao enviar áudio: ' + e.message, 'error');
+  }
     toast('Erro ao enviar áudio: ' + e.message, 'error');
   }
   }
