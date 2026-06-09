@@ -2398,7 +2398,7 @@ async function loadInboxChats() {
           phone,
           name: m.contact_name || lead?.nome || phone,
           lastMsg: '',
-          time: new Date(created_at),
+         time: new Date(m.created_at),
           unread: 0,
           lead,
           messages: [],
