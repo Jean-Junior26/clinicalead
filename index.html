@@ -2119,6 +2119,9 @@ async function switchClinicById(clinicId) {
     }
   }
 }
+ 
+  function openLeadDetail(id) {
+  const l = STATE.leads.find(x=>x.id===id);
   if (!l) return;
   document.getElementById('modalLeadTitle').textContent = l.nome;
   document.getElementById('modalLeadBody').innerHTML = `
