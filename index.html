@@ -2912,7 +2912,13 @@ async function enviarAudioGravado(audioBlob) {
       const base64 = e.target.result.split(',')[1];
     
       try {
-        await evoRequest('POST', `/message/sendWhatsAppAudio/${clinic.whatsapp_instance}`, {
+        await evoRequest('POST', `/message/sendMedia/${clinic.whatsapp_instance}`, {
+          number: '55' + INBOX.activeChat.phone.replace(/\D/g, ''),
+          mediatype: 'audio',
+          media: base64,
+          fileName: 'audio.mp3',
+          mimetype: 'audio/mpeg',
+        });
           number: '55' + INBOX.activeChat.phone.replace(/\D/g, ''),
           audio: base64,
           encoding: true,
