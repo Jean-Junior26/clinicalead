@@ -2928,7 +2928,10 @@ async function enviarAudioGravado(audioBlob) {
     };
     reader.readAsDataURL(audioBlob);
   } catch (e) {
+   } catch (e) {
+    console.error('ERRO AUDIO:', e);
     toast('Erro ao enviar áudio: ' + e.message, 'error');
+  }
   }
 }
 function handleChatKeydown(e) {
