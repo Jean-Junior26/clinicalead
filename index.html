@@ -2638,32 +2638,31 @@ function renderMessages(msgs, chat) {
       lastDate = dateStr;
     }
 
-    let bubbleContent = '';
-    const tipo = m.tipo || 'text';
-
-    if (tipo === 'image' || tipo === 'imageMessage') {
-      bubbleContent =m.url_da_midia
-        ? `<div><img src="${m.url_da_midia}" style="max-width:240px;max-height:240px;border-radius:8px;display:block;cursor:pointer;" onclick="window.open('${m.url_da_midia}','_blank')" onerror="this.style.display='none'"/>${m.conteudo ? `<div style="font-size:13px;margin-top:4px;">${m.conteudo}</div>` : ''}</div>`
+  let bubbleContent = '';
+    const tipo = m.type || 'text';
+    if (tipo === 'image') {
+      bubbleContent = m.media_url
+        ? `<div><img src="${m.media_url}" style="max-width:240px;max-height:240px;border-radius:8px;display:block;cursor:pointer;" onclick="window.open('${m.media_url}','_blank')" onerror="this.style.display='none'"/>${m.content ? `<div style="font-size:13px;margin-top:4px;">${m.content}</div>` : ''}</div>`
         : `<div style="font-size:12px;opacity:0.6;">🖼️ Imagem</div>`;
-    } else if (tipo === 'audio' || tipo === 'audioMessage') {
-      bubbleContent =m.url_da_midia
-        ? `<audio controls style="width:200px;height:36px;"><source src="${m.url_da_midia}"></audio>`
+    } else if (tipo === 'audio') {
+      bubbleContent = m.media_url
+        ? `<audio controls style="width:200px;height:36px;"><source src="${m.media_url}"></audio>`
         : `<div style="font-size:12px;opacity:0.6;">🎵 Áudio</div>`;
-    } else if (tipo === 'video' || tipo === 'videoMessage') {
-      bubbleContent = m.url_da_midia
-        ? `<video controls style="max-width:240px;max-height:200px;border-radius:8px;"><source src="${m.url_da_midia}"></video>`
+    } else if (tipo === 'video') {
+      bubbleContent = m.media_url
+        ? `<video controls style="max-width:240px;max-height:200px;border-radius:8px;"><source src="${m.media_url}"></video>`
         : `<div style="font-size:12px;opacity:0.6;">🎬 Vídeo</div>`;
-    } else if (tipo === 'document' || tipo === 'documentMessage') {
+    } else if (tipo === 'document') {
       bubbleContent = `<div style="display:flex;align-items:center;gap:8px;">
         <i class="ti ti-file" style="font-size:24px;color:var(--gold);"></i>
-        <div>${m.conteudo || 'Documento'}${m.url_da_midia ? `<br><a href="${m.url_da_midia}" target="_blank" style="font-size:11px;color:var(--gold);">Baixar</a>` : ''}</div>
+        <div>${m.content || 'Documento'}${m.media_url ? `<br><a href="${m.media_url}" target="_blank" style="font-size:11px;color:var(--gold);">Baixar</a>` : ''}</div>
       </div>`;
-    } else if (tipo === 'sticker' || tipo === 'stickerMessage') {
-      bubbleContent = m.url_da_midia
-        ? `<img src="${m.url_da_midia}" style="width:100px;height:100px;object-fit:contain;" onerror="this.parentElement.innerHTML='😄'"/>`
+    } else if (tipo === 'sticker') {
+      bubbleContent = m.media_url
+        ? `<img src="${m.media_url}" style="width:100px;height:100px;object-fit:contain;" onerror="this.parentElement.innerHTML='😄'"/>`
         : `<div style="font-size:12px;opacity:0.6;">😄 Figurinha</div>`;
     } else {
-      const text = m.conteudo || '';
+      const text = m.content || '';
       if (text) {
         const formatted = text
           .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -2675,7 +2674,6 @@ function renderMessages(msgs, chat) {
         bubbleContent = `<div style="opacity:0.5;font-size:11px;">📎 Mídia</div>`;
       }
     }
-
     html += `<div class="msg-row ${isSent ? 'sent' : ''}">
       <div class="msg-bubble ${isSent ? 'sent' : 'received'}">
         ${bubbleContent}
@@ -2683,21 +2681,9 @@ function renderMessages(msgs, chat) {
       </div>
     </div>`;
   });
-
   el.innerHTML = html;
   el.scrollTop = el.scrollHeight;
 }
-
-function renderQuickReplies(chat) {
-  const el = document.getElementById('chatQuickReplies');
-  if (!el) return;
-  const replies = ['👋 Boas-vindas', '📅 Confirmar consulta', '⏰ Lembrete 24h', '😊 Pós-consulta', '📍 Endereço'];
-  el.innerHTML = replies.map(r =>
-    `<button class="quick-reply" onclick="setQuickReply('${r}','${chat.id}')">${r}</button>`
-  ).join('');
-}
-
-function setQuickReply(type, chatId) {
   const chat = INBOX.chats.find(c => c.id === chatId);
   const clinic = currentClinic();
   const nome = chat?.lead?.nome || chat?.name || 'cliente';
