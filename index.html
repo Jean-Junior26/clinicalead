@@ -2669,11 +2669,15 @@ function renderChatHeader(chat) {
       <div class="chat-input-row">
         <textarea class="chat-input" id="chatInput" placeholder="Digite uma mensagem..." rows="1"
           onkeydown="handleChatKeydown(event)" oninput="autoResizeInput(this)"></textarea>
-        <div class="chat-input-btns">
+      <div class="chat-input-btns">
           <label class="chat-input-btn" title="Imagem" style="cursor:pointer;">
             <i class="ti ti-photo"></i>
             <input type="file" accept="image/*" style="display:none;" onchange="sendImageMsg(event)"/>
           </label>
+          <button class="chat-input-btn" id="btnGravarAudio" title="Gravar áudio" onclick="toggleGravarAudio()">
+            <i class="ti ti-microphone"></i>
+          </button>
+        </div>
         </div>
         <button class="chat-send-btn" onclick="sendChatMessage()"><i class="ti ti-send"></i></button>
       </div>
