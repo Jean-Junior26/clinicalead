@@ -2377,12 +2377,11 @@ async function loadInboxChats() {
 
   try {
     const { data: msgs, error } = await db
-     .from('mensagens')
-      .select('*')
-      .eq('clinic_id', clinic.id)
-      .order('created_at', { ascending: false })
-      .limit(500);, { ascending: false })
-      .limit(500);
+   .from('mensagens')
+    .select('*')
+    .eq('clinic_id', clinic.id)
+    .order('created_at', { ascending: false })
+    .limit(500);
 
     if (error) throw error;
 
