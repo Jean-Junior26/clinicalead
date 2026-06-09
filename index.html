@@ -2922,7 +2922,7 @@ async function enviarAudioGravado(audioBlob) {
 
     // 3. Enviar para WhatsApp via Evolution API
     const phone = '55' + INBOX.activeChat.phone.replace(/\D/g, '');
-  const resp = await evoRequest('POST', `/message/sendPtv/${clinic.whatsapp_instance}`, {
+  const resp = await evoRequest('POST', `/message/sendWhatsAppAudio/${clinic.whatsapp_instance}`, {
       number: phone,
       audio: audioUrl,
       delay: 1000,
