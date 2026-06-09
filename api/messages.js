@@ -3,12 +3,15 @@ export default async function handler(req, res) {
   
   const SUPABASE_URL = 'https://zcwntpkiispbhjjgidih.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_G6xEiLO4lcNaJafm9RA2tA_QLf4E2FV';
+  
   const phone = req.query.phone || '';
+  const clinic_id = req.query.clinic_id || '';
 
   try {
-    const url = phone
-      ? `${SUPABASE_URL}/rest/v1/mensagens?phone=eq.${phone}&order=created_at.asc&limit=100`
-      : `${SUPABASE_URL}/rest/v1/mensagens?order=created_at.desc&limit=200`;
+    let url = `${SUPABASE_URL}/rest/v1/mensagens?order=created_at.desc&limit=500`;
+    
+    if (phone) url += `&phone=eq.${phone}`;
+    if (clinic_id) url += `&clinic_id=eq.${clinic_id}`;
 
     const r = await fetch(url, {
       headers: {
