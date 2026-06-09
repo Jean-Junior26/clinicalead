@@ -2907,25 +2907,30 @@ async function enviarAudioGravado(audioBlob) {
   if (!INBOX.activeChat) { toast('Selecione uma conversa!', 'error'); return; }
 
   try {
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const base64 = e.target.result.split(',')[1];
-      try {
-        const phone = '55' + INBOX.activeChat.phone.replace(/\D/g, '');
-        const resp = await evoRequest('POST', `/message/sendWhatsAppAudio/${clinic.whatsapp_instance}`, {
-          number: phone,
-         audio: base64,
-          delay: 1000,
-        });
-        console.log('Resposta envio áudio:', JSON.stringify(resp));
-        toast('🎵 Áudio enviado! ✓');
-        await loadInboxChats();
-      } catch(err) {
-        console.error('Erro envio áudio:', err);
-        toast('Erro ao enviar áudio: ' + err.message, 'error');
-      }
-    };
-    reader.readAsDataURL(audioBlob);
+    toast('Enviando áudio...');
+    // 1. Upload para Supabase Storage
+    const fileName = `audio_${Date.now()}.webm`;
+    const { data: uploadData, error: uploadError } = await db.storage
+      .from('audios')
+      .upload(fileName, audioBlob, { contentType: 'audio/webm' });
+
+    if (uploadError) throw new Error('Erro upload: ' + uploadError.message);
+
+    // 2. Pegar URL pública
+    const { data: urlData } = db.storage.from('audios').getPublicUrl(fileName);
+    const audioUrl = urlData.publicUrl;
+
+    // 3. Enviar para WhatsApp via Evolution API
+    const phone = '55' + INBOX.activeChat.phone.replace(/\D/g, '');
+    const resp = await evoRequest('POST', `/message/sendWhatsAppAudio/${clinic.whatsapp_instance}`, {
+      number: phone,
+      audio: audioUrl,
+      delay: 1000,
+    });
+
+    console.log('Resposta envio áudio:', JSON.stringify(resp));
+    toast('🎵 Áudio enviado! ✓');
+    await loadInboxChats();
   } catch (e) {
     console.error('ERRO AUDIO:', e);
     toast('Erro ao enviar áudio: ' + e.message, 'error');
