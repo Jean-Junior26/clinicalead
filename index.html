@@ -1350,7 +1350,7 @@ await loadClinics();
   if (STATE.clinics.length === 0 && !isAdmin) {
     setTimeout(() => openAddClinicWizard(), 500);
   }
-
+}
 // ── CHECK SUBSCRIPTION ────────────────────────
 async function checkSubscription(userId) {
   // Verificação de planos desativada — controle manual pelo admin
