@@ -2874,7 +2874,7 @@ async function iniciarGravacao() {
     };
 
     mediaRecorder.onstop = async () => {
-      const audioBlob = new Blob(audioChunks, { type: 'audio/ogg; codecs=opus' });
+     const audioBlob = new Blob(audioChunks, { type: 'audio/webm; codecs=opus' });
       await enviarAudioGravado(audioBlob);
       stream.getTracks().forEach(t => t.stop());
       isRecording = false;
