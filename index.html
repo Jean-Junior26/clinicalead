@@ -2914,7 +2914,7 @@ async function enviarAudioGravado(audioBlob) {
         const phone = '55' + INBOX.activeChat.phone.replace(/\D/g, '');
         const resp = await evoRequest('POST', `/message/sendWhatsAppAudio/${clinic.whatsapp_instance}`, {
           number: phone,
-          audio: `data:audio/webm;base64,${base64}`,
+         audio: base64,
           delay: 1000,
         });
         console.log('Resposta envio áudio:', JSON.stringify(resp));
