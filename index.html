@@ -2387,7 +2387,7 @@ async function loadInboxChats() {
 
     const chatMap = {};
     (msgs || []).forEach(m => {
-      const phone = (m.telefone || '').replace(/\D/g, '');
+     const phone = (m.phone || '').replace(/\D/g, '');
       if (!phone) return;
       if (!chatMap[phone]) {
         const lead = STATE.leads.find(l =>
