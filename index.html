@@ -2920,10 +2920,7 @@ async function enviarAudioGravado(audioBlob) {
           mimetype: 'audio/mpeg',
         });
           number: '55' + INBOX.activeChat.phone.replace(/\D/g, ''),
-          audio: base64,
-          encoding: true,
-        });
-        toast('🎵 Áudio enviado! ✓');
+         
         await loadInboxChats();
       } catch(err) {
         toast('Erro ao enviar áudio: ' + err.message, 'error');
