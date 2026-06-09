@@ -1350,7 +1350,7 @@ async function checkSubscription(userId) {
       .select('*')
       .eq('user_id', userId)
       .in('status', ['active', 'authorized', 'pending'])
-      .order('criado_em', { ascending: false })
+      .order('created_at', { ascending: false })
       .limit(1)
       .single();
 
@@ -1394,7 +1394,7 @@ function showExpiringBanner() {
 }
 // ── SUPABASE DATA ─────────────────────────────
 async function loadClinics() {
-  const { data, error } = await db.from('clinicas').select('*').order('criado_em', { ascending: true });
+  const { data, error } = await db.from('clinicas').select('*').order('created_at', { ascending: true });
   if (error) { console.error('clinicas:', error); return; }
   STATE.clinics = data || [];
   document.getElementById('navClinicasBadge').textContent = STATE.clinics.length;
@@ -1402,7 +1402,7 @@ async function loadClinics() {
 }
 
 async function loadLeads() {
-  const { data, error } = await db.from('leads').select('*').order('criado_em', { ascending: false });
+  const { data, error } = await db.from('leads').select('*').order('created_at', { ascending: false });
   if (error) { console.error('leads:', error); return; }
   STATE.leads = data || [];
   document.getElementById('navLeadsBadge').textContent = STATE.leads.length;
@@ -1994,7 +1994,7 @@ async function renderMeuPlano() {
       .from('assinaturas')
       .select('*')
       .eq('user_id', STATE.user.id)
-      .order('criado_em', { ascending: false })
+      .order('created_at', { ascending: false })
       .limit(5);
 
     if (error || !data || data.length === 0) {
