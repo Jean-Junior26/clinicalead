@@ -2684,7 +2684,15 @@ function renderMessages(msgs, chat) {
   el.innerHTML = html;
   el.scrollTop = el.scrollHeight;
 }
- function setQuickReply(type, chatId) {
+ function renderQuickReplies(chat) {
+  const el = document.getElementById('chatQuickReplies');
+  if (!el) return;
+  const replies = ['👋 Boas-vindas', '📅 Confirmar consulta', '⏰ Lembrete 24h', '😊 Pós-consulta', '📍 Endereço'];
+  el.innerHTML = replies.map(r =>
+    `<button class="quick-reply" onclick="setQuickReply('${r}','${chat.id}')">${r}</button>`
+  ).join('');
+}
+  function setQuickReply(type, chatId) {
   const chat = INBOX.chats.find(c => c.id === chatId);
   const clinic = currentClinic();
   const nome = chat?.lead?.nome || chat?.name || 'cliente';
