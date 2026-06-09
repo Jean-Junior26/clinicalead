@@ -2640,27 +2640,31 @@ function renderMessages(msgs, chat) {
 
   let bubbleContent = '';
     const tipo = m.type || 'text';
-    if (tipo === 'image') {
-      bubbleContent = m.media_url
-        ? `<div><img src="${m.media_url}" style="max-width:240px;max-height:240px;border-radius:8px;display:block;cursor:pointer;" onclick="window.open('${m.media_url}','_blank')" onerror="this.style.display='none'"/>${m.content ? `<div style="font-size:13px;margin-top:4px;">${m.content}</div>` : ''}</div>`
-        : `<div style="font-size:12px;opacity:0.6;">🖼️ Imagem</div>`;
+   if (tipo === 'image') {
+      bubbleContent = `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;">
+        <span style="font-size:24px;">🖼️</span>
+        <span style="font-size:12px;opacity:0.8;">Imagem</span>
+      </div>`;
     } else if (tipo === 'audio') {
-      bubbleContent = m.media_url
-        ? `<audio controls style="width:200px;height:36px;"><source src="${m.media_url}"></audio>`
-        : `<div style="font-size:12px;opacity:0.6;">🎵 Áudio</div>`;
+      bubbleContent = `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;">
+        <span style="font-size:24px;">🎵</span>
+        <span style="font-size:12px;opacity:0.8;">Áudio</span>
+      </div>`;
     } else if (tipo === 'video') {
-      bubbleContent = m.media_url
-        ? `<video controls style="max-width:240px;max-height:200px;border-radius:8px;"><source src="${m.media_url}"></video>`
-        : `<div style="font-size:12px;opacity:0.6;">🎬 Vídeo</div>`;
+      bubbleContent = `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;">
+        <span style="font-size:24px;">🎬</span>
+        <span style="font-size:12px;opacity:0.8;">Vídeo</span>
+      </div>`;
     } else if (tipo === 'document') {
-      bubbleContent = `<div style="display:flex;align-items:center;gap:8px;">
-        <i class="ti ti-file" style="font-size:24px;color:var(--gold);"></i>
-        <div>${m.content || 'Documento'}${m.media_url ? `<br><a href="${m.media_url}" target="_blank" style="font-size:11px;color:var(--gold);">Baixar</a>` : ''}</div>
+      bubbleContent = `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;">
+        <span style="font-size:24px;">📄</span>
+        <span style="font-size:12px;opacity:0.8;">${m.content || 'Documento'}</span>
       </div>`;
     } else if (tipo === 'sticker') {
-      bubbleContent = m.media_url
-        ? `<img src="${m.media_url}" style="width:100px;height:100px;object-fit:contain;" onerror="this.parentElement.innerHTML='😄'"/>`
-        : `<div style="font-size:12px;opacity:0.6;">😄 Figurinha</div>`;
+      bubbleContent = `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;">
+        <span style="font-size:24px;">😄</span>
+        <span style="font-size:12px;opacity:0.8;">Figurinha</span>
+      </div>`;
     } else {
       const text = m.content || '';
       if (text) {
@@ -2669,6 +2673,11 @@ function renderMessages(msgs, chat) {
           .replace(/\n/g, '<br>')
           .replace(/\*(.*?)\*/g, '<strong>$1</strong>')
           .replace(/_(.*?)_/g, '<em>$1</em>');
+        bubbleContent = `<div>${formatted}</div>`;
+      } else {
+        bubbleContent = `<div style="opacity:0.5;font-size:11px;">📎 Mídia</div>`;
+      }
+    };
         bubbleContent = `<div>${formatted}</div>`;
       } else {
         bubbleContent = `<div style="opacity:0.5;font-size:11px;">📎 Mídia</div>`;
