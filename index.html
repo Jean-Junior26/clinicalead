@@ -2396,7 +2396,7 @@ async function loadInboxChats() {
         chatMap[phone] = {
           id: phone,
           phone,
-          name: m.contact_name || lead?.nome || phone,
+          name: m.nome_de_contato || lead?.nome || phone,
           lastMsg: '',
           time: new Date(m.criado_em),
           unread: 0,
