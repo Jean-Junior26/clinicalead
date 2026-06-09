@@ -2545,10 +2545,13 @@ function startRealtimeInbox() {
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'mensagens' },
-      async (payload) => {
+     async (payload) => {
         console.log('Nova mensagem recebida:', payload);
+        // Toca som apenas para mensagens novas recebidas (não enviadas por mim)
+        const msg = payload.new;
+        const isNewIncoming = msg && !msg.from_me && payload.eventType === 'INSERT';
         await loadInboxChats();
-        playNotificationSound();
+        if (isNewIncoming) playNotificationSound();
       }
     )
     .subscribe((status) => {
