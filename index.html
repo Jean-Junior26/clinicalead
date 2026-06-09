@@ -1336,10 +1336,20 @@ await loadClinics();
     showExpiringBanner();
   }
 
-  if (STATE.clinics.length === 0) {
+ // Verificar se clínica está bloqueada (apenas para não-admin)
+  const isAdmin = STATE.profile?.role === 'admin' || STATE.profile?.role === 'administrador';
+  if (!isAdmin && STATE.clinics.length > 0 && STATE.clinics[0].bloqueado) {
+    await db.auth.signOut();
+    document.getElementById('loadingScreen').style.display = 'none';
+    document.getElementById('loginPage').style.display = '';
+    document.getElementById('loginError').textContent = 'Acesso bloqueado. Entre em contato com o suporte.';
+    document.getElementById('loginError').classList.add('show');
+    return;
+  }
+
+  if (STATE.clinics.length === 0 && !isAdmin) {
     setTimeout(() => openAddClinicWizard(), 500);
   }
-}
 
 // ── CHECK SUBSCRIPTION ────────────────────────
 async function checkSubscription(userId) {
