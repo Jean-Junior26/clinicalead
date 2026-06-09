@@ -3,28 +3,54 @@ module.exports = async function handler(req, res) {
 
   const SUPABASE_URL = process.env.SUPABASE_URL || 'https://zcwntpkiispbhjjgidih.supabase.co';
   const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
+  const EVO_URL = 'https://evolution-api-production-b649.up.railway.app';
+  const EVO_KEY = 'EF8CB101-7B4D-40D5-9884-5931D5B9FB10';
 
-  if (!SUPABASE_KEY) {
-    return res.status(500).json({ error: 'Configuração ausente' });
-  }
+  if (!SUPABASE_KEY) return res.status(500).json({ error: 'Configuração ausente' });
 
   let body = req.body;
   if (typeof body === 'string') {
-    try { body = JSON.parse(body); } catch (e) {
-      return res.status(400).json({ error: 'Body inválido' });
-    }
+    try { body = JSON.parse(body); } catch { return res.status(400).json({ error: 'Body inválido' }); }
   }
-  if (!body || typeof body !== 'object') {
-    return res.status(400).json({ error: 'Body vazio' });
+  if (!body || typeof body !== 'object') return res.status(400).json({ error: 'Body vazio' });
+
+  async function baixarEsalvarAudio(messageId, instanceName, phone) {
+    try {
+      const r = await fetch(`${EVO_URL}/chat/getBase64FromMediaMessage/${instanceName}`, {
+        method: 'POST',
+        headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: { key: { id: messageId } }, convertToMp4: false }),
+      });
+      if (!r.ok) return null;
+      const data = await r.json();
+      const base64 = data.base64;
+      if (!base64) return null;
+
+      const binary = Buffer.from(base64, 'base64');
+      const fileName = `audio_${phone}_${Date.now()}.ogg`;
+
+      const upload = await fetch(`${SUPABASE_URL}/storage/v1/object/audios/${fileName}`, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          'Content-Type': 'audio/ogg',
+        },
+        body: binary,
+      });
+      if (!upload.ok) return null;
+      return `${SUPABASE_URL}/storage/v1/object/public/audios/${fileName}`;
+    } catch (e) {
+      console.error('[webhook] Erro ao baixar áudio:', e.message);
+      return null;
+    }
   }
 
   try {
     const rawEvento = body?.event || body?.type || '';
     const evento = rawEvento.toLowerCase().replace('.', '_');
 
-    if (evento !== 'messages_upsert') {
-      return res.status(200).json({ ok: true, ignorado: rawEvento });
-    }
+    if (evento !== 'messages_upsert') return res.status(200).json({ ok: true, ignorado: rawEvento });
 
     const instanceName = body?.instance || body?.instanceName || null;
     let clinic_id = null;
@@ -74,7 +100,9 @@ module.exports = async function handler(req, res) {
           media_url = m.imageMessage?.url || null;
         } else if (m.audioMessage) {
           content = '🎵 Áudio'; type = 'audio';
-          media_url = m.audioMessage?.url || null;
+          if (message_id && instanceName) {
+            media_url = await baixarEsalvarAudio(message_id, instanceName, phone);
+          }
         } else if (m.videoMessage) {
           content = m.videoMessage?.caption || '🎥 Vídeo'; type = 'video';
           media_url = m.videoMessage?.url || null;
@@ -92,10 +120,7 @@ module.exports = async function handler(req, res) {
           content = '[mídia]'; type = 'unknown';
         }
 
-        const payload = {
-          clinic_id, phone, contact_name, content, type,
-          from_me: fromMe, media_url, message_id, created_at,
-        };
+        const payload = { clinic_id, phone, contact_name, content, type, from_me: fromMe, media_url, message_id, created_at };
 
         const insertResp = await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
           method: 'POST',
@@ -120,7 +145,6 @@ module.exports = async function handler(req, res) {
     }
 
     return res.status(200).json({ ok: true, processadas: insertados.length, erros: erros.length });
-
   } catch (err) {
     return res.status(500).json({ error: 'Erro interno', message: err.message });
   }
