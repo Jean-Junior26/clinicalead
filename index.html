@@ -2107,16 +2107,24 @@ async function switchClinicById(clinicId) {
   const idx = STATE.clinics.findIndex(c => c.id === clinicId);
   if (idx >= 0) {
     switchClinic(idx);
-  } else {
-    const { data } = await db.from('clinicas').select('*').eq('id', clinicId).single();
-    if (data) {
-      STATE.clinics.push(data);
-      STATE.currentClinicIdx = STATE.clinics.length - 1;
-      renderClinicSwitcher();
-      await loadLeads();
-      showPage('dashboard');
-      toast('Clínica: ' + data.nome);
+    return;
+  }
+  // Busca clínica que não está no STATE (admin acessando clínica de outro usuário)
+  const { data } = await db.from('clinicas').select('*').eq('id', clinicId).single();
+  if (data) {
+    // Verifica se está bloqueada
+    if (data.bloqueado) {
+      toast('Esta clínica está bloqueada!', 'error');
+      return;
     }
+    STATE.clinics.push(data);
+    STATE.currentClinicIdx = STATE.clinics.length - 1;
+    renderClinicSwitcher();
+    await loadLeads();
+    showPage('dashboard');
+    toast('Clínica: ' + data.nome);
+  } else {
+    toast('Erro ao acessar clínica', 'error');
   }
 }
  
