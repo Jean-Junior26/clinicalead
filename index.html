@@ -2461,12 +2461,12 @@ async function loadInboxChats() {
 
 function formatLastMsg(m) {
   if (!m) return '';
-  if (m.tipo === 'image' || m.tipo === 'imageMessage') return '🖼️ Imagem';
-  if (m.tipo === 'audio' || m.tipo === 'audioMessage') return '🎵 Áudio';
-  if (m.tipo === 'video' || m.tipo === 'videoMessage') return '🎬 Vídeo';
-  if (m.tipo === 'document' || m.tipo === 'documentMessage') return '📄 Documento';
-  if (m.tipo === 'sticker' || m.tipo === 'stickerMessage') return '😄 Figurinha';
-  return m.conteudo || '📎 Mídia';
+  if (m.type === 'image') return '🖼️ Imagem';
+  if (m.type === 'audio') return '🎵 Áudio';
+  if (m.type === 'video') return '🎬 Vídeo';
+  if (m.type === 'document') return '📄 Documento';
+  if (m.type === 'sticker') return '😄 Figurinha';
+  return m.content || '📎 Mídia';
 }
 
 function startRealtimeInbox() {
