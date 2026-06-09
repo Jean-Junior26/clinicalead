@@ -8,9 +8,9 @@ export default async function handler(req, res) {
   const clinic_id = req.query.clinic_id || '';
 
   try {
-    let url = `${SUPABASE_URL}/rest/v1/mensagens?order=created_at.desc&limit=500`;
+    let url = `${SUPABASE_URL}/rest/v1/mensagens?order=criado_em.desc&limit=500`;
     
-    if (phone) url += `&phone=eq.${phone}`;
+    if (phone) url += `&telefone=eq.${phone}`;
     if (clinic_id) url += `&clinic_id=eq.${clinic_id}`;
 
     const r = await fetch(url, {
