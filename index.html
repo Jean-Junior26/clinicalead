@@ -2717,11 +2717,11 @@ function renderMessages(msgs, chat) {
         <span style="font-size:24px;">🖼️</span>
         <span style="font-size:12px;opacity:0.8;">Imagem</span>
       </div>`;
-    } else if (tipo === 'audio') {
-      bubbleContent = `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;">
-        <span style="font-size:24px;">🎵</span>
-        <span style="font-size:12px;opacity:0.8;">Áudio</span>
-      </div>`;
+ } else if (tipo === 'audio') {
+      const audioSrc = m.media_url || '';
+      bubbleContent = audioSrc
+        ? `<audio controls style="max-width:220px;height:36px;"><source src="${audioSrc}"></audio>`
+        : `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;"><span style="font-size:24px;">🎵</span><span style="font-size:12px;opacity:0.8;">Áudio</span></div>`;
     } else if (tipo === 'video') {
       bubbleContent = `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;">
         <span style="font-size:24px;">🎬</span>
