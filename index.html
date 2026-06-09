@@ -2720,15 +2720,15 @@ async function sendChatMessage() {
   input.value = '';
   autoResizeInput(input);
 
-  const novaMensagem = {
-    clinic_id: clinic?.id || null,
-    telefone: INBOX.activeChat.phone,
-    nome_contato: INBOX.activeChat.name,
-    conteudo: text,
-    tipo: 'text',
-    from_me: true,
-    created_at: new Date().toISOString(),
-  };
+ const novaMensagem = {
+      clinic_id: clinic?.id || null,
+      phone: INBOX.activeChat.phone,
+      contact_name: INBOX.activeChat.name,
+      content: text,
+      type: 'text',
+      from_me: true,
+      created_at: new Date().toISOString(),
+    };
 
   const { data: saved } = await db.from('mensagens').insert(novaMensagem).select().single();
   if (saved) {
