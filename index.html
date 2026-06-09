@@ -2930,17 +2930,17 @@ const phone = rawPhone.length >= 12 ? rawPhone : '55' + rawPhone;
     });
 
     console.log('Resposta envio áudio:', JSON.stringify(resp));
-    toast('🎵 Áudio enviado! ✓');
-    await db.from('mensagens').insert({
-  clinic_id: clinic.id,
-  phone: INBOX.activeChat.phone,
-  contact_name: INBOX.activeChat.name,
-  content: '🎵 Áudio',
-  type: 'audio',
-  from_me: true,
-  created_at: new Date().toISOString(),
-});
-    await loadInboxChats();
+ toast('🎵 Áudio enviado! ✓');
+        await db.from('mensagens').insert({
+          clinic_id: clinic.id,
+          phone: INBOX.activeChat.phone,
+          contact_name: INBOX.activeChat.name,
+          content: '🎵 Áudio',
+          type: 'audio',
+          from_me: true,
+          created_at: new Date().toISOString(),
+        });
+        await loadInboxChats();
   } catch (e) {
     console.error('ERRO AUDIO:', e);
     toast('Erro ao enviar áudio: ' + e.message, 'error');
