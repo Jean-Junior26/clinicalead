@@ -2779,15 +2779,32 @@ if (tipo === 'image') {
   const chat = INBOX.chats.find(c => c.id === chatId);
   const clinic = currentClinic();
   const nome = chat?.lead?.nome || chat?.name || 'cliente';
-  const msgs = {
-    '👋 Boas-vindas': `Olá, ${nome}! 😊 Aqui é da *${clinic?.nome}*! Como posso te ajudar hoje?`,
-    '📅 Confirmar consulta': `Oi ${nome}! 🦷 Sua consulta está confirmada. Qualquer dúvida é só chamar!`,
-    '⏰ Lembrete 24h': `Oi ${nome}! 👋 Lembrando que amanhã você tem consulta conosco. Confirma? Responda *SIM* ou *NÃO* 😊`,
-    '😊 Pós-consulta': `Oi ${nome}! Foi um prazer te receber 😊 Ficou com alguma dúvida?`,
-    '📍 Endereço': `📍 *Endereço:* R. Rui Barbosa, 483 - Centro, Araguari - MG\n🗺️ https://share.google/aBRk2BmdSOHL2iN9X`,
+  const lead = chat?.lead || { nome };
+
+  const tipoMap = {
+    '👋 Boas-vindas':        'boasvindas',
+    '📅 Confirmar consulta': 'confirmacao',
+    '⏰ Lembrete 24h':       'lembrete',
+    '😊 Pós-consulta':       'posconsulta',
+    '📍 Endereço':           null,
   };
+
+  const tipo = tipoMap[type];
+  let msg = '';
+
+  if (tipo) {
+    const auto = STATE.automations.find(a => a.tipo === tipo);
+    if (auto) {
+      msg = substituirVariaveis(auto.msg || auto.mensagem, lead, clinic, '{data}', '{hora}');
+    }
+  }
+
+  if (type === '📍 Endereço') {
+    msg = `📍 *Endereço:* R. Rui Barbosa, 483 - Centro, Araguari - MG\n🗺️ https://share.google/aBRk2BmdSOHL2iN9X`;
+  }
+
   const input = document.getElementById('chatInput');
-  if (input) { input.value = msgs[type] || ''; input.focus(); autoResizeInput(input); }
+  if (input) { input.value = msg; input.focus(); autoResizeInput(input); }
 }
 
 async function sendChatMessage() {
