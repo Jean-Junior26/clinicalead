@@ -1,9 +1,7 @@
 // ============================================================
 // CLINICALEAD — AUTOMAÇÕES V2
-// Adiciona: lembrete 2h, nova automação, chavinha = automático
 // ============================================================
 
-// ── DEFAULTS COM LEMBRETE 2H ────────────────────────────────
 const AUTOMACOES_DEFAULTS = [
   {
     id: 1, tipo: 'boasvindas',
@@ -78,7 +76,6 @@ async function loadAutomations() {
     .eq('clinic_id', clinic.id)
     .order('created_at', { ascending: true });
 
-  // Merge defaults com salvas
   const merged = AUTOMACOES_DEFAULTS.map(def => {
     const salva = (salvas || []).find(s => s.tipo === def.tipo);
     if (salva) {
@@ -94,7 +91,6 @@ async function loadAutomations() {
     return { ...def };
   });
 
-  // Adiciona automações customizadas (não estão nos defaults)
   const customizadas = (salvas || []).filter(s =>
     !AUTOMACOES_DEFAULTS.find(d => d.tipo === s.tipo)
   );
@@ -188,7 +184,19 @@ function editAuto(id) {
   document.getElementById('editAutoId').value = id;
   document.getElementById('editAutoTitle').textContent = a.title || a.titulo;
   document.getElementById('editAutoMsg').value = a.msg || a.mensagem || '';
+  const toggle = document.getElementById('editAutoToggle');
+  if (toggle) {
+    toggle.className = 'toggle ' + (a.automatica ? '' : 'off');
+  }
   openModal('modalEditAuto');
+}
+
+// ── toggleEditAutoMatica ──────────────────────────────────────
+function toggleEditAutoMatica() {
+  const toggle = document.getElementById('editAutoToggle');
+  if (!toggle) return;
+  const isOff = toggle.classList.contains('off');
+  toggle.className = 'toggle ' + (isOff ? '' : 'off');
 }
 
 // ── saveAutoEdit ─────────────────────────────────────────────
@@ -198,8 +206,12 @@ async function saveAutoEdit() {
   if (!a) return;
 
   const novaMsg = document.getElementById('editAutoMsg').value;
+  const toggle = document.getElementById('editAutoToggle');
+  const novaAutomatica = toggle ? !toggle.classList.contains('off') : a.automatica;
+
   a.msg = novaMsg;
   a.mensagem = novaMsg;
+  a.automatica = novaAutomatica;
 
   const clinic = currentClinic();
   if (clinic) {
@@ -211,7 +223,7 @@ async function saveAutoEdit() {
       ativo: a.active !== undefined ? a.active : true,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'clinic_id,tipo' });
-    toast('Mensagem salva para esta clínica! ✓');
+    toast('Automação salva! ✓');
   }
 
   closeModal('modalEditAuto');
@@ -253,7 +265,6 @@ async function salvarNovaAutomacao() {
   const clinic = currentClinic();
   if (!clinic) { toast('Selecione uma clínica', 'error'); return; }
 
-  // Gera tipo único baseado no título
   const tipo = 'custom_' + titulo.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 20) + '_' + Date.now();
 
   const { data: saved, error } = await db.from('automacoes').insert({
