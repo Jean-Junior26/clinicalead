@@ -968,7 +968,35 @@ tbody tr:hover td { background:var(--bg-elevated); }
     <div class="modal-body" id="modalLeadBody"></div>
   </div>
 </div>
-
+<!-- MODAL NOVA AUTOMAÇÃO -->
+<div class="modal-overlay" id="modalNovaAuto">
+  <div class="modal" style="max-width:500px;">
+    <div class="modal-header">
+      <h3><i class="ti ti-bolt" style="margin-right:8px;color:var(--gold);"></i>Nova Automação</h3>
+      <button class="btn btn-ghost btn-icon" onclick="closeModal('modalNovaAuto')"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Título *</label>
+        <input class="form-input" id="novaAutoTitulo" placeholder="Ex: Lembrete pós-avaliação"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Gatilho / Quando enviar</label>
+        <input class="form-input" id="novaAutoGatilho" placeholder="Ex: 3 dias após consulta"/>
+        <div class="form-hint">Apenas descrição — o disparo manual é feito pelo Inbox</div>
+      </div>
+      <div class="form-group" style="margin-bottom:0;">
+        <label class="form-label">Mensagem *</label>
+        <textarea class="form-textarea" id="novaAutoMsg" style="min-height:120px;font-family:var(--mono);font-size:12px;" placeholder="Digite a mensagem..."></textarea>
+        <div class="form-hint">Variáveis: {nome} {procedimento} {clinica} {data} {hora}</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('modalNovaAuto')">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarNovaAutomacao()"><i class="ti ti-check"></i> Criar automação</button>
+    </div>
+  </div>
+</div>
 <!-- MODAL EDITAR AUTOMAÇÃO -->
 <div class="modal-overlay" id="modalEditAuto">
   <div class="modal">
