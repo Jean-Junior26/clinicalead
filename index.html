@@ -401,6 +401,19 @@ tbody tr:hover td { background:var(--bg-elevated); }
 .cal-day.has-dot::after { content:''; width:4px; height:4px; border-radius:50%; background:var(--gold-bright); position:absolute; bottom:3px; }
 .sched-card { background:var(--bg-card); border-radius:var(--r-md); border:1px solid var(--border); overflow:hidden; }
 .sched-header { padding:16px 20px; border-bottom:1px solid var(--border); background:var(--bg-elevated); }
+  @keyframes obsPulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(91,141,184,0.5); }
+  50% { transform: scale(1.15); box-shadow: 0 0 0 5px rgba(91,141,184,0); }
+}
+.obs-balao {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: rgba(91,141,184,0.22);
+  color: #7FB3DC; font-size: 12px; margin-left: 8px; cursor: pointer;
+  animation: obsPulse 1.8s ease-in-out infinite;
+  vertical-align: middle;
+}
+.obs-balao:hover { background: rgba(91,141,184,0.4); animation-play-state: paused; }
 .sched-item { display:flex; gap:14px; padding:16px 20px; border-bottom:1px solid var(--border-subtle); }
 .sched-item:last-child { border-bottom:none; }
 .sched-time { font-family:var(--mono); font-size:13px; font-weight:500; min-width:48px; margin-top:2px; color:var(--text-primary); }
