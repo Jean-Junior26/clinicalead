@@ -128,34 +128,38 @@ function tarefasGerar() {
       });
     });
 
-  // 🟡 5. Follow-up de leads parados há 3+ dias
+  // 🟡 5. Follow-up de leads parados há 3+ dias (desde a última movimentação)
   leads
-    .filter(l => ['contato','sem_resposta'].includes(l.status) && l.created_at)
+    .filter(l => ['contato','sem_resposta'].includes(l.status))
     .forEach(l => {
-      const diasParado = Math.floor((agora - new Date(l.created_at).getTime()) / 86400000);
+      const base = l.status_alterado_em || l.created_at;
+      if (!base) return;
+      const diasParado = Math.floor((agora - new Date(base).getTime()) / 86400000);
       if (diasParado < 3) return;
       tarefas.push({
         chave: `followup:${l.id}`,
         prio: 2,
         icon: 'ti-message-forward',
         titulo: `Follow-up: ${l.nome}`,
-        desc: `Lead parado em "${l.status === 'contato' ? 'Em contato' : 'Sem resposta'}" há ${diasParado} dias — fazer nova tentativa`,
+        desc: `Lead sem movimentação em "${l.status === 'contato' ? 'Em contato' : 'Sem resposta'}" há ${diasParado} dias — fazer nova tentativa`,
         telefone: l.telefone || null,
       });
     });
 
-  // 🟢 6. Pós-venda: fechados entre 2 e 10 dias atrás
+  // 🟢 6. Pós-venda: virou "fechado" há 2 a 10 dias (data real da mudança de status)
   leads
-    .filter(l => l.status === 'fechado' && l.created_at)
+    .filter(l => l.status === 'fechado')
     .forEach(l => {
-      const dias = Math.floor((agora - new Date(l.created_at).getTime()) / 86400000);
+      const base = l.status_alterado_em || l.created_at;
+      if (!base) return;
+      const dias = Math.floor((agora - new Date(base).getTime()) / 86400000);
       if (dias < 2 || dias > 10) return;
       tarefas.push({
         chave: `posvenda:${l.id}`,
         prio: 3,
         icon: 'ti-star',
         titulo: `Pós-venda: ${l.nome}`,
-        desc: `Perguntar como foi a experiência e pedir avaliação no Google ⭐ (gera indicações!)`,
+        desc: `Fechou há ${dias} dias — perguntar como foi a experiência e pedir avaliação no Google ⭐`,
         telefone: l.telefone || null,
       });
     });
