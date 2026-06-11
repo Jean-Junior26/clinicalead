@@ -1771,8 +1771,8 @@ function renderDaySchedule(dateStr) {
       const dotColor = statusColors[consulta.status] || 'var(--gold)';
       const obsTexto = (consulta.observacoes || lead?.observacoes || '').replace(/[`"<>]/g, ' ').replace(/\s+/g, ' ').trim();
       const obsAbrir = lead ? `openEditLead('${lead.id}')` : `openEditConsulta('${consulta.id}')`;
-      const obsIcone = obsTexto
-        ? `<i class="ti ti-message-2" style="color:#5B8DB8;font-size:14px;margin-left:6px;cursor:pointer;" title="${obsTexto.slice(0,150)}" onclick="event.stopPropagation();${obsAbrir}"></i>`
+    const obsIcone = obsTexto
+        ? `<span class="obs-balao" title="${obsTexto.slice(0,150)}" onclick="event.stopPropagation();${obsAbrir}"><i class="ti ti-message-2"></i></span>`
         : '';
       const telDigitos = (lead?.telefone || '').replace(/\D/g, '');
       const btnInbox = telDigitos
