@@ -8,11 +8,11 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
 
   if (!SUPABASE_KEY) return res.status(500).json({ error: 'Configuração ausente' });
 
-  let body = req.body;
-  if (typeof body === 'string') {
-    try { body = JSON.parse(body); } catch { return res.status(400).json({ error: 'Body inválido' }); }
-  }
-  if (!body || typeof body !== 'object') return res.status(400).json({ error: 'Body vazio' });
+  const sbHeaders = {
+    apikey: SUPABASE_KEY,
+    Authorization: `Bearer ${SUPABASE_KEY}`,
+    'Content-Type': 'application/json',
+  };
 
   async function baixarEsalvarAudio(messageId, instanceName, phone) {
     try {
@@ -45,6 +45,102 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       return null;
     }
   }
+
+  // ── LEMBRETES: enviar resposta automática via Evolution ─────
+  async function responderPaciente(instanceName, phone, message) {
+    try {
+      const cleanPhone = String(phone).replace(/\D/g, '');
+      const number = cleanPhone.startsWith('55') ? cleanPhone : '55' + cleanPhone;
+      await fetch(`${EVO_URL}/message/sendText/${instanceName}`, {
+        method: 'POST',
+        headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ number, text: message }),
+      });
+    } catch (e) {
+      console.error('[webhook] Erro ao responder paciente:', e.message);
+    }
+  }
+
+  // ── LEMBRETES: processar resposta "1" (confirma) ou "2" (remarca)
+  async function processarConfirmacao(clinic_id, phone, content, instanceName) {
+    try {
+      if (!clinic_id || !phone || !content) return;
+
+      // Normaliza a resposta do paciente
+      const resp = String(content).trim().toLowerCase();
+      const ehConfirmar = ['1', '1️⃣', 'confirmar', 'confirmo', 'confirmado'].includes(resp);
+      const ehRemarcar = ['2', '2️⃣', 'remarcar', 'reagendar'].includes(resp);
+      if (!ehConfirmar && !ehRemarcar) return;
+
+      // Encontra o lead pelo telefone (compara os últimos 8 dígitos)
+      const digitos = String(phone).replace(/\D/g, '');
+      const sufixo = digitos.slice(-8);
+      if (sufixo.length < 8) return;
+
+      const leadResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinic_id}&telefone=ilike.*${sufixo}&select=id,nome&limit=1`,
+        { headers: sbHeaders }
+      );
+      if (!leadResp.ok) return;
+      const leadsEnc = await leadResp.json();
+      if (!leadsEnc.length) return;
+      const lead = leadsEnc[0];
+
+      // Busca a próxima consulta agendada desse lead que JÁ recebeu o lembrete de 24h
+      const hojeBRT = new Date(Date.now() - 3 * 3600 * 1000).toISOString().split('T')[0];
+      const consResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/consultas?lead_id=eq.${lead.id}&clinic_id=eq.${clinic_id}&status=eq.agendado&lembrete_24h=not.is.null&data=gte.${hojeBRT}&order=data.asc,hora.asc&select=id,data,hora&limit=1`,
+        { headers: sbHeaders }
+      );
+      if (!consResp.ok) return;
+      const consultasEnc = await consResp.json();
+      if (!consultasEnc.length) return; // não há consulta pendente de confirmação = ignora
+      const consulta = consultasEnc[0];
+
+      const [ano, mes, dia] = consulta.data.split('-');
+      const dataFmt = `${dia}/${mes}`;
+      const horaFmt = (consulta.hora || '').slice(0, 5);
+      const primeiroNome = (lead.nome || '').split(' ')[0];
+
+      if (ehConfirmar) {
+        // Atualiza status -> confirmado
+        await fetch(`${SUPABASE_URL}/rest/v1/consultas?id=eq.${consulta.id}`, {
+          method: 'PATCH',
+          headers: { ...sbHeaders, Prefer: 'return=minimal' },
+          body: JSON.stringify({ status: 'confirmado' }),
+        });
+        if (instanceName) {
+          await responderPaciente(
+            instanceName,
+            phone,
+            `Consulta confirmada, ${primeiroNome}! ✅\n\nTe esperamos dia ${dataFmt} às *${horaFmt}*. Até lá! 🦷`
+          );
+        }
+      } else if (ehRemarcar) {
+        // Marca pedido de remarcação
+        await fetch(`${SUPABASE_URL}/rest/v1/consultas?id=eq.${consulta.id}`, {
+          method: 'PATCH',
+          headers: { ...sbHeaders, Prefer: 'return=minimal' },
+          body: JSON.stringify({ remarcar_solicitado: true }),
+        });
+        if (instanceName) {
+          await responderPaciente(
+            instanceName,
+            phone,
+            `Sem problema, ${primeiroNome}! 😊\n\nNossa equipe vai entrar em contato em breve para encontrarmos um novo horário para você.`
+          );
+        }
+      }
+    } catch (e) {
+      console.error('[webhook] Erro em processarConfirmacao:', e.message);
+    }
+  }
+
+  let body = req.body;
+  if (typeof body === 'string') {
+    try { body = JSON.parse(body); } catch { return res.status(400).json({ error: 'Body inválido' }); }
+  }
+  if (!body || typeof body !== 'object') return res.status(400).json({ error: 'Body vazio' });
 
   try {
     const rawEvento = body?.event || body?.type || '';
@@ -138,6 +234,11 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
           erros.push({ phone, erro: errText });
         } else {
           insertados.push(phone);
+        }
+
+        // ── LEMBRETES: se for resposta do paciente ("1" ou "2"), processa
+        if (!fromMe && type === 'text') {
+          await processarConfirmacao(clinic_id, phone, content, instanceName);
         }
       } catch (msgErr) {
         erros.push({ erro: msgErr.message });
