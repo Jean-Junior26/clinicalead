@@ -1752,18 +1752,28 @@ function renderDaySchedule(dateStr) {
         <button class="btn btn-sm" style="margin-left:auto;" onclick="toggleHoraBloqueada('${dateStr}','${hora}')"><i class="ti ti-lock-open"></i></button>
       </div>`;
     }
-    if (consulta) {
+   if (consulta) {
       const lead = STATE.leads.find(l => l.id === consulta.lead_id);
       const statusColors = {agendado:'var(--gold)',confirmado:'#5B8DB8',compareceu:'var(--green)',faltou:'var(--coral)'};
       const dotColor = statusColors[consulta.status] || 'var(--gold)';
+      const obsTexto = (consulta.observacoes || lead?.observacoes || '').replace(/[`"<>]/g, ' ').replace(/\s+/g, ' ').trim();
+      const obsAbrir = lead ? `openEditLead('${lead.id}')` : `openEditConsulta('${consulta.id}')`;
+      const obsIcone = obsTexto
+        ? `<i class="ti ti-message-2" style="color:#5B8DB8;font-size:14px;margin-left:6px;cursor:pointer;" title="${obsTexto.slice(0,150)}" onclick="event.stopPropagation();${obsAbrir}"></i>`
+        : '';
+      const telDigitos = (lead?.telefone || '').replace(/\D/g, '');
+      const btnInbox = telDigitos
+        ? `<button class="btn btn-sm" onclick="event.stopPropagation();tarefaWhats('${telDigitos}')" title="Abrir conversa no Inbox"><i class="ti ti-message-circle" style="color:#25D366;"></i></button>`
+        : '';
       return `<div class="sched-item" style="cursor:pointer;" onclick="openEditConsulta('${consulta.id}')">
         <div class="sched-time" style="color:var(--gold);">${hora}</div>
         <div class="sched-line-col"><div class="sched-dot" style="background:${dotColor};"></div></div>
         <div class="sched-info">
-          <div class="sched-name">${lead?.nome || 'Paciente'}</div>
-          <div class="sched-proc">${lead?.procedimento || consulta.observacoes || '—'}</div>
+          <div class="sched-name">${lead?.nome || 'Paciente'}${obsIcone}</div>
+          <div class="sched-proc">${lead?.procedimento || '—'}</div>
           <div class="sched-acts">
             ${badgeHtml(consulta.status === 'confirmado' ? 'agendado' : consulta.status)}
+            ${btnInbox}
             <button class="btn btn-sm" onclick="event.stopPropagation();sendWAConsulta('${consulta.id}')"><i class="ti ti-brand-whatsapp"></i> Confirmar</button>
             <button class="btn btn-sm" onclick="event.stopPropagation();marcarCompareceu('${consulta.id}')"><i class="ti ti-check"></i> Compareceu</button>
             <button class="btn btn-sm btn-danger btn-sm" onclick="event.stopPropagation();cancelarConsulta('${consulta.id}')"><i class="ti ti-x"></i></button>
