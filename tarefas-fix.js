@@ -219,7 +219,7 @@ function tarefasRenderCard() {
         <div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px;">${tEsc(t.desc)}</div>
       </div>
       <div style="display:flex;gap:6px;flex-shrink:0;">
-        ${t.telefone ? `<button class="btn btn-sm" onclick="tarefaWhats('${tEsc(t.telefone)}')" title="Abrir conversa no WhatsApp"><i class="ti ti-brand-whatsapp" style="color:#25D366;"></i></button>` : ''}
+        ${t.telefone ? `<button class="btn btn-sm" onclick="tarefaWhats('${tEsc(t.telefone)}')" title="Abrir conversa no Inbox"><i class="ti ti-brand-whatsapp" style="color:#25D366;"></i></button>` : ''}
         <button class="btn btn-sm" onclick="tarefaAdiar('${t.chave}')" title="Adiar para amanhã"><i class="ti ti-clock-pause"></i></button>
         <button class="btn btn-sm" onclick="tarefaConcluir('${t.chave}')" title="Marcar como concluída" style="color:var(--gold);"><i class="ti ti-check"></i></button>
       </div>
@@ -327,11 +327,34 @@ async function tarefaAdiar(chave) {
   toast('Adiada para amanhã ⏰');
 }
 
-function tarefaWhats(telefone) {
+async function tarefaWhats(telefone) {
   const d = String(telefone).replace(/\D/g, '');
   if (!d) return;
-  const n = d.startsWith('55') ? d : '55' + d;
-  window.open('https://wa.me/' + n, '_blank');
+  const alvo = d.slice(-8);
+
+  // Abre a página do Inbox
+  const navEl = document.querySelector('[data-page="inbox"]');
+  showPage('inbox', navEl);
+
+  // Espera as conversas carregarem (até ~4s)
+  for (let i = 0; i < 20; i++) {
+    if (INBOX.chats && INBOX.chats.length) break;
+    await new Promise(r => setTimeout(r, 200));
+  }
+
+  // Procura a conversa pelo telefone (últimos 8 dígitos)
+  let chat = (INBOX.chats || []).find(c => String(c.phone).replace(/\D/g, '').slice(-8) === alvo);
+
+  // Se ainda não existe conversa, cria uma nova
+  if (!chat) {
+    const n = d.startsWith('55') ? d : '55' + d;
+    const lead = (STATE.leads || []).find(l => l.telefone?.replace(/\D/g, '').slice(-8) === alvo);
+    chat = { id: n, phone: n, name: lead?.nome || n, lastMsg: '', time: new Date(), unread: 0, lead, messages: [] };
+    INBOX.chats.unshift(chat);
+    if (typeof renderInboxList === 'function') renderInboxList();
+  }
+
+  openChat(chat.id);
 }
 
 // ── Atualização principal ────────────────────────────────────
