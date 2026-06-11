@@ -42,7 +42,7 @@ export default async function handler(req, res) {
     return r.ok;
   }
 
-  async function enviarWhatsApp(instance, phone, message) {
+  async function enviarWhatsApp(instance, phone, message, clinicId) {
     const cleanPhone = String(phone).replace(/\D/g, '');
     const number = cleanPhone.startsWith('55') ? cleanPhone : '55' + cleanPhone;
     const r = await fetch(`${EVO_URL}/message/sendText/${instance}`, {
@@ -51,7 +51,30 @@ export default async function handler(req, res) {
       body: JSON.stringify({ number, text: message }),
     });
     if (!r.ok) throw new Error(`Evolution falhou: ${await r.text()}`);
-    return r.json();
+    const data = await r.json().catch(() => null);
+
+    // Salva a mensagem enviada no Inbox (Evolution não notifica envios via API)
+    try {
+      await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
+        method: 'POST',
+        headers: { ...sbHeaders, Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          clinic_id: clinicId || null,
+          phone: number,
+          contact_name: null,
+          content: message,
+          type: 'text',
+          from_me: true,
+          media_url: null,
+          message_id: data?.key?.id || null,
+          created_at: new Date().toISOString(),
+        }),
+      });
+    } catch (e) {
+      console.error('[lembretes] Falha ao salvar no Inbox:', e.message);
+    }
+
+    return data;
   }
 
   function fmtData(dataStr) {
@@ -121,7 +144,7 @@ export default async function handler(req, res) {
             `2️⃣ para *REMARCAR*\n\n` +
             `Até logo! 🦷`;
 
-          await enviarWhatsApp(clinica.whatsapp_instance, lead.telefone, msg);
+          await enviarWhatsApp(clinica.whatsapp_instance, lead.telefone, msg, c.clinic_id);
           await sbPatch(`consultas?id=eq.${c.id}`, { lembrete_24h: new Date().toISOString() });
           enviados24h++;
           continue; // não manda os dois lembretes na mesma rodada
@@ -134,7 +157,7 @@ export default async function handler(req, res) {
             `Sua consulta na *${clinica.nome}* é hoje às *${horaLimpa}*. Estamos te esperando!\n\n` +
             `Qualquer imprevisto, é só responder esta mensagem. Até já! 🦷`;
 
-          await enviarWhatsApp(clinica.whatsapp_instance, lead.telefone, msg);
+          await enviarWhatsApp(clinica.whatsapp_instance, lead.telefone, msg, c.clinic_id);
           await sbPatch(`consultas?id=eq.${c.id}`, { lembrete_2h: new Date().toISOString() });
           enviados2h++;
         }
