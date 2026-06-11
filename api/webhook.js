@@ -47,14 +47,33 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
   }
 
   // ── LEMBRETES: enviar resposta automática via Evolution ─────
-  async function responderPaciente(instanceName, phone, message) {
+  async function responderPaciente(instanceName, clinicId, phone, message) {
     try {
       const cleanPhone = String(phone).replace(/\D/g, '');
       const number = cleanPhone.startsWith('55') ? cleanPhone : '55' + cleanPhone;
-      await fetch(`${EVO_URL}/message/sendText/${instanceName}`, {
+      const r = await fetch(`${EVO_URL}/message/sendText/${instanceName}`, {
         method: 'POST',
         headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
         body: JSON.stringify({ number, text: message }),
+      });
+      const data = await r.json().catch(() => null);
+      const sentId = data?.key?.id || null;
+
+      // Salva a mensagem enviada no Inbox (Evolution não notifica envios via API)
+      await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
+        method: 'POST',
+        headers: { ...sbHeaders, Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          clinic_id: clinicId,
+          phone: number,
+          contact_name: null,
+          content: message,
+          type: 'text',
+          from_me: true,
+          media_url: null,
+          message_id: sentId,
+          created_at: new Date().toISOString(),
+        }),
       });
     } catch (e) {
       console.error('[webhook] Erro ao responder paciente:', e.message);
@@ -112,6 +131,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
         if (instanceName) {
           await responderPaciente(
             instanceName,
+            clinic_id,
             phone,
             `Consulta confirmada, ${primeiroNome}! ✅\n\nTe esperamos dia ${dataFmt} às *${horaFmt}*. Até lá! 🦷`
           );
@@ -126,6 +146,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
         if (instanceName) {
           await responderPaciente(
             instanceName,
+            clinic_id,
             phone,
             `Sem problema, ${primeiroNome}! 😊\n\nNossa equipe vai entrar em contato em breve para encontrarmos um novo horário para você.`
           );
@@ -217,6 +238,18 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
         }
 
         const payload = { clinic_id, phone, contact_name, content, type, from_me: fromMe, media_url, message_id, created_at };
+
+        // Anti-duplicata: se essa mensagem já foi salva (ex: enviada pela API), pula
+        if (message_id) {
+          const dupResp = await fetch(
+            `${SUPABASE_URL}/rest/v1/mensagens?message_id=eq.${encodeURIComponent(message_id)}&select=id&limit=1`,
+            { headers: sbHeaders }
+          );
+          if (dupResp.ok) {
+            const dup = await dupResp.json();
+            if (dup.length) { insertados.push(phone); continue; }
+          }
+        }
 
         const insertResp = await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
           method: 'POST',
