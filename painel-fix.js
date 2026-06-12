@@ -150,6 +150,68 @@ renderDashboard = function () {
 
   // Central de Tarefas continua sempre "de hoje" (sem filtro de período)
   if (typeof atualizarTarefasDashboard === 'function') atualizarTarefasDashboard();
+
+  // Faixa financeira (orçamentos + pagamentos)
+  atualizarFinanceiroDashboard();
 };
+
+// ── Faixa financeira do Painel ───────────────────────────────
+async function atualizarFinanceiroDashboard() {
+  const clinic = currentClinic();
+  const page = document.getElementById('page-dashboard');
+  const metrics = page?.querySelector('.metrics-grid');
+  if (!clinic || !page || !metrics) return;
+
+  // Cria a faixa (uma vez)
+  let faixa = document.getElementById('painelFinanceiro');
+  if (!faixa) {
+    faixa = document.createElement('div');
+    faixa.id = 'painelFinanceiro';
+    faixa.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:16px 0;';
+    metrics.insertAdjacentElement('afterend', faixa);
+  }
+  faixa.innerHTML = `<div style="grid-column:1/-1;font-size:12px;color:var(--text-muted);padding:8px;">Carregando financeiro...</div>`;
+
+  try {
+    const { data: orcs } = await db.from('orcamentos')
+      .select('id,status').eq('clinic_id', clinic.id).neq('status', 'recusado');
+    const ids = (orcs || []).map(o => o.id);
+
+    let pendenteAprovacao = 0, aprovadoTotal = 0;
+    if (ids.length) {
+      const { data: itens } = await db.from('orcamento_itens')
+        .select('valor,qtd,aprovado,orcamento_id').in('orcamento_id', ids);
+      (itens || []).forEach(i => {
+        const v = Number(i.valor || 0) * Number(i.qtd || 1);
+        if (i.aprovado) aprovadoTotal += v;
+        else pendenteAprovacao += v;
+      });
+    }
+
+    let qPag = db.from('pagamentos').select('valor,data').eq('clinic_id', clinic.id);
+    const { data: pags } = await qPag;
+    const todosPagos = (pags || []).reduce((s, p) => s + Number(p.valor || 0), 0);
+    const recebidoPeriodo = (pags || [])
+      .filter(p => !PAINEL.inicio || (p.data >= PAINEL.inicio && p.data <= PAINEL.fim))
+      .reduce((s, p) => s + Number(p.valor || 0), 0);
+
+    const aReceber = Math.max(0, aprovadoTotal - todosPagos);
+
+    const cardFin = (titulo, valor, cor, icone, sub) => `
+      <div class="card" style="padding:14px 16px;">
+        <div style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.6px;"><i class="ti ${icone}" style="color:${cor};font-size:15px;"></i> ${titulo}</div>
+        <div style="font-size:20px;font-weight:700;font-family:var(--mono);color:${cor};margin-top:6px;">${fmtCurrency(valor)}</div>
+        ${sub ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${sub}</div>` : ''}
+      </div>`;
+
+    faixa.innerHTML =
+      cardFin('Orçamentos pendentes', pendenteAprovacao, 'var(--coral)', 'ti-file-invoice', 'aguardando aprovação do paciente') +
+      cardFin('A receber', aReceber, '#E8C96A', 'ti-hourglass', 'aprovado e ainda não pago') +
+      cardFin('Recebido no período', recebidoPeriodo, 'var(--gold)', 'ti-cash', PAINEL.inicio ? 'conforme o filtro acima' : 'desde o início');
+  } catch (e) {
+    faixa.innerHTML = '';
+    console.error('[painel financeiro]', e);
+  }
+}
 
 console.log('✅ painel-fix.js carregado — filtro de período do Painel ativo');
