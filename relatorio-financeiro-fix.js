@@ -25,6 +25,13 @@ function relfinSetPeriodo(atalho) {
   relfinRender();
 }
 
+function relfinSetDatas() {
+  RELFIN.inicio = document.getElementById('relFinDataInicio')?.value || null;
+  RELFIN.fim = document.getElementById('relFinDataFim')?.value || rfHoje();
+  RELFIN.atalho = 'custom';
+  relfinRender();
+}
+
 // ── Renderização da seção ────────────────────────────────────
 async function relfinRender() {
   const page = document.getElementById('page-relatorios');
@@ -43,7 +50,15 @@ async function relfinRender() {
   sec.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin:28px 0 14px;">
       <h2 style="font-size:17px;"><i class="ti ti-cash" style="color:var(--gold);margin-right:8px;"></i>Financeiro</h2>
-      <div style="display:flex;gap:8px;">${btn('30', '30 dias')}${btn('90', '90 dias')}${btn('365', '1 ano')}${btn('tudo', 'Tudo')}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <div style="display:flex;align-items:center;gap:8px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--r-sm,10px);padding:5px 10px;">
+          <i class="ti ti-calendar" style="color:var(--gold);font-size:14px;"></i>
+          <input type="date" id="relFinDataInicio" class="form-input" style="border:none;background:transparent;padding:0;width:120px;font-size:12px;" value="${RELFIN.inicio || ''}" onchange="relfinSetDatas()"/>
+          <span style="color:var(--text-muted);font-size:11px;">até</span>
+          <input type="date" id="relFinDataFim" class="form-input" style="border:none;background:transparent;padding:0;width:120px;font-size:12px;" value="${RELFIN.fim || ''}" onchange="relfinSetDatas()"/>
+        </div>
+        ${btn('30', '30 dias')}${btn('90', '90 dias')}${btn('365', '1 ano')}${btn('tudo', 'Tudo')}
+      </div>
     </div>
     <div id="relFinCorpo" style="font-size:13px;color:var(--text-secondary);padding:20px;">Carregando dados financeiros...</div>
   `;
@@ -62,8 +77,39 @@ async function relfinRender() {
     const pacientesPagantes = new Set(pagamentos.map(p => p.lead_id).filter(Boolean)).size;
     const ticketMedio = pacientesPagantes ? recebido / pacientesPagantes : 0;
 
+    // ── Listas de detalhamento (drill-down dos cards) ──
+    const leadMap = {};
+    (STATE.leads || []).forEach(l => { leadMap[l.id] = l; });
+    const FORMA_NOMES = { pix: '💠 Pix', cartao_credito: '💳 Crédito', cartao_debito: '💳 Débito', dinheiro: '💵 Dinheiro', boleto: '🧾 Boleto', transferencia: '🏦 Transf.' };
+
+    RELFIN.det = { recebidos: [], pagantes: [], orcados: [] };
+    pagamentos.forEach(p => {
+      const lead = leadMap[p.lead_id];
+      RELFIN.det.recebidos.push({
+        leadId: p.lead_id, nome: lead?.nome || 'Lead', tel: (lead?.telefone || '').replace(/\D/g, ''),
+        sub: `${FORMA_NOMES[p.forma] || p.forma} · ${p.data ? new Date(p.data + 'T12:00').toLocaleDateString('pt-BR') : '—'}`,
+        valor: Number(p.valor || 0),
+      });
+    });
+    const pagPorLead = {};
+    pagamentos.forEach(p => {
+      if (!p.lead_id) return;
+      if (!pagPorLead[p.lead_id]) pagPorLead[p.lead_id] = { total: 0, qtd: 0 };
+      pagPorLead[p.lead_id].total += Number(p.valor || 0);
+      pagPorLead[p.lead_id].qtd++;
+    });
+    Object.entries(pagPorLead).forEach(([leadId, agg]) => {
+      const lead = leadMap[leadId];
+      RELFIN.det.pagantes.push({
+        leadId, nome: lead?.nome || 'Lead', tel: (lead?.telefone || '').replace(/\D/g, ''),
+        sub: `${agg.qtd} pagamento${agg.qtd !== 1 ? 's' : ''} no período`,
+        valor: agg.total,
+      });
+    });
+    RELFIN.det.pagantes.sort((a, b) => b.valor - a.valor);
+
     // ── Orçamentos do período (taxa de aprovação + procedimentos) ──
-    let qOrc = db.from('orcamentos').select('id,created_at').eq('clinic_id', clinic.id).neq('status', 'recusado');
+    let qOrc = db.from('orcamentos').select('id,lead_id,created_at').eq('clinic_id', clinic.id).neq('status', 'recusado');
     if (RELFIN.inicio) qOrc = qOrc.gte('created_at', RELFIN.inicio).lte('created_at', RELFIN.fim + 'T23:59:59');
     const { data: orcs } = await qOrc;
     const orcIds = (orcs || []).map(o => o.id);
@@ -77,6 +123,19 @@ async function relfinRender() {
     const valorOrcado = itens.reduce((s, i) => s + Number(i.valor) * Number(i.qtd || 1), 0);
     const valorAprovado = itens.filter(i => i.aprovado).reduce((s, i) => s + Number(i.valor) * Number(i.qtd || 1), 0);
     const taxaAprov = valorOrcado ? Math.round((valorAprovado / valorOrcado) * 100) : 0;
+
+    (orcs || []).forEach(o => {
+      const lead = leadMap[o.lead_id];
+      const its = itens.filter(i => i.orcamento_id === o.id);
+      const tot = its.reduce((s, i) => s + Number(i.valor) * Number(i.qtd || 1), 0);
+      const apr = its.filter(i => i.aprovado).reduce((s, i) => s + Number(i.valor) * Number(i.qtd || 1), 0);
+      RELFIN.det.orcados.push({
+        leadId: o.lead_id, nome: lead?.nome || 'Lead', tel: (lead?.telefone || '').replace(/\D/g, ''),
+        sub: `${new Date(o.created_at).toLocaleDateString('pt-BR')} · aprovado ${rfFmt(apr)} de ${rfFmt(tot)}`,
+        valor: tot,
+      });
+    });
+    RELFIN.det.orcados.sort((a, b) => b.valor - a.valor);
 
     // ── Por forma de pagamento ──
     const FORMAS = {
@@ -129,19 +188,19 @@ async function relfinRender() {
     }).join('');
 
     // ── Monta o corpo ──
-    const cardKpi = (titulo, valor, sub, cor) => `
-      <div class="card" style="padding:14px 16px;">
+    const cardKpi = (tipo, titulo, valor, sub, cor) => `
+      <div class="card" style="padding:14px 16px;${tipo ? 'cursor:pointer;transition:border-color 0.2s;' : ''}" ${tipo ? `onmouseover="this.style.borderColor='var(--gold-border)'" onmouseout="this.style.borderColor=''" onclick="relfinDetalhe('${tipo}')" title="Clique para ver o detalhamento"` : ''}>
         <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.6px;">${titulo}</div>
         <div style="font-size:21px;font-weight:700;font-family:var(--mono);color:${cor};margin-top:6px;">${valor}</div>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${sub}</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${sub}${tipo ? ' · <span style="color:var(--gold);">ver →</span>' : ''}</div>
       </div>`;
 
     document.getElementById('relFinCorpo').innerHTML = `
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:18px;">
-        ${cardKpi('Recebido', rfFmt(recebido), `${pagamentos.length} pagamento${pagamentos.length !== 1 ? 's' : ''}`, 'var(--gold)')}
-        ${cardKpi('Ticket médio', rfFmt(ticketMedio), `${pacientesPagantes} paciente${pacientesPagantes !== 1 ? 's' : ''} pagante${pacientesPagantes !== 1 ? 's' : ''}`, '#E8C96A')}
-        ${cardKpi('Orçado no período', rfFmt(valorOrcado), 'soma dos orçamentos criados', 'var(--text-primary, #F0EAD6)')}
-        ${cardKpi('Taxa de aprovação', taxaAprov + '%', `${rfFmt(valorAprovado)} aprovados`, taxaAprov >= 50 ? 'var(--gold)' : 'var(--coral)')}
+        ${cardKpi('recebidos', 'Recebido', rfFmt(recebido), `${pagamentos.length} pagamento${pagamentos.length !== 1 ? 's' : ''}`, 'var(--gold)')}
+        ${cardKpi('pagantes', 'Ticket médio', rfFmt(ticketMedio), `${pacientesPagantes} paciente${pacientesPagantes !== 1 ? 's' : ''} pagante${pacientesPagantes !== 1 ? 's' : ''}`, '#E8C96A')}
+        ${cardKpi('orcados', 'Orçado no período', rfFmt(valorOrcado), 'soma dos orçamentos criados', 'var(--text-primary, #F0EAD6)')}
+        ${cardKpi('orcados', 'Taxa de aprovação', taxaAprov + '%', `${rfFmt(valorAprovado)} aprovados`, taxaAprov >= 50 ? 'var(--gold)' : 'var(--coral)')}
       </div>
 
       <div class="card" style="margin-bottom:14px;">
@@ -179,5 +238,50 @@ async function relfinRender() {
     return r;
   };
 })();
+
+// ── Modal de detalhamento (quem compõe cada número) ──────────
+function relfinDetalhe(tipo) {
+  if (!document.getElementById('modalRelFin')) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'modalRelFin';
+    overlay.innerHTML = `
+      <div class="modal" style="max-width:620px;width:96vw;">
+        <div class="modal-header">
+          <h3 id="relFinDetTitulo"></h3>
+          <button class="btn btn-ghost btn-icon" onclick="closeModal('modalRelFin')"><i class="ti ti-x"></i></button>
+        </div>
+        <div class="modal-body" id="relFinDetBody" style="max-height:65vh;overflow-y:auto;"></div>
+      </div>`;
+    document.body.appendChild(overlay);
+  }
+
+  const config = {
+    recebidos: { titulo: '<i class="ti ti-cash" style="color:var(--gold);margin-right:8px;"></i>Pagamentos recebidos', vazio: 'Nenhum pagamento no período.' },
+    pagantes:  { titulo: '<i class="ti ti-users" style="color:#E8C96A;margin-right:8px;"></i>Pacientes pagantes', vazio: 'Nenhum paciente pagante no período.' },
+    orcados:   { titulo: '<i class="ti ti-file-invoice" style="color:var(--gold);margin-right:8px;"></i>Orçamentos do período', vazio: 'Nenhum orçamento criado no período.' },
+  };
+  const c = config[tipo];
+  const lista = (RELFIN.det && RELFIN.det[tipo]) || [];
+  document.getElementById('relFinDetTitulo').innerHTML = c.titulo;
+
+  document.getElementById('relFinDetBody').innerHTML = lista.length ? lista.map(item => `
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border-subtle);flex-wrap:wrap;">
+      <div class="avatar" style="${avatarStyle(item.nome)}">${initials(item.nome)}</div>
+      <div style="flex:1;min-width:140px;">
+        <div style="font-size:13px;font-weight:600;">${item.nome}</div>
+        <div style="font-size:11px;color:var(--text-muted);">${item.sub || ''}</div>
+      </div>
+      <div style="font-family:var(--mono);font-size:14px;color:var(--gold);">${rfFmt(item.valor)}</div>
+      <div style="display:flex;gap:6px;">
+        <button class="btn btn-sm btn-ghost btn-icon" title="Abrir orçamentos" onclick="closeModal('modalRelFin');openOrcamento('${item.leadId}')"><i class="ti ti-file-invoice" style="color:var(--gold);"></i></button>
+        ${item.tel ? `<button class="btn btn-sm btn-ghost btn-icon" title="Conversa no Inbox" onclick="closeModal('modalRelFin');tarefaWhats('${item.tel}')"><i class="ti ti-message-circle" style="color:#25D366;"></i></button>` : ''}
+        <button class="btn btn-sm btn-ghost btn-icon" title="Abrir cadastro" onclick="closeModal('modalRelFin');openEditLead('${item.leadId}')"><i class="ti ti-user"></i></button>
+      </div>
+    </div>`).join('')
+    : `<div style="text-align:center;padding:30px;color:var(--text-secondary);font-size:13px;">${c.vazio}</div>`;
+
+  document.getElementById('modalRelFin').classList.add('open');
+}
 
 console.log('✅ relatorio-financeiro-fix.js carregado — relatório financeiro ativo');
