@@ -110,6 +110,7 @@ renderLeads = function (filter = 'all', search = '') {
       <td><span style="font-size:12px;color:var(--text-secondary);"><i class="ti ${SOURCE_ICON[l.origem] || 'ti-dots'}" style="margin-right:4px;"></i>${l.origem || '—'}</span></td>
       <td class="td-muted">${fmtDate(l.created_at)}</td>
       <td><div style="display:flex;gap:6px;">
+        <button class="btn btn-sm btn-ghost btn-icon" title="Orçamentos" onclick="openOrcamento('${l.id}')"><i class="ti ti-file-invoice" style="color:var(--gold);"></i></button>
         <button class="btn btn-sm btn-ghost btn-icon" title="WhatsApp" onclick="openSendWA('${l.id}')"><i class="ti ti-brand-whatsapp" style="color:var(--gold);"></i></button>
         <button class="btn btn-sm btn-ghost btn-icon" title="Editar" onclick="openEditLead('${l.id}')"><i class="ti ti-edit"></i></button>
         <button class="btn btn-sm btn-ghost btn-icon" title="Ver" onclick="openLeadDetail('${l.id}')"><i class="ti ti-eye"></i></button>
