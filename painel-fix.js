@@ -155,14 +155,15 @@ renderDashboard = function () {
   atualizarFinanceiroDashboard();
 };
 
-// ── Faixa financeira do Painel ───────────────────────────────
+// ── Faixa financeira do Painel (cards clicáveis) ─────────────
+let PAINEL_FIN = { pendentes: [], areceber: [], recebidos: [] };
+
 async function atualizarFinanceiroDashboard() {
   const clinic = currentClinic();
   const page = document.getElementById('page-dashboard');
   const metrics = page?.querySelector('.metrics-grid');
   if (!clinic || !page || !metrics) return;
 
-  // Cria a faixa (uma vez)
   let faixa = document.getElementById('painelFinanceiro');
   if (!faixa) {
     faixa = document.createElement('div');
@@ -174,44 +175,114 @@ async function atualizarFinanceiroDashboard() {
 
   try {
     const { data: orcs } = await db.from('orcamentos')
-      .select('id,status').eq('clinic_id', clinic.id).neq('status', 'recusado');
+      .select('id,lead_id,status,desconto,created_at').eq('clinic_id', clinic.id).neq('status', 'recusado');
     const ids = (orcs || []).map(o => o.id);
 
-    let pendenteAprovacao = 0, aprovadoTotal = 0;
+    let itens = [], pags = [];
     if (ids.length) {
-      const { data: itens } = await db.from('orcamento_itens')
-        .select('valor,qtd,aprovado,orcamento_id').in('orcamento_id', ids);
-      (itens || []).forEach(i => {
-        const v = Number(i.valor || 0) * Number(i.qtd || 1);
-        if (i.aprovado) aprovadoTotal += v;
-        else pendenteAprovacao += v;
-      });
+      const r1 = await db.from('orcamento_itens').select('orcamento_id,valor,qtd,aprovado').in('orcamento_id', ids);
+      itens = r1.data || [];
     }
+    const r2 = await db.from('pagamentos').select('valor,data,forma,lead_id,orcamento_id').eq('clinic_id', clinic.id);
+    pags = r2.data || [];
 
-    let qPag = db.from('pagamentos').select('valor,data').eq('clinic_id', clinic.id);
-    const { data: pags } = await qPag;
-    const todosPagos = (pags || []).reduce((s, p) => s + Number(p.valor || 0), 0);
-    const recebidoPeriodo = (pags || [])
-      .filter(p => !PAINEL.inicio || (p.data >= PAINEL.inicio && p.data <= PAINEL.fim))
-      .reduce((s, p) => s + Number(p.valor || 0), 0);
+    // Agrega por orçamento
+    PAINEL_FIN = { pendentes: [], areceber: [], recebidos: [] };
+    let pendenteAprovacao = 0, aprovadoTotal = 0;
 
+    (orcs || []).forEach(o => {
+      const lead = (STATE.leads || []).find(l => l.id === o.lead_id);
+      const its = itens.filter(i => i.orcamento_id === o.id);
+      const pend = its.filter(i => !i.aprovado).reduce((s, i) => s + Number(i.valor) * Number(i.qtd || 1), 0);
+      const aprov = its.filter(i => i.aprovado).reduce((s, i) => s + Number(i.valor) * Number(i.qtd || 1), 0);
+      const pagoOrc = pags.filter(p => p.orcamento_id === o.id).reduce((s, p) => s + Number(p.valor || 0), 0);
+      const aReceberOrc = Math.max(0, aprov - pagoOrc);
+
+      pendenteAprovacao += pend;
+      aprovadoTotal += aprov;
+
+      const base = { leadId: o.lead_id, nome: lead?.nome || 'Lead', tel: (lead?.telefone || '').replace(/\D/g, ''), data: new Date(o.created_at).toLocaleDateString('pt-BR') };
+      if (pend > 0) PAINEL_FIN.pendentes.push({ ...base, valor: pend });
+      if (aReceberOrc > 0) PAINEL_FIN.areceber.push({ ...base, valor: aReceberOrc });
+    });
+
+    const FORMA_LBL = { pix: '💠 Pix', cartao_credito: '💳 Crédito', cartao_debito: '💳 Débito', dinheiro: '💵 Dinheiro', boleto: '🧾 Boleto', transferencia: '🏦 Transf.' };
+    const pagsPeriodo = pags.filter(p => !PAINEL.inicio || (p.data >= PAINEL.inicio && p.data <= PAINEL.fim));
+    pagsPeriodo.forEach(p => {
+      const lead = (STATE.leads || []).find(l => l.id === p.lead_id);
+      PAINEL_FIN.recebidos.push({
+        leadId: p.lead_id,
+        nome: lead?.nome || 'Lead',
+        tel: (lead?.telefone || '').replace(/\D/g, ''),
+        data: p.data ? new Date(p.data + 'T12:00').toLocaleDateString('pt-BR') : '—',
+        valor: Number(p.valor || 0),
+        forma: FORMA_LBL[p.forma] || p.forma,
+      });
+    });
+
+    const todosPagos = pags.reduce((s, p) => s + Number(p.valor || 0), 0);
+    const recebidoPeriodo = pagsPeriodo.reduce((s, p) => s + Number(p.valor || 0), 0);
     const aReceber = Math.max(0, aprovadoTotal - todosPagos);
 
-    const cardFin = (titulo, valor, cor, icone, sub) => `
-      <div class="card" style="padding:14px 16px;">
-        <div style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.6px;"><i class="ti ${icone}" style="color:${cor};font-size:15px;"></i> ${titulo}</div>
+    const cardFin = (tipo, titulo, valor, cor, icone, sub, qtd) => `
+      <div class="card" style="padding:14px 16px;cursor:pointer;transition:border-color 0.2s;" onmouseover="this.style.borderColor='var(--gold-border)'" onmouseout="this.style.borderColor=''" onclick="abrirDetalheFinanceiro('${tipo}')" title="Clique para ver o detalhamento">
+        <div style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.6px;"><i class="ti ${icone}" style="color:${cor};font-size:15px;"></i> ${titulo} ${qtd ? `<span style="background:var(--bg-elevated);border-radius:10px;padding:1px 7px;font-size:10px;">${qtd}</span>` : ''}</div>
         <div style="font-size:20px;font-weight:700;font-family:var(--mono);color:${cor};margin-top:6px;">${fmtCurrency(valor)}</div>
-        ${sub ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${sub}</div>` : ''}
+        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${sub} · <span style="color:var(--gold);">ver detalhes →</span></div>
       </div>`;
 
     faixa.innerHTML =
-      cardFin('Orçamentos pendentes', pendenteAprovacao, 'var(--coral)', 'ti-file-invoice', 'aguardando aprovação do paciente') +
-      cardFin('A receber', aReceber, '#E8C96A', 'ti-hourglass', 'aprovado e ainda não pago') +
-      cardFin('Recebido no período', recebidoPeriodo, 'var(--gold)', 'ti-cash', PAINEL.inicio ? 'conforme o filtro acima' : 'desde o início');
+      cardFin('pendentes', 'Orçamentos pendentes', pendenteAprovacao, 'var(--coral)', 'ti-file-invoice', 'aguardando aprovação', PAINEL_FIN.pendentes.length) +
+      cardFin('areceber', 'A receber', aReceber, '#E8C96A', 'ti-hourglass', 'aprovado e não pago', PAINEL_FIN.areceber.length) +
+      cardFin('recebidos', 'Recebido no período', recebidoPeriodo, 'var(--gold)', 'ti-cash', PAINEL.inicio ? 'conforme o filtro' : 'desde o início', PAINEL_FIN.recebidos.length);
   } catch (e) {
     faixa.innerHTML = '';
     console.error('[painel financeiro]', e);
   }
+}
+
+// ── Modal de detalhamento financeiro ─────────────────────────
+function abrirDetalheFinanceiro(tipo) {
+  if (!document.getElementById('modalFinanceiro')) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'modalFinanceiro';
+    overlay.innerHTML = `
+      <div class="modal" style="max-width:640px;width:96vw;">
+        <div class="modal-header">
+          <h3 id="finTitulo"></h3>
+          <button class="btn btn-ghost btn-icon" onclick="closeModal('modalFinanceiro')"><i class="ti ti-x"></i></button>
+        </div>
+        <div class="modal-body" id="finBody" style="max-height:65vh;overflow-y:auto;"></div>
+      </div>`;
+    document.body.appendChild(overlay);
+  }
+
+  const config = {
+    pendentes: { titulo: '<i class="ti ti-file-invoice" style="color:var(--coral);margin-right:8px;"></i>Orçamentos pendentes de aprovação', lista: PAINEL_FIN.pendentes, vazio: 'Nenhum orçamento aguardando aprovação. 🎉' },
+    areceber:  { titulo: '<i class="ti ti-hourglass" style="color:#E8C96A;margin-right:8px;"></i>Valores a receber', lista: PAINEL_FIN.areceber, vazio: 'Nada a receber — tudo quitado! 🎉' },
+    recebidos: { titulo: '<i class="ti ti-cash" style="color:var(--gold);margin-right:8px;"></i>Pagamentos recebidos', lista: PAINEL_FIN.recebidos, vazio: 'Nenhum pagamento no período.' },
+  };
+  const c = config[tipo];
+  document.getElementById('finTitulo').innerHTML = c.titulo;
+
+  document.getElementById('finBody').innerHTML = c.lista.length ? c.lista.map(item => `
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border-subtle);flex-wrap:wrap;">
+      <div class="avatar" style="${avatarStyle(item.nome)}">${initials(item.nome)}</div>
+      <div style="flex:1;min-width:140px;">
+        <div style="font-size:13px;font-weight:600;">${item.nome}</div>
+        <div style="font-size:11px;color:var(--text-muted);">${item.forma ? item.forma + ' · ' : ''}${item.data}</div>
+      </div>
+      <div style="font-family:var(--mono);font-size:14px;color:var(--gold);">${fmtCurrency(item.valor)}</div>
+      <div style="display:flex;gap:6px;">
+        <button class="btn btn-sm btn-ghost btn-icon" title="Abrir orçamentos" onclick="closeModal('modalFinanceiro');openOrcamento('${item.leadId}')"><i class="ti ti-file-invoice" style="color:var(--gold);"></i></button>
+        ${item.tel ? `<button class="btn btn-sm btn-ghost btn-icon" title="Conversa no Inbox" onclick="closeModal('modalFinanceiro');tarefaWhats('${item.tel}')"><i class="ti ti-message-circle" style="color:#25D366;"></i></button>` : ''}
+        <button class="btn btn-sm btn-ghost btn-icon" title="Abrir cadastro" onclick="closeModal('modalFinanceiro');openEditLead('${item.leadId}')"><i class="ti ti-user"></i></button>
+      </div>
+    </div>`).join('')
+    : `<div style="text-align:center;padding:30px;color:var(--text-secondary);font-size:13px;">${c.vazio}</div>`;
+
+  document.getElementById('modalFinanceiro').classList.add('open');
 }
 
 console.log('✅ painel-fix.js carregado — filtro de período do Painel ativo');
