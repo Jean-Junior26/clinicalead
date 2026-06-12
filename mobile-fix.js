@@ -77,17 +77,19 @@
     /* ── Agenda: calendário em cima, consultas embaixo ── */
     .agenda-layout { grid-template-columns: 1fr !important; }
 
-    /* ── Kanban: colunas largas com deslize horizontal (estilo Trello) ── */
+    /* ── Kanban: uma etapa por tela com efeito de imã (deslize lateral) ── */
     .kanban-board {
       display: flex !important;
       gap: 12px;
       overflow-x: auto;
+      scroll-snap-type: x mandatory;
       -webkit-overflow-scrolling: touch;
       padding-bottom: 12px;
     }
     .kanban-col {
-      min-width: 270px;
-      flex: 0 0 270px;
+      min-width: 85vw;
+      flex: 0 0 85vw;
+      scroll-snap-align: center;
     }
 
     /* ── Modais cabem na tela ── */
