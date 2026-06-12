@@ -44,6 +44,26 @@ async function tarefasCarregarDados() {
   TAREFAS.resolvidas = {};
   (res || []).forEach(r => { TAREFAS.resolvidas[r.tarefa_chave] = r; });
 
+  // Orçamentos parados: sem nenhuma aprovação há 3+ dias
+  try {
+    const { data: orcsParados } = await db.from('orcamentos')
+      .select('id,lead_id,created_at,status')
+      .eq('clinic_id', clinic.id)
+      .in('status', ['rascunho', 'enviado'])
+      .lte('created_at', tDiasAtras(3) + 'T23:59:59');
+    TAREFAS.orcamentos = orcsParados || [];
+    TAREFAS.orcItens = [];
+    if (TAREFAS.orcamentos.length) {
+      const { data: its } = await db.from('orcamento_itens')
+        .select('orcamento_id,valor,qtd')
+        .in('orcamento_id', TAREFAS.orcamentos.map(o => o.id));
+      TAREFAS.orcItens = its || [];
+    }
+  } catch (e) {
+    TAREFAS.orcamentos = [];
+    TAREFAS.orcItens = [];
+  }
+
   return true;
 }
 
@@ -128,41 +148,56 @@ function tarefasGerar() {
       });
     });
 
-  // 🟡 5. Follow-up de leads parados há 3+ dias (desde a última movimentação)
+  // 🟡 5. Follow-up de leads parados há 3+ dias
   leads
-    .filter(l => ['contato','sem_resposta'].includes(l.status))
+    .filter(l => ['contato','sem_resposta'].includes(l.status) && l.created_at)
     .forEach(l => {
-      const base = l.status_alterado_em || l.created_at;
-      if (!base) return;
-      const diasParado = Math.floor((agora - new Date(base).getTime()) / 86400000);
+      const diasParado = Math.floor((agora - new Date(l.created_at).getTime()) / 86400000);
       if (diasParado < 3) return;
       tarefas.push({
         chave: `followup:${l.id}`,
         prio: 2,
         icon: 'ti-message-forward',
         titulo: `Follow-up: ${l.nome}`,
-        desc: `Lead sem movimentação em "${l.status === 'contato' ? 'Em contato' : 'Sem resposta'}" há ${diasParado} dias — fazer nova tentativa`,
+        desc: `Lead parado em "${l.status === 'contato' ? 'Em contato' : 'Sem resposta'}" há ${diasParado} dias — fazer nova tentativa`,
         telefone: l.telefone || null,
       });
     });
 
-  // 🟢 6. Pós-venda: virou "fechado" há 2 a 10 dias (data real da mudança de status)
+  // 🟢 6. Pós-venda: fechados entre 2 e 10 dias atrás
   leads
-    .filter(l => l.status === 'fechado')
+    .filter(l => l.status === 'fechado' && l.created_at)
     .forEach(l => {
-      const base = l.status_alterado_em || l.created_at;
-      if (!base) return;
-      const dias = Math.floor((agora - new Date(base).getTime()) / 86400000);
+      const dias = Math.floor((agora - new Date(l.created_at).getTime()) / 86400000);
       if (dias < 2 || dias > 10) return;
       tarefas.push({
         chave: `posvenda:${l.id}`,
         prio: 3,
         icon: 'ti-star',
         titulo: `Pós-venda: ${l.nome}`,
-        desc: `Fechou há ${dias} dias — perguntar como foi a experiência e pedir avaliação no Google ⭐`,
+        desc: `Perguntar como foi a experiência e pedir avaliação no Google ⭐ (gera indicações!)`,
         telefone: l.telefone || null,
       });
     });
+
+  // 🟡 7. Orçamentos sem resposta há 3+ dias (dinheiro na mesa!)
+  (TAREFAS.orcamentos || []).forEach(o => {
+    const lead = leadMap[o.lead_id];
+    const dias = Math.floor((agora - new Date(o.created_at).getTime()) / 86400000);
+    const valor = (TAREFAS.orcItens || [])
+      .filter(i => i.orcamento_id === o.id)
+      .reduce((s, i) => s + Number(i.valor) * Number(i.qtd || 1), 0);
+    if (valor <= 0) return;
+    tarefas.push({
+      chave: `orcamento:${o.id}`,
+      prio: 2,
+      icon: 'ti-file-invoice',
+      titulo: `Orçamento parado: ${lead?.nome || 'Lead'} (${fmtCurrency(valor)})`,
+      desc: `Sem aprovação há ${dias} dias — fazer follow-up, tirar dúvidas e oferecer condições de pagamento`,
+      telefone: lead?.telefone || null,
+      leadId: o.lead_id,
+    });
+  });
 
   // Remove tarefas concluídas/adiadas e ordena por prioridade
   TAREFAS.lista = tarefas
@@ -219,7 +254,8 @@ function tarefasRenderCard() {
         <div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px;">${tEsc(t.desc)}</div>
       </div>
       <div style="display:flex;gap:6px;flex-shrink:0;">
-        ${t.telefone ? `<button class="btn btn-sm" onclick="tarefaWhats('${tEsc(t.telefone)}')" title="Abrir conversa no Inbox"><i class="ti ti-brand-whatsapp" style="color:#25D366;"></i></button>` : ''}
+        ${t.leadId ? `<button class="btn btn-sm" onclick="openOrcamento('${t.leadId}')" title="Abrir orçamentos"><i class="ti ti-file-invoice" style="color:var(--gold);"></i></button>` : ''}
+        ${t.telefone ? `<button class="btn btn-sm" onclick="tarefaWhats('${tEsc(t.telefone)}')" title="Abrir conversa no WhatsApp"><i class="ti ti-brand-whatsapp" style="color:#25D366;"></i></button>` : ''}
         <button class="btn btn-sm" onclick="tarefaAdiar('${t.chave}')" title="Adiar para amanhã"><i class="ti ti-clock-pause"></i></button>
         <button class="btn btn-sm" onclick="tarefaConcluir('${t.chave}')" title="Marcar como concluída" style="color:var(--gold);"><i class="ti ti-check"></i></button>
       </div>
@@ -327,34 +363,11 @@ async function tarefaAdiar(chave) {
   toast('Adiada para amanhã ⏰');
 }
 
-async function tarefaWhats(telefone) {
+function tarefaWhats(telefone) {
   const d = String(telefone).replace(/\D/g, '');
   if (!d) return;
-  const alvo = d.slice(-8);
-
-  // Abre a página do Inbox
-  const navEl = document.querySelector('[data-page="inbox"]');
-  showPage('inbox', navEl);
-
-  // Espera as conversas carregarem (até ~4s)
-  for (let i = 0; i < 20; i++) {
-    if (INBOX.chats && INBOX.chats.length) break;
-    await new Promise(r => setTimeout(r, 200));
-  }
-
-  // Procura a conversa pelo telefone (últimos 8 dígitos)
-  let chat = (INBOX.chats || []).find(c => String(c.phone).replace(/\D/g, '').slice(-8) === alvo);
-
-  // Se ainda não existe conversa, cria uma nova
-  if (!chat) {
-    const n = d.startsWith('55') ? d : '55' + d;
-    const lead = (STATE.leads || []).find(l => l.telefone?.replace(/\D/g, '').slice(-8) === alvo);
-    chat = { id: n, phone: n, name: lead?.nome || n, lastMsg: '', time: new Date(), unread: 0, lead, messages: [] };
-    INBOX.chats.unshift(chat);
-    if (typeof renderInboxList === 'function') renderInboxList();
-  }
-
-  openChat(chat.id);
+  const n = d.startsWith('55') ? d : '55' + d;
+  window.open('https://wa.me/' + n, '_blank');
 }
 
 // ── Atualização principal ────────────────────────────────────
