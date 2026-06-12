@@ -2710,7 +2710,7 @@ function renderChatHeader(chat) {
       </div>
       <div class="chat-header-actions">
         ${chat.lead
-          ? `<button class="btn btn-sm btn-primary" onclick="showPage('leads')"><i class="ti ti-user"></i> Ver lead</button>`
+         ? `<button class="btn btn-sm btn-primary" onclick="openEditLead('${chat.lead.id}')"><i class="ti ti-user"></i> Ver lead</button>`
           : `<button class="btn btn-sm" onclick="createLeadFromChat('${chat.id}')"><i class="ti ti-user-plus"></i> Criar lead</button>`
         }
       </div>
