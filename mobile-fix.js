@@ -74,6 +74,22 @@
       overflow-x: auto; -webkit-overflow-scrolling: touch;
     }
 
+    /* ── Agenda: calendário em cima, consultas embaixo ── */
+    .agenda-layout { grid-template-columns: 1fr !important; }
+
+    /* ── Kanban: colunas largas com deslize horizontal (estilo Trello) ── */
+    .kanban-board {
+      display: flex !important;
+      gap: 12px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      padding-bottom: 12px;
+    }
+    .kanban-col {
+      min-width: 270px;
+      flex: 0 0 270px;
+    }
+
     /* ── Modais cabem na tela ── */
     .modal { max-width: 94vw !important; width: 94vw; max-height: 88vh; overflow-y: auto; }
 
