@@ -219,6 +219,18 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
           ? new Date(Number(msg.messageTimestamp) * 1000).toISOString()
           : new Date().toISOString();
 
+        // Anti-duplicata PRIMEIRO: se já foi salva, pula antes de baixar qualquer mídia
+        if (message_id) {
+          const dupResp = await fetch(
+            `${SUPABASE_URL}/rest/v1/mensagens?message_id=eq.${encodeURIComponent(message_id)}&select=id&limit=1`,
+            { headers: sbHeaders }
+          );
+          if (dupResp.ok) {
+            const dup = await dupResp.json();
+            if (dup.length) { insertados.push(phone); continue; }
+          }
+        }
+
         let content = '';
         let type = 'text';
         let media_url = null;
@@ -263,18 +275,6 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
         }
 
         const payload = { clinic_id, phone, contact_name, content, type, from_me: fromMe, media_url, message_id, created_at };
-
-        // Anti-duplicata: se essa mensagem já foi salva (ex: enviada pela API), pula
-        if (message_id) {
-          const dupResp = await fetch(
-            `${SUPABASE_URL}/rest/v1/mensagens?message_id=eq.${encodeURIComponent(message_id)}&select=id&limit=1`,
-            { headers: sbHeaders }
-          );
-          if (dupResp.ok) {
-            const dup = await dupResp.json();
-            if (dup.length) { insertados.push(phone); continue; }
-          }
-        }
 
         const insertResp = await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
           method: 'POST',
