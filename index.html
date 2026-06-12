@@ -2767,11 +2767,8 @@ function renderMessages(msgs, chat) {
 if (tipo === 'image') {
       const imgSrc = m.media_url || '';
       bubbleContent = imgSrc
-        ? `<a href="${imgSrc}" download target="_blank" style="display:flex;align-items:center;gap:8px;padding:4px 0;color:inherit;text-decoration:none;">
-            <span style="font-size:24px;">🖼️</span>
-            <span style="font-size:12px;opacity:0.8;">Imagem · Clique para baixar</span>
-          </a>`
-        : `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;"><span style="font-size:24px;">🖼️</span><span style="font-size:12px;opacity:0.8;">Imagem</span></div>`;
+        ? `<img src="${imgSrc}" style="max-width:240px;max-height:300px;border-radius:10px;display:block;cursor:pointer;" onclick="window.open('${imgSrc}','_blank')" loading="lazy"/>` + (m.content && m.content !== '📷 Imagem' ? `<div style="font-size:12px;margin-top:4px;">${m.content}</div>` : '')
+        : `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;"><span style="font-size:24px;">🖼️</span><span style="font-size:12px;opacity:0.8;">Imagem indisponível</span></div>`;
     } else if (tipo === 'audio') {
       const audioSrc = m.media_url || '';
       bubbleContent = audioSrc
@@ -2780,21 +2777,18 @@ if (tipo === 'image') {
     } else if (tipo === 'video') {
       const vidSrc = m.media_url || '';
       bubbleContent = vidSrc
-        ? `<a href="${vidSrc}" download target="_blank" style="display:flex;align-items:center;gap:8px;padding:4px 0;color:inherit;text-decoration:none;">
-            <span style="font-size:24px;">🎬</span>
-            <span style="font-size:12px;opacity:0.8;">Vídeo · Clique para baixar</span>
-          </a>`
-        : `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;"><span style="font-size:24px;">🎬</span><span style="font-size:12px;opacity:0.8;">Vídeo</span></div>`;
+        ? `<video controls preload="metadata" style="max-width:260px;max-height:320px;border-radius:10px;display:block;"><source src="${vidSrc}"></video>` + (m.content && m.content !== '🎥 Vídeo' ? `<div style="font-size:12px;margin-top:4px;">${m.content}</div>` : '')
+        : `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;"><span style="font-size:24px;">🎬</span><span style="font-size:12px;opacity:0.8;">Vídeo indisponível</span></div>`;
     } else if (tipo === 'document') {
-      bubbleContent = `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;">
-        <span style="font-size:24px;">📄</span>
-        <span style="font-size:12px;opacity:0.8;">${m.content || 'Documento'}</span>
-      </div>`;
+      const docSrc = m.media_url || '';
+      bubbleContent = docSrc
+        ? `<a href="${docSrc}" download target="_blank" style="display:flex;align-items:center;gap:8px;padding:4px 0;color:inherit;text-decoration:none;"><span style="font-size:24px;">📄</span><span style="font-size:12px;opacity:0.8;text-decoration:underline;">${m.content || 'Documento'} · baixar</span></a>`
+        : `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;"><span style="font-size:24px;">📄</span><span style="font-size:12px;opacity:0.8;">${m.content || 'Documento'}</span></div>`;
     } else if (tipo === 'sticker') {
-      bubbleContent = `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;">
-        <span style="font-size:24px;">😄</span>
-        <span style="font-size:12px;opacity:0.8;">Figurinha</span>
-      </div>`;
+      const stkSrc = m.media_url || '';
+      bubbleContent = stkSrc
+        ? `<img src="${stkSrc}" style="width:120px;height:120px;object-fit:contain;display:block;" loading="lazy"/>`
+        : `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;"><span style="font-size:24px;">😄</span><span style="font-size:12px;opacity:0.8;">Figurinha</span></div>`;
     } else {
       const text = m.content || '';
       if (text) {
