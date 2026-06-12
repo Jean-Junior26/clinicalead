@@ -276,7 +276,7 @@ function relfinDetalhe(tipo) {
       <div style="display:flex;gap:6px;">
         <button class="btn btn-sm btn-ghost btn-icon" title="Abrir orçamentos" onclick="closeModal('modalRelFin');openOrcamento('${item.leadId}')"><i class="ti ti-file-invoice" style="color:var(--gold);"></i></button>
         ${item.tel ? `<button class="btn btn-sm btn-ghost btn-icon" title="Conversa no Inbox" onclick="closeModal('modalRelFin');tarefaWhats('${item.tel}')"><i class="ti ti-message-circle" style="color:#25D366;"></i></button>` : ''}
-        <button class="btn btn-sm btn-ghost btn-icon" title="Abrir cadastro" onclick="closeModal('modalRelFin');openEditLead('${item.leadId}')"><i class="ti ti-user"></i></button>
+        <button class="btn btn-sm btn-ghost btn-icon" title="Abrir cadastro em nova aba" onclick="abrirCadastroNovaAba('${item.leadId}')"><i class="ti ti-external-link"></i></button>
       </div>
     </div>`).join('')
     : `<div style="text-align:center;padding:30px;color:var(--text-secondary);font-size:13px;">${c.vazio}</div>`;
