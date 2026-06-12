@@ -128,6 +128,7 @@ function renderPacientes() {
                 <td style="padding:10px 16px;border-bottom:1px solid var(--border-subtle);"><span style="font-size:12px;color:var(--text-secondary);"><i class="ti ${SOURCE_ICON[l.origem] || 'ti-dots'}" style="margin-right:4px;"></i>${l.origem || '—'}</span></td>
                 <td style="padding:10px 16px;border-bottom:1px solid var(--border-subtle);">
                   <div style="display:flex;gap:6px;">
+                    <button class="btn btn-sm btn-ghost btn-icon" title="Orçamentos" onclick="openOrcamento('${l.id}')"><i class="ti ti-file-invoice" style="color:var(--gold);"></i></button>
                     <button class="btn btn-sm btn-ghost btn-icon" title="Conversa no Inbox" onclick="tarefaWhats('${(l.telefone || '').replace(/\D/g, '')}')"><i class="ti ti-message-circle" style="color:#25D366;"></i></button>
                     <button class="btn btn-sm btn-ghost btn-icon" title="Editar" onclick="openEditLead('${l.id}')"><i class="ti ti-edit"></i></button>
                     <button class="btn btn-sm btn-ghost btn-icon" title="Ver" onclick="openLeadDetail('${l.id}')"><i class="ti ti-eye"></i></button>
