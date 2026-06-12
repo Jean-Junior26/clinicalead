@@ -20,11 +20,12 @@ function abrirCadastroNovaAba(leadId) {
   let tentativas = 0;
   const timer = setInterval(() => {
     tentativas++;
-    if ((window.STATE?.leads || []).length && typeof openEditLead === 'function') {
+    const pronto = typeof STATE !== 'undefined' && (STATE.leads || []).length && typeof openEditLead === 'function';
+    if (pronto) {
       clearInterval(timer);
       openEditLead(leadId);
-    } else if (tentativas > 40) {
-      clearInterval(timer); // desiste após ~20s (app não carregou)
+    } else if (tentativas > 60) {
+      clearInterval(timer); // desiste após ~30s (app não carregou)
     }
   }, 500);
 })();
