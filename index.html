@@ -2890,23 +2890,40 @@ async function sendChatMessage() {
 
 async function sendImageMsg(event) {
   const file = event.target.files[0];
+  event.target.value = '';
   if (!file || !INBOX.activeChat) return;
   const clinic = currentClinic();
   if (!clinic?.whatsapp_instance) { toast('Conecte o WhatsApp primeiro!', 'error'); return; }
-  toast('Enviando imagem...');
+  if (file.size > 3.5 * 1024 * 1024) { toast('Arquivo muito grande (máx. 3,5 MB)', 'error'); return; }
+
+  const ehVideo = file.type.startsWith('video/');
+  const ehSticker = file.type === 'image/webp';
+  toast(ehSticker ? 'Enviando figurinha...' : ehVideo ? 'Enviando vídeo...' : 'Enviando imagem...');
+
   const reader = new FileReader();
   reader.onload = async (e) => {
     const base64 = e.target.result.split(',')[1];
     try {
-      await evoRequest('POST', `/message/sendMedia/${clinic.whatsapp_instance}`, {
-        number: '55' + INBOX.activeChat.phone.replace(/\D/g, ''),
-        mediatype: 'image',
-        media: base64,
-        fileName: file.name,
+      const resp = await fetch('/api/send-media', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instance: clinic.whatsapp_instance,
+          phone: INBOX.activeChat.phone,
+          clinic_id: clinic.id,
+          base64,
+          mimetype: file.type || 'application/octet-stream',
+          fileName: file.name,
+        }),
       });
-      toast('Imagem enviada! ✓');
+      if (!resp.ok) throw new Error('Falha no envio');
+      toast('Enviado! ✓');
       await loadInboxChats();
-    } catch (e) { toast('Erro ao enviar imagem', 'error'); }
+      const atualizado = INBOX.chats.find(c => c.id === INBOX.activeChat.id);
+      if (atualizado) { INBOX.activeChat = atualizado; renderMessages(atualizado.messages, atualizado); }
+    } catch (err) {
+      toast('Erro ao enviar mídia', 'error');
+    }
   };
   reader.readAsDataURL(file);
 }
