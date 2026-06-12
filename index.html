@@ -2722,6 +2722,7 @@ function renderChatHeader(chat) {
         <textarea class="chat-input" id="chatInput" placeholder="Digite uma mensagem..." rows="1"
           onkeydown="handleChatKeydown(event)" oninput="autoResizeInput(this)"></textarea>
       <div class="chat-input-btns">
+      <button class="chat-input-btn" title="Emojis" onclick="toggleEmojiPicker(event)"><i class="ti ti-mood-smile"></i></button>
           <label class="chat-input-btn" title="Imagem" style="cursor:pointer;">
             <i class="ti ti-photo"></i>
            <input type="file" accept="image/*,video/*" style="display:none;" onchange="sendImageMsg(event)"/>
