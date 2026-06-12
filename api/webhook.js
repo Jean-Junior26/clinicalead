@@ -14,7 +14,8 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
     'Content-Type': 'application/json',
   };
 
-  async function baixarEsalvarAudio(messageId, instanceName, phone) {
+  // ── Baixa mídia descriptografada do Evolution e salva no Storage
+  async function baixarEsalvarMidia(messageId, instanceName, phone, tipo, nomeOriginal) {
     try {
       const r = await fetch(`${EVO_URL}/chat/getBase64FromMediaMessage/${instanceName}`, {
         method: 'POST',
@@ -26,22 +27,37 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       const base64 = data.base64;
       if (!base64) return null;
 
+      const config = {
+        audio:    { bucket: 'audios', ext: 'ogg',  mime: 'audio/ogg' },
+        image:    { bucket: 'midias', ext: 'jpg',  mime: 'image/jpeg' },
+        video:    { bucket: 'midias', ext: 'mp4',  mime: 'video/mp4' },
+        sticker:  { bucket: 'midias', ext: 'webp', mime: 'image/webp' },
+        document: { bucket: 'midias', ext: 'bin',  mime: 'application/octet-stream' },
+      };
+      const cfg = config[tipo] || config.document;
       const binary = Buffer.from(base64, 'base64');
-      const fileName = `audio_${phone}_${Date.now()}.ogg`;
 
-      const upload = await fetch(`${SUPABASE_URL}/storage/v1/object/audios/${fileName}`, {
+      let fileName;
+      if (tipo === 'document' && nomeOriginal) {
+        const limpo = String(nomeOriginal).replace(/[^a-zA-Z0-9._-]/g, '_').slice(-80);
+        fileName = `doc_${phone}_${Date.now()}_${limpo}`;
+      } else {
+        fileName = `${tipo}_${phone}_${Date.now()}.${cfg.ext}`;
+      }
+
+      const upload = await fetch(`${SUPABASE_URL}/storage/v1/object/${cfg.bucket}/${fileName}`, {
         method: 'POST',
         headers: {
           apikey: SUPABASE_KEY,
           Authorization: `Bearer ${SUPABASE_KEY}`,
-          'Content-Type': 'audio/ogg',
+          'Content-Type': cfg.mime,
         },
         body: binary,
       });
       if (!upload.ok) return null;
-      return `${SUPABASE_URL}/storage/v1/object/public/audios/${fileName}`;
+      return `${SUPABASE_URL}/storage/v1/object/public/${cfg.bucket}/${fileName}`;
     } catch (e) {
-      console.error('[webhook] Erro ao baixar áudio:', e.message);
+      console.error('[webhook] Erro ao baixar mídia:', e.message);
       return null;
     }
   }
@@ -214,20 +230,29 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
           content = m.extendedTextMessage?.text || ''; type = 'text';
         } else if (m.imageMessage) {
           content = m.imageMessage?.caption || '📷 Imagem'; type = 'image';
-          media_url = m.imageMessage?.url || null;
+          if (message_id && instanceName) {
+            media_url = await baixarEsalvarMidia(message_id, instanceName, phone, 'image');
+          }
         } else if (m.audioMessage) {
           content = '🎵 Áudio'; type = 'audio';
           if (message_id && instanceName) {
-            media_url = await baixarEsalvarAudio(message_id, instanceName, phone);
+            media_url = await baixarEsalvarMidia(message_id, instanceName, phone, 'audio');
           }
         } else if (m.videoMessage) {
           content = m.videoMessage?.caption || '🎥 Vídeo'; type = 'video';
-          media_url = m.videoMessage?.url || null;
+          if (message_id && instanceName) {
+            media_url = await baixarEsalvarMidia(message_id, instanceName, phone, 'video');
+          }
         } else if (m.documentMessage) {
           content = m.documentMessage?.fileName || '📄 Documento'; type = 'document';
-          media_url = m.documentMessage?.url || null;
+          if (message_id && instanceName) {
+            media_url = await baixarEsalvarMidia(message_id, instanceName, phone, 'document', m.documentMessage?.fileName);
+          }
         } else if (m.stickerMessage) {
           content = '🖼️ Sticker'; type = 'sticker';
+          if (message_id && instanceName) {
+            media_url = await baixarEsalvarMidia(message_id, instanceName, phone, 'sticker');
+          }
         } else if (m.locationMessage) {
           content = `📍 ${m.locationMessage?.degreesLatitude}, ${m.locationMessage?.degreesLongitude}`;
           type = 'location';
