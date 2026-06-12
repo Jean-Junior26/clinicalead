@@ -205,5 +205,10 @@
   // Garante de novo após o login (a topbar pode renderizar depois)
   setTimeout(montarElementosMobile, 2500);
 
+  // ── PWA: registra o service worker (torna o app instalável) ─
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  }
+
   console.log('✅ mobile-fix.js carregado — modo celular ativo');
 })();
