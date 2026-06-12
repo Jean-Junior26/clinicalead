@@ -2536,7 +2536,7 @@ async function loadInboxChats() {
 
     STATE.leads.filter(l => l.telefone).forEach(lead => {
       const phone = lead.telefone.replace(/\D/g, '');
-      const exists = INBOX.chats.find(c => c.phone.slice(-9) === phone.slice(-9));
+      const exists = INBOX.chats.find(c => c.phone.slice(-8) === phone.slice(-8));
       if (!exists) {
         INBOX.chats.push({
           id: phone,
