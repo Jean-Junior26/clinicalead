@@ -88,7 +88,12 @@ function orcGarantirModal() {
 
 function orcRender(html) {
   const titulo = document.getElementById('orcTitulo');
-  if (titulo) titulo.innerHTML = `<i class="ti ti-file-invoice" style="margin-right:8px;color:var(--gold);"></i>Orçamentos — ${ORC.lead?.nome || 'Lead'}`;
+  if (titulo) {
+    const tel = (ORC.lead?.telefone || '').replace(/\D/g, '');
+    const btnInbox = tel ? `<button class="btn btn-sm btn-ghost btn-icon" title="Conversa no Inbox" style="margin-left:10px;" onclick="closeModal('modalOrcamento');tarefaWhats('${tel}')"><i class="ti ti-message-circle" style="color:#25D366;"></i></button>` : '';
+    const btnLead = ORC.lead ? `<button class="btn btn-sm btn-ghost btn-icon" title="Abrir cadastro" onclick="closeModal('modalOrcamento');openEditLead('${ORC.lead.id}')"><i class="ti ti-user"></i></button>` : '';
+    titulo.innerHTML = `<i class="ti ti-file-invoice" style="margin-right:8px;color:var(--gold);"></i>Orçamentos — ${ORC.lead?.nome || 'Lead'}${btnInbox}${btnLead}`;
+  }
   const body = document.getElementById('orcBody');
   if (body) body.innerHTML = html;
 }
