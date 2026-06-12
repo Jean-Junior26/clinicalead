@@ -2724,7 +2724,7 @@ function renderChatHeader(chat) {
       <div class="chat-input-btns">
           <label class="chat-input-btn" title="Imagem" style="cursor:pointer;">
             <i class="ti ti-photo"></i>
-            <input type="file" accept="image/*" style="display:none;" onchange="sendImageMsg(event)"/>
+           <input type="file" accept="image/*,video/*" style="display:none;" onchange="sendImageMsg(event)"/>
           </label>
           <button class="chat-input-btn" id="btnGravarAudio" title="Gravar áudio" onclick="toggleGravarAudio()">
             <i class="ti ti-microphone"></i>
