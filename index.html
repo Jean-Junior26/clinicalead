@@ -1787,6 +1787,9 @@ function renderDaySchedule(dateStr) {
       const btnInbox = telDigitos
         ? `<button class="btn btn-sm" onclick="event.stopPropagation();tarefaWhats('${telDigitos}')" title="Abrir conversa no Inbox"><i class="ti ti-message-circle" style="color:#25D366;"></i></button>`
         : '';
+     const btnCadastro = lead
+        ? `<button class="btn btn-sm" onclick="event.stopPropagation();abrirCadastroNovaAba('${lead.id}')" title="Abrir cadastro em nova aba"><i class="ti ti-external-link"></i></button>`
+        : '';
       return `<div class="sched-item" style="cursor:pointer;" onclick="openEditConsulta('${consulta.id}')">
         <div class="sched-time" style="color:var(--gold);">${hora}</div>
         <div class="sched-line-col"><div class="sched-dot" style="background:${dotColor};"></div></div>
