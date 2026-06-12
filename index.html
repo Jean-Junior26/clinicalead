@@ -2505,7 +2505,7 @@ async function loadInboxChats() {
       if (!phone) return;
       if (!chatMap[phone]) {
         const lead = STATE.leads.find(l =>
-          l.telefone && l.telefone.replace(/\D/g, '').slice(-9) === phone.slice(-9)
+        l.telefone && l.telefone.replace(/\D/g, '').slice(-8) === phone.slice(-8)
         );
         chatMap[phone] = {
           id: phone,
