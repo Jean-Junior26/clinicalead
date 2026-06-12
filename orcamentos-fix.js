@@ -60,8 +60,11 @@ async function orcCarregarDados() {
     const ids = ORC.orcamentos.map(o => o.id);
     const { data: itens } = await db.from('orcamento_itens')
       .select('*').in('orcamento_id', ids);
+    const { data: pags } = await db.from('pagamentos')
+      .select('*').in('orcamento_id', ids).order('data');
     ORC.orcamentos.forEach(o => {
       o.itens = (itens || []).filter(i => i.orcamento_id === o.id);
+      o.pagamentos = (pags || []).filter(p => p.orcamento_id === o.id);
     });
   }
 }
@@ -115,6 +118,54 @@ function orcRenderLista() {
         <span style="font-family:var(--mono);font-size:12px;color:${i.aprovado ? 'var(--gold)' : 'var(--text-secondary)'};">${orcFmt(i.valor * i.qtd)}</span>
       </div>`).join('');
 
+    const pagoV = (o.pagamentos || []).reduce((s, p) => s + Number(p.valor || 0), 0);
+    const aReceber = Math.max(0, aprovadoV - pagoV);
+
+    const FORMA_ICON = { pix: '💠', cartao_credito: '💳', cartao_debito: '💳', dinheiro: '💵', boleto: '🧾', transferencia: '🏦' };
+    const FORMA_LABEL = { pix: 'Pix', cartao_credito: 'Cartão de crédito', cartao_debito: 'Cartão de débito', dinheiro: 'Dinheiro', boleto: 'Boleto', transferencia: 'Transferência' };
+
+    const pagLinhas = (o.pagamentos || []).map(p => `
+      <div style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12px;">
+        <span>${FORMA_ICON[p.forma] || '💰'}</span>
+        <span style="flex:1;color:var(--text-secondary);">${FORMA_LABEL[p.forma] || p.forma}${p.parcelas > 1 ? ` (${p.parcelas}x)` : ''} · ${new Date(p.data + 'T12:00').toLocaleDateString('pt-BR')}</span>
+        <span style="font-family:var(--mono);color:var(--gold);">${orcFmt(p.valor)}</span>
+        <button class="btn btn-sm btn-ghost btn-icon" style="padding:2px 6px;" title="Excluir pagamento" onclick="orcExcluirPagamento('${p.id}','${o.id}')"><i class="ti ti-x" style="color:var(--coral);font-size:12px;"></i></button>
+      </div>`).join('');
+
+    const pagamentosBloco = aprovadoV > 0 ? `
+      <div style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--border);">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+          <div style="font-size:12px;">
+            <span style="color:var(--text-muted);">Pago:</span> <strong style="color:var(--gold);font-family:var(--mono);">${orcFmt(pagoV)}</strong>
+            <span style="color:var(--text-muted);margin-left:10px;">A receber:</span> <strong style="color:${aReceber > 0 ? 'var(--coral)' : 'var(--gold)'};font-family:var(--mono);">${orcFmt(aReceber)}</strong>
+            ${aReceber === 0 && pagoV > 0 ? ' <span style="font-size:11px;">✅ quitado</span>' : ''}
+          </div>
+          <button class="btn btn-sm" onclick="orcTogglePagForm('${o.id}')"><i class="ti ti-cash"></i> Registrar pagamento</button>
+        </div>
+        ${pagLinhas ? `<div style="margin-top:6px;">${pagLinhas}</div>` : ''}
+        <div id="orcPagForm-${o.id}" style="display:none;margin-top:10px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--r-sm,10px);padding:12px;">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <input type="text" id="pagValor-${o.id}" class="form-input" placeholder="Valor (R$)" style="width:110px;font-size:12px;padding:6px 8px;"/>
+            <select id="pagForma-${o.id}" class="form-input" style="width:150px;font-size:12px;padding:6px 8px;" onchange="document.getElementById('pagParcelasWrap-${o.id}').style.display = this.value==='cartao_credito' ? 'flex' : 'none'">
+              <option value="pix">💠 Pix</option>
+              <option value="cartao_credito">💳 Cartão de crédito</option>
+              <option value="cartao_debito">💳 Cartão de débito</option>
+              <option value="dinheiro">💵 Dinheiro</option>
+              <option value="boleto">🧾 Boleto</option>
+              <option value="transferencia">🏦 Transferência</option>
+            </select>
+            <div id="pagParcelasWrap-${o.id}" style="display:none;align-items:center;gap:4px;">
+              <select id="pagParcelas-${o.id}" class="form-input" style="width:70px;font-size:12px;padding:6px 8px;">
+                ${[1,2,3,4,5,6,7,8,9,10,11,12].map(n => `<option value="${n}">${n}x</option>`).join('')}
+              </select>
+            </div>
+            <input type="date" id="pagData-${o.id}" class="form-input" style="width:140px;font-size:12px;padding:6px 8px;" value="${new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().split('T')[0]}"/>
+            <button class="btn btn-primary btn-sm" onclick="orcRegistrarPagamento('${o.id}')"><i class="ti ti-check"></i> Confirmar</button>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">💡 Pagou metade no dinheiro e metade no cartão? Registre 2 pagamentos, um de cada forma.</div>
+        </div>
+      </div>` : '';
+
     return `
       <div class="card" style="margin-bottom:14px;">
         <div class="card-header">
@@ -130,6 +181,7 @@ function orcRenderLista() {
             <div style="font-size:12px;"><span style="color:var(--text-muted);">Pendente</span><br><strong style="font-size:15px;color:${pendenteV > 0 ? 'var(--coral)' : 'var(--text-secondary)'};">${orcFmt(pendenteV)}</strong></div>
           </div>
           <div style="font-size:11px;color:var(--text-muted);margin-top:8px;"><i class="ti ti-info-circle"></i> Marque os itens que o paciente aprovou — o restante fica como pendente.</div>
+          ${pagamentosBloco}
         </div>
       </div>`;
   }).join('');
@@ -308,6 +360,45 @@ async function orcExcluir(orcId) {
   const { error } = await db.from('orcamentos').delete().eq('id', orcId);
   if (error) { toast('Erro: ' + error.message, 'error'); return; }
   toast('Orçamento excluído');
+  await orcCarregarDados();
+  orcRenderLista();
+}
+
+// ── Pagamentos ───────────────────────────────────────────────
+function orcTogglePagForm(orcId) {
+  const f = document.getElementById('orcPagForm-' + orcId);
+  if (f) f.style.display = f.style.display === 'none' ? 'block' : 'none';
+}
+
+async function orcRegistrarPagamento(orcId) {
+  const clinic = currentClinic();
+  if (!clinic) return;
+
+  const valor = parseFloat(String(document.getElementById('pagValor-' + orcId)?.value || '').replace(/\./g, '').replace(',', '.')) || 0;
+  const forma = document.getElementById('pagForma-' + orcId)?.value || 'pix';
+  const parcelas = forma === 'cartao_credito' ? Number(document.getElementById('pagParcelas-' + orcId)?.value || 1) : 1;
+  const data = document.getElementById('pagData-' + orcId)?.value || new Date().toISOString().split('T')[0];
+
+  if (valor <= 0) { toast('Digite o valor do pagamento', 'error'); return; }
+
+  const { error } = await db.from('pagamentos').insert({
+    clinic_id: clinic.id,
+    lead_id: ORC.leadId,
+    orcamento_id: orcId,
+    valor, forma, parcelas, data,
+  });
+  if (error) { toast('Erro: ' + error.message, 'error'); return; }
+
+  toast(`Pagamento de ${orcFmt(valor)} registrado! 💰`);
+  await orcCarregarDados();
+  orcRenderLista();
+}
+
+async function orcExcluirPagamento(pagId, orcId) {
+  if (!confirm('Excluir este pagamento?')) return;
+  const { error } = await db.from('pagamentos').delete().eq('id', pagId);
+  if (error) { toast('Erro: ' + error.message, 'error'); return; }
+  toast('Pagamento excluído');
   await orcCarregarDados();
   orcRenderLista();
 }
