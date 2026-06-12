@@ -1792,7 +1792,7 @@ function renderDaySchedule(dateStr) {
         <div class="sched-line-col"><div class="sched-dot" style="background:${dotColor};"></div></div>
         <div class="sched-info">
           <div class="sched-name">${lead?.nome || 'Paciente'}${obsIcone}</div>
-          <div class="sched-proc">${lead?.procedimento || '—'}</div>
+         <div class="sched-proc">${consulta.procedimento || lead?.procedimento || '—'}</div>
           <div class="sched-acts">
             ${badgeHtml(consulta.status === 'confirmado' ? 'agendado' : consulta.status)}
             ${btnInbox}
