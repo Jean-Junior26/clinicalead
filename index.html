@@ -2518,6 +2518,9 @@ async function loadInboxChats() {
           messages: [],
         };
       }
+      if (m.contact_name && chatMap[phone].name === chatMap[phone].phone) {
+        chatMap[phone].name = m.contact_name;
+      }
       chatMap[phone].messages.push(m);
       if (!m.from_me && !m.read_at) chatMap[phone].unread++;
     });
