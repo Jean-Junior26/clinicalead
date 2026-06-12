@@ -2139,9 +2139,14 @@ async function renderClinicas() {
         <td class="td-muted">${c.telefone || '—'}</td>
         <td><span class="badge ${c.plano === 'Pro' ? 'badge-gold' : 'badge-gray'}">${c.plano || 'Pro'}</span></td>
         <td class="td-mono">${STATE.leads.filter(l => l.clinic_id === c.id).length}</td>
-        <td>${c.whatsapp_instance
-          ? `<span class="badge badge-gold"><i class="ti ti-check"></i> Conectado</span>`
-          : '<span class="badge badge-gray">Não conectado</span>'}</td>
+       <td><div style="display:flex;align-items:center;gap:6px;">
+          ${c.whatsapp_instance
+            ? `<span class="badge badge-gold"><i class="ti ti-check"></i> Conectado</span>
+               <button class="btn btn-sm" title="Reconectar / gerar QR Code" onclick="conectarWhatsAppClinica('${c.id}')"><i class="ti ti-qrcode"></i></button>
+               <button class="btn btn-sm btn-danger" title="Desconectar WhatsApp" onclick="desconectarWhatsAppClinica('${c.id}')"><i class="ti ti-plug-x"></i></button>`
+            : `<span class="badge badge-gray">Não conectado</span>
+               <button class="btn btn-sm btn-primary" title="Conectar WhatsApp" onclick="conectarWhatsAppClinica('${c.id}')"><i class="ti ti-qrcode"></i> Conectar</button>`}
+        </div></td>
         <td><div style="display:flex;gap:6px;">
           ${isAdmin ? `
             <button class="btn btn-sm ${c.bloqueado ? 'btn-primary' : 'btn-danger'}" onclick="toggleBloquearClinica('${c.id}', ${c.bloqueado})">
