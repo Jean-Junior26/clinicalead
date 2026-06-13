@@ -2351,7 +2351,7 @@ async function saveNewClinic() {
   if (error) { toast('Erro ao criar clínica: '+error.message,'error'); return; }
   STATE.clinics.push(data);
   STATE.currentClinicIdx = STATE.clinics.length-1;
-  document.getElementById('navClinicasBadge').textContent = STATE.clinics.length;
+{ const b = document.getElementById('navClinicasBadge'); if (b) b.textContent = STATE.clinics.length; }
   closeWizard();
   renderClinicSwitcher();
   showPage('clinicas');
