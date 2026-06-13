@@ -1,75 +1,10 @@
 // ============================================================
-// CLINICALEAD — AGENDA FIX
-// Parte 1: horários personalizados salvos no Supabase
-// Parte 2: campo Procedimento no agendamento (catálogo vivo)
+// CLINICALEAD — PROCEDIMENTO NO AGENDAMENTO
+// Adiciona o campo "Procedimento" no modal de novo agendamento,
+// alimentado pelo catálogo vivo da clínica (página Procedimentos).
+// Criou um procedimento novo? Ele já aparece aqui na hora.
+// Bônus: ao escolher o paciente, sugere o procedimento do lead.
 // ============================================================
-
-// ── CARREGAR HORÁRIOS DA CLÍNICA ─────────────────────────────
-async function loadHorariosClinica() {
-  const clinic = currentClinic();
-  if (!clinic) return;
-  const { data } = await db
-    .from('agenda_config')
-    .select('horarios')
-    .eq('clinic_id', clinic.id)
-    .single();
-  if (data?.horarios && data.horarios.length > 0) {
-    CAL.horariosDisponiveis = data.horarios;
-  } else {
-    // Horários padrão
-    CAL.horariosDisponiveis = [
-      '08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30',
-      '14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30'
-    ];
-  }
-}
-// ── SALVAR HORÁRIOS DA CLÍNICA ───────────────────────────────
-async function salvarHorariosClinica() {
-  const clinic = currentClinic();
-  if (!clinic) return;
-  await db.from('agenda_config').upsert({
-    clinic_id: clinic.id,
-    horarios: CAL.horariosDisponiveis,
-    updated_at: new Date().toISOString(),
-  }, { onConflict: 'clinic_id' });
-}
-// ── ADICIONAR NOVO HORÁRIO ───────────────────────────────────
-async function adicionarNovoHorario() {
-  const val = document.getElementById('novoHorarioInput').value;
-  if (!val) { toast('Selecione um horário', 'error'); return; }
-  const hora = val.slice(0, 5);
-  if (CAL.horariosDisponiveis.includes(hora)) { toast('Horário já existe!', 'error'); return; }
-  CAL.horariosDisponiveis.push(hora);
-  CAL.horariosDisponiveis.sort();
-  await salvarHorariosClinica();
-  const dateStr = CAL.selectedDate || new Date().toISOString().split('T')[0];
-  renderConfigSlotsGrid(dateStr);
-  toast(hora + ' adicionado e salvo! ✓');
-}
-// ── CARREGAR CONSULTAS + HORÁRIOS ────────────────────────────
-async function loadConsultas() {
-  const clinic = currentClinic();
-  if (!clinic) return;
-  try {
-    await loadHorariosClinica();
-    const { data } = await db
-      .from('consultas')
-      .select('*')
-      .eq('clinic_id', clinic.id)
-      .order('data')
-      .order('hora');
-    CAL.consultas = data || [];
-  } catch(e) {
-    CAL.consultas = [];
-  }
-}
-// ── SALVAR CONFIGURAÇÃO DA AGENDA ────────────────────────────
-async function salvarConfigAgenda() {
-  await salvarHorariosClinica();
-  closeModal('modalConfigAgenda');
-  if (CAL.selectedDate) renderDaySchedule(CAL.selectedDate);
-  toast('Configuração salva! ✓');
-}
 
 let AGF = { procs: [] };
 
@@ -169,10 +104,33 @@ salvarNovoAgendamento = async function () {
   toast('Consulta agendada! ✓');
 
   if (clinic?.whatsapp_instance && lead?.telefone) {
-    const dataFormatada = new Date(data + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
-    const procLinha = procedimento ? `\n🦷 *Procedimento:* ${procedimento}` : '';
-    const msg = `Olá, ${lead.nome}! 🎉 Sua consulta está *confirmada*!\n\n📅 *Data:* ${dataFormatada}\n⏰ *Horário:* ${hora}${procLinha}\n📍 *Endereço:* R. Rui Barbosa, 483 - Centro, Araguari - MG\n🗺️ *Como chegar:* https://share.google/aBRk2BmdSOHL2iN9X\n\nQualquer dúvida, é só chamar aqui! Te esperamos 😊`;
-    try { await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg); toast('Confirmação enviada por WhatsApp! ✓'); } catch (e) {}
+    try {
+      // Usa a mensagem editável da tela de Automações (tipo "confirmacao")
+      const { data: autoConf } = await db.from('automacoes')
+        .select('mensagem,ativo')
+        .eq('clinic_id', clinic.id)
+        .eq('tipo', 'confirmacao')
+        .maybeSingle();
+
+      let template = null;
+      if (autoConf) {
+        template = autoConf.ativo ? autoConf.mensagem : null; // desativada = não envia
+      } else if (typeof AUTOMACOES_DEFAULTS !== 'undefined') {
+        template = AUTOMACOES_DEFAULTS.find(a => a.tipo === 'confirmacao')?.msg || null;
+      }
+
+      if (template) {
+        const dataFormatada = new Date(data + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+        const msg = template
+          .replaceAll('{nome}', lead.nome || '')
+          .replaceAll('{clinica}', clinic.nome || clinic.name || '')
+          .replaceAll('{data}', dataFormatada)
+          .replaceAll('{hora}', hora)
+          .replaceAll('{procedimento}', procedimento || lead.procedimento || 'sua avaliação');
+        await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg);
+        toast('Confirmação enviada por WhatsApp! ✓');
+      }
+    } catch (e) {}
   }
 };
 
