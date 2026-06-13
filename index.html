@@ -2291,7 +2291,7 @@ async function saveNewLead() {
   const { data, error } = await db.from('leads').insert(newLead).select().single();
   if (error) { toast('Erro ao salvar: '+error.message,'error'); return; }
   STATE.leads.unshift(data);
-  document.getElementById('navLeadsBadge').textContent = STATE.leads.length;
+  document.getElementById('navLeadsBadge').textContent = currentLeads().length;
   closeModal('modalNewLead');
   renderPage(document.querySelector('.page.active')?.id?.replace('page-',''));
   toast(`${nome} adicionado como novo lead! 🎉`);
