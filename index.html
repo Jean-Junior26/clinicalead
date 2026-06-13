@@ -2163,7 +2163,7 @@ async function renderClinicas() {
           ${isAdmin ? `
             <button class="btn btn-sm ${c.bloqueado ? 'btn-primary' : 'btn-danger'}" onclick="toggleBloquearClinica('${c.id}', ${c.bloqueado})">
               <i class="ti ti-${c.bloqueado ? 'lock-open' : 'lock'}"></i> ${c.bloqueado ? 'Liberar' : 'Bloquear'}
-            </button>` : ''}
+            </button>` : ''}${isAdmin ? `<button class="btn btn-sm btn-danger" onclick="excluirClinica('${c.id}')" title="Excluir clínica e todos os dados (ADM)"><i class="ti ti-trash"></i> Excluir</button>` : ''}
           <button class="btn btn-sm btn-primary" onclick="switchClinicById('${c.id}')">
             <i class="ti ti-login"></i> Acessar
           </button>
