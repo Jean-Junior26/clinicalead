@@ -64,6 +64,29 @@ async function tarefasCarregarDados() {
     TAREFAS.orcItens = [];
   }
 
+  // Histórico p/ retorno semestral: últimas presenças + consultas futuras
+  try {
+    const { data: hist } = await db.from('consultas')
+      .select('lead_id,data,status')
+      .eq('clinic_id', clinic.id)
+      .in('status', ['compareceu', 'agendado', 'confirmado']);
+    TAREFAS.ultimaPresenca = {};
+    TAREFAS.temConsultaFutura = {};
+    const hoje = tHoje();
+    (hist || []).forEach(c => {
+      if (c.status === 'compareceu') {
+        if (!TAREFAS.ultimaPresenca[c.lead_id] || c.data > TAREFAS.ultimaPresenca[c.lead_id]) {
+          TAREFAS.ultimaPresenca[c.lead_id] = c.data;
+        }
+      } else if (c.data >= hoje) {
+        TAREFAS.temConsultaFutura[c.lead_id] = true;
+      }
+    });
+  } catch (e) {
+    TAREFAS.ultimaPresenca = {};
+    TAREFAS.temConsultaFutura = {};
+  }
+
   return true;
 }
 
@@ -148,11 +171,12 @@ function tarefasGerar() {
       });
     });
 
-  // 🟡 5. Follow-up de leads parados há 3+ dias
+  // 🟡 5. Follow-up de leads parados há 3+ dias (desde a última mudança de status)
   leads
-    .filter(l => ['contato','sem_resposta'].includes(l.status) && l.created_at)
+    .filter(l => ['contato','sem_resposta'].includes(l.status) && (l.status_alterado_em || l.created_at))
     .forEach(l => {
-      const diasParado = Math.floor((agora - new Date(l.created_at).getTime()) / 86400000);
+      const ref = l.status_alterado_em || l.created_at;
+      const diasParado = Math.floor((agora - new Date(ref).getTime()) / 86400000);
       if (diasParado < 3) return;
       tarefas.push({
         chave: `followup:${l.id}`,
@@ -164,11 +188,12 @@ function tarefasGerar() {
       });
     });
 
-  // 🟢 6. Pós-venda: fechados entre 2 e 10 dias atrás
+  // 🟢 6. Pós-venda: fechados entre 2 e 10 dias atrás (pela data do fechamento)
   leads
-    .filter(l => l.status === 'fechado' && l.created_at)
+    .filter(l => l.status === 'fechado' && (l.status_alterado_em || l.created_at))
     .forEach(l => {
-      const dias = Math.floor((agora - new Date(l.created_at).getTime()) / 86400000);
+      const ref = l.status_alterado_em || l.created_at;
+      const dias = Math.floor((agora - new Date(ref).getTime()) / 86400000);
       if (dias < 2 || dias > 10) return;
       tarefas.push({
         chave: `posvenda:${l.id}`,
@@ -198,6 +223,47 @@ function tarefasGerar() {
       leadId: o.lead_id,
     });
   });
+
+  // 🟢 8. Retorno semestral: última atividade entre 6 e 8 meses atrás
+  //    Regra: relógio conta da ÚLTIMA atividade (presença ou fechamento);
+  //    novo tratamento reinicia; consulta futura marcada = não cobra.
+  leads
+    .filter(l => l.status === 'fechado')
+    .forEach(l => {
+      if (TAREFAS.temConsultaFutura[l.id]) return; // já está voltando
+      const fechamento = (l.status_alterado_em || l.created_at || '').split('T')[0];
+      const presenca = TAREFAS.ultimaPresenca[l.id] || '';
+      const ref = presenca > fechamento ? presenca : fechamento;
+      if (!ref) return;
+      const dias = Math.floor((agora - new Date(ref + 'T12:00').getTime()) / 86400000);
+      if (dias < 183 || dias > 244) return; // janela: 6 a 8 meses
+      tarefas.push({
+        chave: `retorno:${l.id}:${ref}`,
+        prio: 3,
+        icon: 'ti-calendar-repeat',
+        titulo: `Retorno semestral: ${l.nome}`,
+        desc: `Última visita há ${Math.floor(dias / 30)} meses — convidar para revisão e limpeza preventiva (use a automação "Retorno semestral")`,
+        telefone: l.telefone || null,
+        leadId: l.id,
+      });
+    });
+
+  // 🟢 9. Aniversariantes de HOJE 🎂
+  const hojeMesDia = tHoje().slice(5); // "MM-DD"
+  leads
+    .filter(l => l.data_nascimento && String(l.data_nascimento).slice(5) === hojeMesDia)
+    .forEach(l => {
+      tarefas.push({
+        chave: `aniversario:${l.id}:${tHoje().slice(0, 4)}`,
+        prio: 3,
+        icon: 'ti-cake',
+        titulo: `🎂 Aniversário de ${l.nome} HOJE!`,
+        desc: `Enviar parabéns — clique no 🎂 para mandar a mensagem da automação em 1 clique`,
+        telefone: l.telefone || null,
+        leadId: l.id,
+        aniversario: true,
+      });
+    });
 
   // Remove tarefas concluídas/adiadas e ordena por prioridade
   TAREFAS.lista = tarefas
@@ -254,7 +320,8 @@ function tarefasRenderCard() {
         <div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px;">${tEsc(t.desc)}</div>
       </div>
       <div style="display:flex;gap:6px;flex-shrink:0;">
-        ${t.leadId ? `<button class="btn btn-sm" onclick="openOrcamento('${t.leadId}')" title="Abrir orçamentos"><i class="ti ti-file-invoice" style="color:var(--gold);"></i></button>` : ''}
+        ${t.aniversario ? `<button class="btn btn-sm" onclick="tarefaEnviarAniversario('${t.leadId}','${t.chave}')" title="Enviar parabéns agora (mensagem da automação)">🎂</button>` : ''}
+        ${t.leadId && !t.aniversario ? `<button class="btn btn-sm" onclick="openOrcamento('${t.leadId}')" title="Abrir orçamentos"><i class="ti ti-file-invoice" style="color:var(--gold);"></i></button>` : ''}
         ${t.telefone ? `<button class="btn btn-sm" onclick="tarefaWhats('${tEsc(t.telefone)}')" title="Abrir conversa no WhatsApp"><i class="ti ti-brand-whatsapp" style="color:#25D366;"></i></button>` : ''}
         <button class="btn btn-sm" onclick="tarefaAdiar('${t.chave}')" title="Adiar para amanhã"><i class="ti ti-clock-pause"></i></button>
         <button class="btn btn-sm" onclick="tarefaConcluir('${t.chave}')" title="Marcar como concluída" style="color:var(--gold);"><i class="ti ti-check"></i></button>
@@ -396,5 +463,44 @@ async function atualizarTarefasDashboard() {
     atualizarTarefasDashboard();
   };
 })();
+
+// ── Enviar parabéns em 1 clique (usa a automação "aniversario") ──
+async function tarefaEnviarAniversario(leadId, chave) {
+  const clinic = currentClinic();
+  const lead = (STATE.leads || []).find(l => l.id === leadId);
+  if (!clinic || !lead) return;
+  if (!clinic.whatsapp_instance || !lead.telefone) {
+    toast('Clínica sem WhatsApp conectado ou lead sem telefone', 'error');
+    return;
+  }
+
+  // Busca a mensagem editável da clínica (ou o padrão)
+  let template = null;
+  try {
+    const { data: auto } = await db.from('automacoes')
+      .select('mensagem,ativo')
+      .eq('clinic_id', clinic.id)
+      .eq('tipo', 'aniversario')
+      .maybeSingle();
+    if (auto) template = auto.ativo ? auto.mensagem : null;
+  } catch (e) {}
+  if (!template && typeof AUTOMACOES_DEFAULTS !== 'undefined') {
+    template = AUTOMACOES_DEFAULTS.find(a => a.tipo === 'aniversario')?.msg || null;
+  }
+  if (!template) { toast('Automação de aniversário não encontrada/ativa', 'error'); return; }
+
+  const msg = template
+    .replaceAll('{nome}', lead.nome || '')
+    .replaceAll('{clinica}', clinic.nome || clinic.name || '')
+    .replaceAll('{procedimento}', lead.procedimento || '');
+
+  try {
+    await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg);
+    toast(`🎂 Parabéns enviado para ${lead.nome}!`);
+    tarefaConcluir(chave); // missão cumprida, tarefa some sozinha
+  } catch (e) {
+    toast('Erro ao enviar: ' + (e?.message || 'verifique a conexão do WhatsApp'), 'error');
+  }
+}
 
 console.log('✅ tarefas-fix.js carregado — Central de Tarefas do CRC ativa');
