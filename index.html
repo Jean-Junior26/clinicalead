@@ -1459,7 +1459,7 @@ async function loadClinics() {
   const { data, error } = await query;
   if (error) { console.error('clinicas:', error); return; }
   STATE.clinics = data || [];
-  document.getElementById('navClinicasBadge').textContent = STATE.clinics.length;
+{ const b = document.getElementById('navClinicasBadge'); if (b) b.textContent = STATE.clinics.length; }
   renderClinicSwitcher();
 }
 
