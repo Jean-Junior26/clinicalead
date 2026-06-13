@@ -1467,7 +1467,7 @@ async function loadLeads() {
   const { data, error } = await db.from('leads').select('*').order('created_at', { ascending: false });
   if (error) { console.error('leads:', error); return; }
   STATE.leads = data || [];
-  document.getElementById('navLeadsBadge').textContent = STATE.leads.length;
+  document.getElementById('navLeadsBadge').textContent = currentLeads().length;
 }
 
 function loadAutomations() {
