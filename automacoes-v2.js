@@ -1,5 +1,9 @@
 // ============================================================
-// CLINICALEAD — AUTOMAÇÕES V2
+// CLINICALEAD — AUTOMAÇÕES V3
+// Variáveis disponíveis nas mensagens:
+//   {nome} {clinica} {procedimento} {data} {hora}
+// Dica: cada clínica deve editar as mensagens de confirmação e
+// lembretes para incluir o PRÓPRIO endereço e link do Maps.
 // ============================================================
 
 const AUTOMACOES_DEFAULTS = [
@@ -14,26 +18,26 @@ const AUTOMACOES_DEFAULTS = [
   {
     id: 2, tipo: 'confirmacao',
     titulo: 'Confirmação de agendamento', title: 'Confirmação de agendamento',
-    desc: 'Enviada imediatamente ao registrar a consulta.',
+    desc: 'Enviada ao registrar a consulta. 💡 Edite e adicione o endereço e o link do Maps da sua clínica!',
     trigger: 'Consulta agendada', icon: 'ti-calendar-check',
     active: true, ativo: true, automatica: true,
-    msg: 'Olá, {nome}! 🎉 Sua consulta está *confirmada*!\n\n📅 *Data:* {data}\n⏰ *Horário:* {hora}\n📍 *Endereço:* R. Rui Barbosa, 483 - Centro, Araguari - MG\n🗺️ https://share.google/aBRk2BmdSOHL2iN9X\n\nQualquer dúvida, é só chamar aqui! Te esperamos 😊',
+    msg: 'Olá, {nome}! 🎉 Sua consulta está *confirmada*!\n\n📅 *Data:* {data}\n⏰ *Horário:* {hora}\n🦷 *Procedimento:* {procedimento}\n\nQualquer dúvida, é só chamar aqui! Te esperamos 😊',
   },
   {
     id: 3, tipo: 'lembrete2h',
     titulo: 'Lembrete 2h antes', title: 'Lembrete 2h antes',
-    desc: 'Enviado automaticamente 2h antes da consulta.',
+    desc: 'Enviado 2h antes da consulta. 💡 Edite e adicione o endereço da sua clínica!',
     trigger: '2h antes da consulta', icon: 'ti-bell',
     active: true, ativo: true, automatica: true,
-    msg: 'Oi {nome}! ⏰ Sua consulta na *{clinica}* é *hoje às {hora}*!\n\n📍 R. Rui Barbosa, 483 - Centro, Araguari - MG\n🗺️ https://share.google/aBRk2BmdSOHL2iN9X\n\nTe esperamos! 😊',
+    msg: 'Oi {nome}! ⏰ Sua consulta na *{clinica}* é *hoje às {hora}*!\n\nJá estamos te esperando de sorriso aberto! 😁\n\nSe precisar de qualquer coisa, é só chamar aqui.',
   },
   {
     id: 4, tipo: 'lembrete',
     titulo: 'Lembrete 24h antes', title: 'Lembrete 24h antes',
-    desc: 'Enviado automaticamente 24h antes da consulta.',
+    desc: 'Enviado 24h antes da consulta. 💡 Edite e adicione o endereço da sua clínica!',
     trigger: '24h antes da consulta', icon: 'ti-clock',
     active: true, ativo: true, automatica: true,
-    msg: 'Oi {nome}! 👋 Passando para lembrar que *amanhã* você tem consulta conosco!\n\n⏰ *Horário:* {hora}\n📍 *Endereço:* R. Rui Barbosa, 483 - Centro, Araguari - MG\n🗺️ https://share.google/aBRk2BmdSOHL2iN9X\n\nConfirma sua presença? Responda *SIM* ou *NÃO* 😊',
+    msg: 'Oi {nome}! 👋 Passando para lembrar que *amanhã* você tem consulta conosco!\n\n⏰ *Horário:* {hora}\n\nConfirma sua presença? Responda:\n*1* ✅ para confirmar\n*2* 🔄 para remarcar',
   },
   {
     id: 5, tipo: 'followup',
@@ -58,6 +62,47 @@ const AUTOMACOES_DEFAULTS = [
     trigger: '7 dias sem atividade', icon: 'ti-star',
     active: false, ativo: false, automatica: false,
     msg: 'Oi {nome}! 🌟 Tudo bem?\n\nPassei aqui porque lembrei de você e queria saber se ainda tem interesse em cuidar do seu sorriso com a gente! 😊\n\nEsse mês temos uma *condição especial* para *{procedimento}* com formas facilitadas de pagamento.\n\nPosso te contar mais detalhes? É por tempo limitado! 🦷',
+  },
+  // ── NOVAS: o esquadrão de recuperação de receita ────────────
+  {
+    id: 8, tipo: 'recuperacao_falta',
+    titulo: 'Recuperação de falta', title: 'Recuperação de falta',
+    desc: 'Use quando a Central de Tarefas pedir para recuperar uma falta — sem cobrança, com porta aberta.',
+    trigger: 'Paciente faltou', icon: 'ti-door-off',
+    active: true, ativo: true, automatica: false,
+    msg: 'Oi {nome}! Sentimos sua falta hoje 🥺\n\nImprevistos acontecem, super entendemos! O importante é não deixar seu sorriso esperando 😊\n\nQue tal a gente já deixar um *novo horário* reservado pra você? Me fala o melhor dia que eu encaixo na agenda! 📅',
+  },
+  {
+    id: 9, tipo: 'orcamento_followup',
+    titulo: 'Follow-up de orçamento', title: 'Follow-up de orçamento',
+    desc: 'Use quando a Central avisar "orçamento parado" — retoma a conversa e oferece facilidade.',
+    trigger: 'Orçamento sem resposta há 3 dias', icon: 'ti-file-invoice',
+    active: true, ativo: true, automatica: false,
+    msg: 'Oi {nome}! 😊 Tudo bem?\n\nPassando pra saber se você ficou com alguma dúvida sobre o *orçamento de {procedimento}* que preparamos pra você.\n\nSe a questão for o investimento, temos *parcelamento facilitado* e podemos montar uma condição que caiba no seu bolso! 💳\n\nPosso te ajudar com alguma coisa? Estamos aqui! 🦷',
+  },
+  {
+    id: 10, tipo: 'avaliacao_google',
+    titulo: 'Pedir avaliação no Google', title: 'Pedir avaliação no Google',
+    desc: 'Use no pós-venda (2 dias após fechar). 💡 Edite e cole o link de avaliação da sua clínica no Google!',
+    trigger: '2 dias após virar paciente', icon: 'ti-star-filled',
+    active: true, ativo: true, automatica: false,
+    msg: 'Oi {nome}! 😊\n\nFoi uma alegria cuidar do seu sorriso! Espero que esteja tudo ótimo por aí 💛\n\nSe você gostou do nosso atendimento, uma *avaliação no Google* nos ajuda DEMAIS — leva 30 segundos e faz toda diferença pra gente:\n\n⭐ [cole aqui o link de avaliação da sua clínica]\n\nMuito obrigado pela confiança! 🦷✨',
+  },
+  {
+    id: 11, tipo: 'retorno_revisao',
+    titulo: 'Retorno semestral (revisão)', title: 'Retorno semestral (revisão)',
+    desc: 'Recall de revisão/limpeza ~6 meses após o tratamento — o segredo da agenda sempre cheia.',
+    trigger: '6 meses após o tratamento', icon: 'ti-calendar-repeat',
+    active: true, ativo: true, automatica: false,
+    msg: 'Oi {nome}! 😊 Aqui é da *{clinica}*!\n\nJá faz uns 6 meses desde a sua última visita, e a recomendação é fazer *revisão e limpeza* a cada semestre pra manter o sorriso saudável (e evitar tratamentos mais caros lá na frente! 😉).\n\nQue tal já garantirmos seu horário? Me fala o melhor dia pra você! 📅🦷',
+  },
+  {
+    id: 12, tipo: 'aniversario',
+    titulo: 'Aniversário do paciente', title: 'Aniversário do paciente',
+    desc: 'Mensagem de parabéns — relacionamento puro, e quem sente carinho indica a clínica.',
+    trigger: 'Aniversário', icon: 'ti-cake',
+    active: true, ativo: true, automatica: false,
+    msg: 'Parabéns, {nome}!! 🎉🎂\n\nA equipe da *{clinica}* deseja um dia incrível, cheio de alegria e MUITOS sorrisos — afinal, sorriso é com a gente mesmo! 😁\n\nFelicidades! 🥳💛',
   },
 ];
 
@@ -303,4 +348,4 @@ async function salvarNovaAutomacao() {
   toast(`Automação "${titulo}" criada! ✓`);
 }
 
-console.log('✅ automacoes-v2.js carregado com sucesso');
+console.log('✅ automacoes-v2.js carregado com sucesso (v3 — 12 automações)');
