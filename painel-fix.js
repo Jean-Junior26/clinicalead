@@ -24,6 +24,8 @@ function abrirCadastroNovaAba(leadId) {
     if (pronto) {
       clearInterval(timer);
       openEditLead(leadId);
+      // Limpa o ?lead= da URL pra que o F5 não reabra o cadastro
+      history.replaceState(null, '', location.origin + location.pathname);
     } else if (tentativas > 60) {
       clearInterval(timer); // desiste após ~30s (app não carregou)
     }
