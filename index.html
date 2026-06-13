@@ -2155,7 +2155,7 @@ async function renderClinicas() {
           ${c.whatsapp_instance
             ? `<span class="badge badge-gold"><i class="ti ti-check"></i> Conectado</span>
                <button class="btn btn-sm" title="Reconectar / gerar QR Code" onclick="conectarWhatsAppClinica('${c.id}')"><i class="ti ti-qrcode"></i></button>
-               <button class="btn btn-sm btn-danger" title="Desconectar WhatsApp" onclick="desconectarWhatsAppClinica('${c.id}')"><i class="ti ti-plug-x"></i></button>`
+               <button class="btn btn-sm btn-danger" title="Desconectar WhatsApp" onclick="desconectarWhatsAppClinica('${c.id}')"><i class="ti ti-plug-x"></i></button>`+ `${isAdmin ? `<button class="btn btn-sm btn-danger" style="margin-left:4px;" onclick="excluirInstanciaClinica('${c.id}')" title="Excluir instância do servidor (ADM)"><i class="ti ti-trash"></i></button>` : ''}`
             : `<span class="badge badge-gray">Não conectado</span>
                <button class="btn btn-sm btn-primary" title="Conectar WhatsApp" onclick="conectarWhatsAppClinica('${c.id}')"><i class="ti ti-qrcode"></i> Conectar</button>`}
         </div></td>
