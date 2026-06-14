@@ -23,17 +23,13 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
         headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: msgCompleta, convertToMp4: false }),
       });
-      console.log('[DIAG] getBase64 status:', r.status, 'tipo:', tipo);
       if (!r.ok) {
         const errTxt = await r.text();
-        console.log('[DIAG] getBase64 FALHOU:', errTxt.slice(0, 300));
         return null;
       }
       const data = await r.json();
       const base64 = data.base64;
-      console.log('[DIAG] base64 recebido?', base64 ? ('SIM, ' + base64.length + ' chars') : 'NÃO (vazio)');
       if (!base64) {
-        console.log('[DIAG] resposta sem base64. Chaves:', Object.keys(data).join(','));
         return null;
       }
 
@@ -64,17 +60,13 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
         },
         body: binary,
       });
-      console.log('[DIAG] upload status:', upload.status, 'bucket:', cfg.bucket, 'file:', fileName);
       if (!upload.ok) {
         const upErr = await upload.text();
-        console.log('[DIAG] upload FALHOU:', upErr.slice(0, 300));
         return null;
       }
       const finalUrl = `${SUPABASE_URL}/storage/v1/object/public/${cfg.bucket}/${fileName}`;
-      console.log('[DIAG] SUCESSO! url:', finalUrl);
       return finalUrl;
     } catch (e) {
-      console.error('[DIAG] EXCEÇÃO ao baixar mídia:', e.message);
       return null;
     }
   }
@@ -217,9 +209,6 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
           content = m.extendedTextMessage?.text || ''; type = 'text';
         } else if (m.imageMessage) {
           content = m.imageMessage?.caption || '📷 Imagem'; type = 'image';
-          console.log('[PAYLOAD] imageMessage keys:', Object.keys(m.imageMessage).join(','));
-          console.log('[PAYLOAD] tem base64?', m.imageMessage.base64 ? 'SIM' : 'nao', '| tem url?', m.imageMessage.url ? 'SIM' : 'nao', '| tem mediaKey?', m.imageMessage.mediaKey ? 'SIM' : 'nao');
-          console.log('[PAYLOAD] msg base64 raiz?', msg.base64 ? 'SIM' : 'nao', '| mediaUrl raiz?', msg.mediaUrl ? 'SIM' : 'nao');
           if (message_id && instanceName) media_url = await baixarEsalvarMidia(msg, instanceName, phone, 'image');
         } else if (m.audioMessage) {
           content = '🎵 Áudio'; type = 'audio';
