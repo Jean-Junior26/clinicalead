@@ -28,13 +28,20 @@ async function recarregarAgendaDoBanco() {
   } catch (e) { /* silencioso */ }
 }
 
-// ── Toggle do "Compareceu": clica de novo volta para agendado ──
+// ── Toggle do "Compareceu": clica de novo volta ao status ANTERIOR ──
 async function toggleCompareceu(consultaId) {
   const c = (typeof CAL !== 'undefined' && CAL.consultas) ? CAL.consultas.find(x => x.id === consultaId) : null;
   if (!c) return;
-  const novoStatus = (c.status === 'compareceu') ? 'agendado' : 'compareceu';
-  const dados = { status: novoStatus };
-  if (novoStatus === 'agendado') { dados.atendido = false; dados.atendido_em = null; }
+
+  let dados;
+  if (c.status === 'compareceu') {
+    // Desfazendo: volta ao status anterior guardado (ou agendado se não houver)
+    const anterior = c.status_anterior || 'agendado';
+    dados = { status: anterior, status_anterior: null, atendido: false, atendido_em: null };
+  } else {
+    // Marcando compareceu: guarda o status atual para poder desfazer depois
+    dados = { status: 'compareceu', status_anterior: c.status || 'agendado' };
+  }
 
   const { error } = await db.from('consultas').update(dados).eq('id', consultaId);
   if (error) { toast('Erro: ' + error.message, 'error'); return; }
@@ -42,11 +49,11 @@ async function toggleCompareceu(consultaId) {
 
   const lead = (STATE.leads || []).find(l => l.id === c.lead_id);
   if (lead) {
-    lead.status = novoStatus === 'compareceu' ? 'compareceu' : 'agendado';
+    lead.status = dados.status === 'compareceu' ? 'compareceu' : (dados.status === 'confirmado' ? 'agendado' : dados.status);
     await db.from('leads').update({ status: lead.status }).eq('id', lead.id);
   }
 
-  toast(novoStatus === 'compareceu' ? 'Marcado como compareceu! ✓' : 'Voltou para agendado ↩️');
+  toast(dados.status === 'compareceu' ? 'Marcado como compareceu! ✓' : 'Status desfeito ↩️');
   if (typeof renderDaySchedule === 'function' && CAL.selectedDate) renderDaySchedule(CAL.selectedDate);
 }
 
@@ -239,12 +246,14 @@ async function salvarRegistroAtendimento() {
   if (typeof renderDaySchedule === 'function' && CAL.selectedDate) renderDaySchedule(CAL.selectedDate);
 }
 
-// ── Desfazer: volta a consulta para "agendado" ───────────────
+// ── Desfazer: volta a consulta para o status ANTERIOR ────────
 async function desfazerStatusConsulta(consultaId) {
   const c = CAL.consultas.find(x => x.id === consultaId);
   if (!c) return;
+  const anterior = c.status_anterior || 'agendado';
   const dados = {
-    status: 'agendado',
+    status: anterior,
+    status_anterior: null,
     atendido: false,
     atendido_em: null,
   };
@@ -252,14 +261,13 @@ async function desfazerStatusConsulta(consultaId) {
   if (error) { toast('Erro ao desfazer: ' + error.message, 'error'); return; }
   Object.assign(c, dados);
 
-  // Volta também o status do lead, se fizer sentido
   const lead = (STATE.leads || []).find(l => l.id === c.lead_id);
   if (lead && ['compareceu', 'faltou'].includes(lead.status)) {
-    lead.status = 'agendado';
-    await db.from('leads').update({ status: 'agendado' }).eq('id', lead.id);
+    lead.status = (anterior === 'confirmado' || anterior === 'agendado') ? 'agendado' : anterior;
+    await db.from('leads').update({ status: lead.status }).eq('id', lead.id);
   }
 
-  toast('Status desfeito — voltou para agendado ↩️');
+  toast('Status desfeito ↩️');
   if (typeof renderDaySchedule === 'function' && CAL.selectedDate) renderDaySchedule(CAL.selectedDate);
 }
 
