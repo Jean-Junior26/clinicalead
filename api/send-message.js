@@ -1,7 +1,7 @@
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const EVO_URL = 'https://evolution-api-production-b649.up.railway.app';
+  const EVO_URL = 'https://evolution-api-production-62cb.up.railway.app';
   const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae000';
 
   const { instance, phone, message } = req.body;
