@@ -62,16 +62,23 @@
         .replaceAll('{clinica}', clinic?.nome || clinic?.name || '')
         .replaceAll('{data}', dataFmt || '(a combinar)')
         .replaceAll('{hora}', horaFmt || '(a combinar)')
-        .replaceAll('{procedimento}', procedimento || 'sua avaliação');
+        .replaceAll('{procedimento}', procedimento || 'sua avaliação')
+        .replaceAll('{endereco}', (typeof enderecoClinica === 'function' ? enderecoClinica(clinic) : (clinic?.endereco || '')))
+        .replaceAll('{mapa}', (typeof linkMapaClinica === 'function' ? linkMapaClinica(clinic) : ''));
 
       if (tipo && tipo !== 'endereco') {
         const auto = (STATE.automations || []).find(a => a.tipo === tipo);
         if (auto) msg = aplicarVars(auto.msg || auto.mensagem);
       } else if (tipo === 'endereco') {
-        // Usa a automação de confirmação como fonte do endereço, se existir,
-        // senão deixa um molde editável.
-        const auto = (STATE.automations || []).find(a => a.tipo === 'confirmacao');
-        msg = `📍 *Endereço da ${clinic?.nome || 'clínica'}:*\n[edite aqui o endereço e o link do mapa da sua clínica]`;
+        // Usa o endereço real cadastrado da clínica + link do mapa (manual ou gerado)
+        const end = (typeof enderecoClinica === 'function') ? enderecoClinica(clinic) : (clinic?.endereco || '');
+        const mapa = (typeof linkMapaClinica === 'function') ? linkMapaClinica(clinic) : '';
+        if (end) {
+          msg = `📍 *Endereço da ${clinic?.nome || 'clínica'}:*\n${end}`;
+          if (mapa) msg += `\n🗺️ *Como chegar:* ${mapa}`;
+        } else {
+          msg = `📍 *Endereço:* [cadastre o endereço da clínica em Clínicas → Editar]`;
+        }
       }
 
       const input = document.getElementById('chatInput');
