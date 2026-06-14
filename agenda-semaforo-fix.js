@@ -18,14 +18,24 @@ const SEMAFORO_CORES = {
 
 // Aplica o semáforo visual aos itens da agenda já renderizados
 function aplicarSemaforoAgenda() {
-  const itens = document.querySelectorAll('#daySchedule .sched-item, .sched-item');
+  // Escopo restrito: só os itens dentro da lista da agenda
+  const container = document.getElementById('agendaList');
+  if (!container) return;
+  const itens = container.querySelectorAll('.sched-item');
   itens.forEach(item => {
     const onclick = item.getAttribute('onclick') || '';
     const m = onclick.match(/openEditConsulta\('([^']+)'\)/);
-    if (!m) return;
+    if (!m) return; // não é item de consulta (slot vazio/bloqueado)
     const consultaId = m[1];
     const consulta = (typeof CAL !== 'undefined' && CAL.consultas) ? CAL.consultas.find(c => c.id === consultaId) : null;
     if (!consulta) return;
+
+    // RESET defensivo: remove botões/cores aplicados antes (evita "vazar" de outro item)
+    item.querySelectorAll('.btn-atendido, .btn-ver-registro').forEach(b => b.remove());
+    item.style.borderLeft = '';
+    item.style.paddingLeft = '';
+    const nm = item.querySelector('.sched-name');
+    if (nm) nm.style.color = '';
 
     // Determina o status visual
     let statusVisual = consulta.status;
