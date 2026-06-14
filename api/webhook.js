@@ -100,8 +100,8 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
     try {
       if (!clinic_id || !phone || !content) return;
       const resp = String(content).trim().toLowerCase();
-      const ehConfirmar = ['1', '1️⃣', 'confirmar', 'confirmo', 'confirmado'].includes(resp);
-      const ehRemarcar = ['2', '2️⃣', 'remarcar', 'reagendar'].includes(resp);
+      const ehConfirmar = ['1', '1️⃣', 'sim', 'confirmar', 'confirmo', 'confirmado', 'confirmada', 'ok', 'pode ser', 'vou', 'estarei', 'estarei la', 'estarei lá'].includes(resp);
+      const ehRemarcar = ['2', '2️⃣', 'nao', 'não', 'remarcar', 'reagendar', 'nao posso', 'não posso', 'nao vou', 'não vou'].includes(resp);
       if (!ehConfirmar && !ehRemarcar) return;
       const digitos = String(phone).replace(/\D/g, '');
       const sufixo = digitos.slice(-8);
@@ -116,7 +116,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       const lead = leadsEnc[0];
       const hojeBRT = new Date(Date.now() - 3 * 3600 * 1000).toISOString().split('T')[0];
       const consResp = await fetch(
-        `${SUPABASE_URL}/rest/v1/consultas?lead_id=eq.${lead.id}&clinic_id=eq.${clinic_id}&status=eq.agendado&lembrete_24h=not.is.null&data=gte.${hojeBRT}&order=data.asc,hora.asc&select=id,data,hora&limit=1`,
+        `${SUPABASE_URL}/rest/v1/consultas?lead_id=eq.${lead.id}&clinic_id=eq.${clinic_id}&status=in.(agendado,confirmado)&data=gte.${hojeBRT}&order=data.asc,hora.asc&select=id,data,hora&limit=1`,
         { headers: sbHeaders }
       );
       if (!consResp.ok) return;
