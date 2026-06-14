@@ -15,14 +15,15 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
   };
 
   // ── Baixa mídia descriptografada do Evolution e salva no Storage
-  async function baixarEsalvarMidia(messageId, instanceName, phone, tipo, nomeOriginal) {
+  async function baixarEsalvarMidia(msgCompleta, instanceName, phone, tipo, nomeOriginal) {
     try {
+      // v2.3.7: precisa do objeto message COMPLETO (não só a key), senão "Message not found"
       const r = await fetch(`${EVO_URL}/chat/getBase64FromMediaMessage/${instanceName}`, {
         method: 'POST',
         headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: { key: { id: messageId } }, convertToMp4: false }),
+        body: JSON.stringify({ message: msgCompleta, convertToMp4: false }),
       });
-      console.log('[DIAG] getBase64 status:', r.status, 'tipo:', tipo, 'msgId:', messageId);
+      console.log('[DIAG] getBase64 status:', r.status, 'tipo:', tipo);
       if (!r.ok) {
         const errTxt = await r.text();
         console.log('[DIAG] getBase64 FALHOU:', errTxt.slice(0, 300));
@@ -216,19 +217,22 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
           content = m.extendedTextMessage?.text || ''; type = 'text';
         } else if (m.imageMessage) {
           content = m.imageMessage?.caption || '📷 Imagem'; type = 'image';
-          if (message_id && instanceName) media_url = await baixarEsalvarMidia(message_id, instanceName, phone, 'image');
+          console.log('[PAYLOAD] imageMessage keys:', Object.keys(m.imageMessage).join(','));
+          console.log('[PAYLOAD] tem base64?', m.imageMessage.base64 ? 'SIM' : 'nao', '| tem url?', m.imageMessage.url ? 'SIM' : 'nao', '| tem mediaKey?', m.imageMessage.mediaKey ? 'SIM' : 'nao');
+          console.log('[PAYLOAD] msg base64 raiz?', msg.base64 ? 'SIM' : 'nao', '| mediaUrl raiz?', msg.mediaUrl ? 'SIM' : 'nao');
+          if (message_id && instanceName) media_url = await baixarEsalvarMidia(msg, instanceName, phone, 'image');
         } else if (m.audioMessage) {
           content = '🎵 Áudio'; type = 'audio';
-          if (message_id && instanceName) media_url = await baixarEsalvarMidia(message_id, instanceName, phone, 'audio');
+          if (message_id && instanceName) media_url = await baixarEsalvarMidia(msg, instanceName, phone, 'audio');
         } else if (m.videoMessage) {
           content = m.videoMessage?.caption || '🎥 Vídeo'; type = 'video';
-          if (message_id && instanceName) media_url = await baixarEsalvarMidia(message_id, instanceName, phone, 'video');
+          if (message_id && instanceName) media_url = await baixarEsalvarMidia(msg, instanceName, phone, 'video');
         } else if (m.documentMessage) {
           content = m.documentMessage?.fileName || '📄 Documento'; type = 'document';
-          if (message_id && instanceName) media_url = await baixarEsalvarMidia(message_id, instanceName, phone, 'document', m.documentMessage?.fileName);
+          if (message_id && instanceName) media_url = await baixarEsalvarMidia(msg, instanceName, phone, 'document', m.documentMessage?.fileName);
         } else if (m.stickerMessage) {
           content = '🖼️ Sticker'; type = 'sticker';
-          if (message_id && instanceName) media_url = await baixarEsalvarMidia(message_id, instanceName, phone, 'sticker');
+          if (message_id && instanceName) media_url = await baixarEsalvarMidia(msg, instanceName, phone, 'sticker');
         } else if (m.locationMessage) {
           content = `📍 ${m.locationMessage?.degreesLatitude}, ${m.locationMessage?.degreesLongitude}`; type = 'location';
         } else if (m.contactMessage) {
