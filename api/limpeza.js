@@ -6,7 +6,7 @@
 // Chamado por um cron 1x por dia.
 // ============================================================
 
-const DIAS_RETENCAO = 7; // ← mude aqui quantos dias as mídias ficam guardadas
+const DIAS_RETENCAO = 4; // ← mude aqui quantos dias as mídias ficam guardadas
 
 export default async function handler(req, res) {
   const SUPABASE_URL = process.env.SUPABASE_URL || 'https://zcwntpkiispbhjjgidih.supabase.co';
