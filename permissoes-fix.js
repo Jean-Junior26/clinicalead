@@ -120,21 +120,58 @@ function aplicarPermissoesNoMenu() {
   if (typeof loadApp !== 'function') { console.error('[permissoes] loadApp não encontrado'); return; }
   const _origLoadApp = loadApp;
   loadApp = async function (user) {
-    await _origLoadApp(user);
-    // Após o app carregar, verifica se é colaborador e aplica
+    // 1. ANTES de tudo: descobre se é colaborador e carrega permissões/clínica
+    STATE.user = user; // garante que STATE.user existe para a consulta
     try {
       await carregarPermissoesColaborador();
-      if (PERMISSOES.ehColaborador) {
+    } catch (e) { console.error('[permissoes] erro ao carregar:', e); }
+
+    // 2. Roda o loadApp original (vai carregar clínicas, leads, etc)
+    await _origLoadApp(user);
+
+    // 3. Se for colaborador, aplica tudo
+    if (PERMISSOES.ehColaborador) {
+      try {
         await carregarClinicaColaborador();
         aplicarPermissoesNoMenu();
         // Leva o colaborador para a primeira página permitida
         const primeira = ['dashboard', 'leads', 'inbox', 'agenda', 'kanban', 'pacientes', 'relatorios', 'procedimentos', 'automacoes']
           .find(p => temPermissao(p));
         if (primeira) showPage(primeira);
+      } catch (e) {
+        console.error('[permissoes] erro ao aplicar:', e);
       }
-    } catch (e) {
-      console.error('[permissoes] erro ao aplicar:', e);
     }
+  };
+})();
+
+// ── Bloqueia o wizard de criar clínica para colaboradores ────
+(function () {
+  if (typeof openAddClinicWizard !== 'function') return;
+  const _origWizard = openAddClinicWizard;
+  openAddClinicWizard = function (...args) {
+    if (PERMISSOES.ehColaborador) {
+      // colaborador nunca cria clínica
+      return;
+    }
+    return _origWizard.apply(this, args);
+  };
+})();
+
+// ── Intercepta loadClinics: colaborador pega clínica via clinic_users ──
+(function () {
+  if (typeof loadClinics !== 'function') return;
+  const _origLoadClinics = loadClinics;
+  loadClinics = async function (...args) {
+    if (PERMISSOES.ehColaborador && PERMISSOES.clinicId) {
+      const { data } = await db.from('clinicas').select('*').eq('id', PERMISSOES.clinicId);
+      STATE.clinics = data || [];
+      const badge = document.getElementById('navClinicasBadge');
+      if (badge) badge.textContent = STATE.clinics.length;
+      if (typeof renderClinicSwitcher === 'function') renderClinicSwitcher();
+      return;
+    }
+    return _origLoadClinics.apply(this, args);
   };
 })();
 
