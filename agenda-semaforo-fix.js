@@ -57,6 +57,38 @@ async function toggleCompareceu(consultaId) {
   if (typeof renderDaySchedule === 'function' && CAL.selectedDate) renderDaySchedule(CAL.selectedDate);
 }
 
+// ── Corrige o botão "Confirmar" da agenda ────────────────────
+// Antes: ao enviar a mensagem, já marcava status 'confirmado' (errado).
+// Agora: só ENVIA o pedido de confirmação e marca lembrete_24h.
+// O status 'confirmado' só muda quando o paciente responde SIM
+// (tratado pelo webhook em processarConfirmacao).
+async function sendWAConsultaCorrigido(consultaId) {
+  const c = (typeof CAL !== 'undefined' && CAL.consultas) ? CAL.consultas.find(x => x.id === consultaId) : null;
+  if (!c) return;
+  const lead = (STATE.leads || []).find(l => l.id === c.lead_id);
+  const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
+  if (!clinic?.whatsapp_instance || !lead?.telefone) { toast('Configure o WhatsApp primeiro!', 'error'); return; }
+
+  // Monta a mensagem com endereço dinâmico da clínica
+  const end = (typeof enderecoClinica === 'function') ? enderecoClinica(clinic) : (clinic?.endereco || '');
+  const mapa = (typeof linkMapaClinica === 'function') ? linkMapaClinica(clinic) : '';
+  let msg = `Oi ${lead.nome}! 👋 Passando para lembrar que *amanhã* você tem consulta conosco!\n\n⏰ *Horário:* ${(c.hora || '').slice(0,5)}`;
+  if (end) msg += `\n📍 *Endereço:* ${end}`;
+  if (mapa) msg += `\n🗺️ ${mapa}`;
+  msg += `\n\nConfirma sua presença? Responda *SIM* ou *NÃO* 😊`;
+
+  try {
+    await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg);
+    // Marca que o lembrete foi enviado (NÃO marca confirmado)
+    await db.from('consultas').update({ lembrete_24h: new Date().toISOString() }).eq('id', consultaId);
+    c.lembrete_24h = new Date().toISOString();
+    toast('Pedido de confirmação enviado! Aguardando resposta do paciente. ✓');
+    if (typeof renderDaySchedule === 'function' && CAL.selectedDate) renderDaySchedule(CAL.selectedDate);
+  } catch (e) {
+    toast('Erro ao enviar WhatsApp', 'error');
+  }
+}
+
 // Aplica o semáforo visual aos itens da agenda já renderizados
 function aplicarSemaforoAgenda() {
   // Escopo restrito: só os itens dentro da lista da agenda
@@ -284,6 +316,11 @@ async function desfazerStatusConsulta(consultaId) {
     // Faz o botão "Compareceu" virar toggle (clica de novo, desfaz)
     if (typeof marcarCompareceu === 'function') {
       marcarCompareceu = function (consultaId) { toggleCompareceu(consultaId); };
+    }
+
+    // Corrige o botão "Confirmar" (não marca confirmado ao enviar)
+    if (typeof sendWAConsulta === 'function') {
+      sendWAConsulta = function (consultaId) { sendWAConsultaCorrigido(consultaId); };
     }
 
     console.log('✅ agenda-semaforo-fix.js carregado — semáforo + registro de atendimento');
