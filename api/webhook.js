@@ -100,9 +100,11 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
     try {
       if (!clinic_id || !phone || !content) return;
       const resp = String(content).trim().toLowerCase();
+      console.log('[CONFIRM] resposta recebida:', JSON.stringify(resp), 'phone:', phone, 'clinic:', clinic_id);
       const ehConfirmar = ['1', '1️⃣', 'sim', 'confirmar', 'confirmo', 'confirmado', 'confirmada', 'ok', 'pode ser', 'vou', 'estarei', 'estarei la', 'estarei lá'].includes(resp);
       const ehRemarcar = ['2', '2️⃣', 'nao', 'não', 'remarcar', 'reagendar', 'nao posso', 'não posso', 'nao vou', 'não vou'].includes(resp);
-      if (!ehConfirmar && !ehRemarcar) return;
+      console.log('[CONFIRM] ehConfirmar:', ehConfirmar, '| ehRemarcar:', ehRemarcar);
+      if (!ehConfirmar && !ehRemarcar) { console.log('[CONFIRM] resposta não reconhecida, ignorando'); return; }
       const digitos = String(phone).replace(/\D/g, '');
       const sufixo = digitos.slice(-8);
       if (sufixo.length < 8) return;
@@ -112,7 +114,8 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       );
       if (!leadResp.ok) return;
       const leadsEnc = await leadResp.json();
-      if (!leadsEnc.length) return;
+      console.log('[CONFIRM] leads encontrados:', leadsEnc.length, leadsEnc.map(l=>l.nome).join(','));
+      if (!leadsEnc.length) { console.log('[CONFIRM] nenhum lead com sufixo', sufixo); return; }
       const lead = leadsEnc[0];
       const hojeBRT = new Date(Date.now() - 3 * 3600 * 1000).toISOString().split('T')[0];
       const consResp = await fetch(
@@ -121,12 +124,14 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       );
       if (!consResp.ok) return;
       const consultasEnc = await consResp.json();
-      if (!consultasEnc.length) return;
+      console.log('[CONFIRM] consultas encontradas:', consultasEnc.length);
+      if (!consultasEnc.length) { console.log('[CONFIRM] nenhuma consulta agendada/confirmada futura para', lead.nome); return; }
       const consulta = consultasEnc[0];
       const [ano, mes, dia] = consulta.data.split('-');
       const dataFmt = `${dia}/${mes}`;
       const horaFmt = (consulta.hora || '').slice(0, 5);
       const primeiroNome = (lead.nome || '').split(' ')[0];
+      console.log('[CONFIRM] vai atualizar consulta', consulta.id, 'ehConfirmar:', ehConfirmar);
       if (ehConfirmar) {
         await fetch(`${SUPABASE_URL}/rest/v1/consultas?id=eq.${consulta.id}`, {
           method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
