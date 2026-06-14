@@ -10,7 +10,7 @@ export default async function handler(req, res) {
 
   const SUPABASE_URL = process.env.SUPABASE_URL || 'https://zcwntpkiispbhjjgidih.supabase.co';
   const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
-  const EVO_URL = 'https://evolution-api-production-b649.up.railway.app';
+  const EVO_URL = 'https://evolution-api-production-62cb.up.railway.app';
   const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae000';
 
   const { instance, phone, clinic_id, base64, mimetype, fileName, caption } = req.body || {};
