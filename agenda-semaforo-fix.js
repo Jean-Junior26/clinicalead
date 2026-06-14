@@ -73,6 +73,18 @@ function aplicarSemaforoAgenda() {
       selo.setAttribute('onclick', `event.stopPropagation();abrirRegistroAtendimento('${consultaId}')`);
       acts.appendChild(selo);
     }
+
+    // Botão "Desfazer": volta a consulta para "agendado" (corrige cliques errados)
+    const jaMexido = consulta.atendido || ['compareceu', 'faltou'].includes(consulta.status);
+    if (acts && jaMexido && !acts.querySelector('.btn-desfazer')) {
+      const desfazer = document.createElement('button');
+      desfazer.className = 'btn btn-sm btn-desfazer';
+      desfazer.style.cssText = 'color:var(--text-muted);';
+      desfazer.title = 'Desfazer — voltar para agendado';
+      desfazer.innerHTML = '<i class="ti ti-arrow-back-up"></i>';
+      desfazer.setAttribute('onclick', `event.stopPropagation();desfazerStatusConsulta('${consultaId}')`);
+      acts.appendChild(desfazer);
+    }
   });
 }
 
@@ -171,6 +183,30 @@ async function salvarRegistroAtendimento() {
 
   toast('Atendimento registrado! ✓');
   closeModal('modalRegistroAtend');
+  if (typeof renderDaySchedule === 'function' && CAL.selectedDate) renderDaySchedule(CAL.selectedDate);
+}
+
+// ── Desfazer: volta a consulta para "agendado" ───────────────
+async function desfazerStatusConsulta(consultaId) {
+  const c = CAL.consultas.find(x => x.id === consultaId);
+  if (!c) return;
+  const dados = {
+    status: 'agendado',
+    atendido: false,
+    atendido_em: null,
+  };
+  const { error } = await db.from('consultas').update(dados).eq('id', consultaId);
+  if (error) { toast('Erro ao desfazer: ' + error.message, 'error'); return; }
+  Object.assign(c, dados);
+
+  // Volta também o status do lead, se fizer sentido
+  const lead = (STATE.leads || []).find(l => l.id === c.lead_id);
+  if (lead && ['compareceu', 'faltou'].includes(lead.status)) {
+    lead.status = 'agendado';
+    await db.from('leads').update({ status: 'agendado' }).eq('id', lead.id);
+  }
+
+  toast('Status desfeito — voltou para agendado ↩️');
   if (typeof renderDaySchedule === 'function' && CAL.selectedDate) renderDaySchedule(CAL.selectedDate);
 }
 
