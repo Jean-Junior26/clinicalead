@@ -16,6 +16,40 @@ const SEMAFORO_CORES = {
   atrasado:   { borda: '#E5534B',            nome: '#E5534B' },   // vermelho alerta (visual)
 };
 
+// ── Recarrega consultas do banco e re-renderiza (pega status do webhook) ──
+async function recarregarAgendaDoBanco() {
+  if (typeof CAL === 'undefined' || !CAL.selectedDate) return;
+  const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
+  if (!clinic) return;
+  try {
+    const { data } = await db.from('consultas').select('*').eq('clinic_id', clinic.id);
+    if (data) CAL.consultas = data;
+    if (typeof renderDaySchedule === 'function') renderDaySchedule(CAL.selectedDate);
+  } catch (e) { /* silencioso */ }
+}
+
+// ── Toggle do "Compareceu": clica de novo volta para agendado ──
+async function toggleCompareceu(consultaId) {
+  const c = (typeof CAL !== 'undefined' && CAL.consultas) ? CAL.consultas.find(x => x.id === consultaId) : null;
+  if (!c) return;
+  const novoStatus = (c.status === 'compareceu') ? 'agendado' : 'compareceu';
+  const dados = { status: novoStatus };
+  if (novoStatus === 'agendado') { dados.atendido = false; dados.atendido_em = null; }
+
+  const { error } = await db.from('consultas').update(dados).eq('id', consultaId);
+  if (error) { toast('Erro: ' + error.message, 'error'); return; }
+  Object.assign(c, dados);
+
+  const lead = (STATE.leads || []).find(l => l.id === c.lead_id);
+  if (lead) {
+    lead.status = novoStatus === 'compareceu' ? 'compareceu' : 'agendado';
+    await db.from('leads').update({ status: lead.status }).eq('id', lead.id);
+  }
+
+  toast(novoStatus === 'compareceu' ? 'Marcado como compareceu! ✓' : 'Voltou para agendado ↩️');
+  if (typeof renderDaySchedule === 'function' && CAL.selectedDate) renderDaySchedule(CAL.selectedDate);
+}
+
 // Aplica o semáforo visual aos itens da agenda já renderizados
 function aplicarSemaforoAgenda() {
   // Escopo restrito: só os itens dentro da lista da agenda
@@ -52,6 +86,25 @@ function aplicarSemaforoAgenda() {
     item.style.paddingLeft = '17px';
     const nomeEl = item.querySelector('.sched-name');
     if (nomeEl) nomeEl.style.color = cor.nome;
+
+    // Corrige o texto do badge (o render original força "Agendado" mesmo se confirmado)
+    const badge = item.querySelector('.badge');
+    if (badge) {
+      const textos = {
+        confirmado: 'Confirmado',
+        compareceu: 'Compareceu',
+        atendido: 'Atendido',
+        faltou: 'Faltou',
+        atrasado: 'Atrasado',
+        agendado: 'Agendado',
+      };
+      const txt = consulta.atendido ? 'Atendido' : (textos[statusVisual] || textos[consulta.status]);
+      if (txt) badge.textContent = txt;
+      // cor do badge acompanha o status
+      badge.style.background = 'transparent';
+      badge.style.border = `1px solid ${cor.borda === 'transparent' ? 'var(--gold-border)' : cor.borda}`;
+      badge.style.color = cor.nome;
+    }
 
     // Adiciona o botão "Atendido" (se compareceu e ainda não foi atendido)
     const acts = item.querySelector('.sched-acts');
@@ -219,12 +272,28 @@ async function desfazerStatusConsulta(consultaId) {
       _orig.apply(this, args);
       setTimeout(aplicarSemaforoAgenda, 30);
     };
+
+    // Faz o botão "Compareceu" virar toggle (clica de novo, desfaz)
+    if (typeof marcarCompareceu === 'function') {
+      marcarCompareceu = function (consultaId) { toggleCompareceu(consultaId); };
+    }
+
     console.log('✅ agenda-semaforo-fix.js carregado — semáforo + registro de atendimento');
     return true;
   }
   if (!instalar()) {
     const iv = setInterval(() => { if (instalar()) clearInterval(iv); }, 600);
     setTimeout(() => clearInterval(iv), 15000);
+  }
+
+  // Recarrega do banco ao abrir a Agenda (pega status atualizados pelo webhook,
+  // ex: paciente que confirmou pelo WhatsApp)
+  if (typeof showPage === 'function') {
+    const _origShow = showPage;
+    showPage = function (id, el) {
+      _origShow(id, el);
+      if (id === 'agenda') setTimeout(recarregarAgendaDoBanco, 200);
+    };
   }
 
   // Reaplica o semáforo a cada minuto (pra o alerta de 30min aparecer sozinho)
