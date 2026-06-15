@@ -63,11 +63,58 @@ async function renderListaResponsaveis() {
     cont.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px;">Nenhum responsável cadastrado ainda.</div>';
     return;
   }
-  cont.innerHTML = RESP.lista.map(r => `
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:var(--bg-elevated);border-radius:10px;margin-bottom:8px;">
-      <span style="font-weight:500;">${r.nome}</span>
-      <button class="btn btn-sm btn-danger" onclick="removerResponsavel('${r.id}')"><i class="ti ti-trash"></i></button>
-    </div>`).join('');
+  cont.innerHTML = RESP.lista.map(r => {
+    const aTipo = r.com_agendar_tipo || 'nenhum';
+    const fTipo = r.com_fechar_tipo || 'nenhum';
+    const selTipo = (val, atual) => `<option value="${val}" ${atual === val ? 'selected' : ''}>`;
+    return `
+    <div style="padding:14px;background:var(--bg-elevated);border-radius:10px;margin-bottom:10px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;">
+        <span style="font-weight:600;font-size:14px;">${r.nome}</span>
+        <button class="btn btn-sm btn-danger" onclick="removerResponsavel('${r.id}')"><i class="ti ti-trash"></i></button>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div style="background:var(--bg);border-radius:8px;padding:10px;">
+          <div style="font-size:11px;color:var(--blue,#5B8DB8);text-transform:uppercase;font-weight:600;margin-bottom:6px;"><i class="ti ti-calendar-plus"></i> Por agendar</div>
+          <select class="form-input" id="cat_${r.id}" style="font-size:12px;padding:5px 8px;margin-bottom:6px;">
+            ${selTipo('nenhum', aTipo)}Não ganha</option>
+            ${selTipo('fixo', aTipo)}Valor fixo (R$)</option>
+            ${selTipo('percentual', aTipo)}Percentual (%)</option>
+          </select>
+          <input type="number" step="0.01" class="form-input" id="cav_${r.id}" value="${r.com_agendar_valor || ''}" placeholder="0" style="font-size:12px;padding:5px 8px;"/>
+        </div>
+
+        <div style="background:var(--bg);border-radius:8px;padding:10px;">
+          <div style="font-size:11px;color:var(--gold);text-transform:uppercase;font-weight:600;margin-bottom:6px;"><i class="ti ti-trophy"></i> Por fechar</div>
+          <select class="form-input" id="cft_${r.id}" style="font-size:12px;padding:5px 8px;margin-bottom:6px;">
+            ${selTipo('nenhum', fTipo)}Não ganha</option>
+            ${selTipo('fixo', fTipo)}Valor fixo (R$)</option>
+            ${selTipo('percentual', fTipo)}Percentual (%)</option>
+          </select>
+          <input type="number" step="0.01" class="form-input" id="cfv_${r.id}" value="${r.com_fechar_valor || ''}" placeholder="0" style="font-size:12px;padding:5px 8px;"/>
+        </div>
+      </div>
+
+      <button class="btn btn-sm btn-primary" style="width:100%;margin-top:10px;" onclick="salvarComissaoResp('${r.id}')"><i class="ti ti-device-floppy"></i> Salvar comissão</button>
+    </div>`;
+  }).join('');
+}
+
+// Salva a regra de comissão de um responsável
+async function salvarComissaoResp(id) {
+  const dados = {
+    com_agendar_tipo: document.getElementById('cat_' + id).value,
+    com_agendar_valor: parseFloat(document.getElementById('cav_' + id).value) || 0,
+    com_fechar_tipo: document.getElementById('cft_' + id).value,
+    com_fechar_valor: parseFloat(document.getElementById('cfv_' + id).value) || 0,
+  };
+  const { error } = await db.from('responsaveis').update(dados).eq('id', id);
+  if (error) { toast('Erro: ' + error.message, 'error'); return; }
+  // atualiza memória
+  const r = RESP.lista.find(x => x.id === id);
+  if (r) Object.assign(r, dados);
+  toast('Comissão salva! 💰');
 }
 
 async function adicionarResponsavel() {
