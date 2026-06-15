@@ -147,26 +147,30 @@ function renderPainelFigurinhas() {
 }
 
 // ── Mostra a figurinha REAL + botão favoritar nas mensagens ──
-// Intercepta renderMessages: após renderizar, troca o placeholder
-// "😄 Figurinha" pela imagem real e adiciona o botão ⭐.
+// Após renderizar, casa cada bolha de sticker com sua mensagem e
+// injeta a imagem + botão favoritar (recebidas E enviadas).
 function processarStickersNaTela() {
   if (typeof INBOX === 'undefined' || !INBOX.activeChat) return;
-  const stickers = (INBOX.activeChat.messages || []).filter(m => m.type === 'sticker');
-  if (!stickers.length) return;
+  const msgs = INBOX.activeChat.messages || [];
 
-  // Para cada bolha de sticker na tela, casa com a mensagem (em ordem)
-  const bolhas = Array.from(document.querySelectorAll('.msg-bubble')).filter(b => (b.textContent || '').includes('Figurinha') && !b.dataset.figFeita);
-  // ordem das bolhas = ordem das mensagens sticker
-  let idx = 0;
-  bolhas.forEach(bubble => {
-    const st = stickers[idx];
-    idx++;
-    if (!st || !st.media_url) return;
+  // Pega todas as bolhas na ordem em que aparecem
+  const todasBolhas = Array.from(document.querySelectorAll('.msg-bubble'));
+  // Filtra mensagens que são sticker (na mesma ordem do render)
+  let msgIdx = 0;
+  todasBolhas.forEach(bubble => {
+    // avança no array de mensagens junto com as bolhas
+    const msg = msgs[msgIdx];
+    msgIdx++;
+    if (!msg) return;
+    if (msg.type !== 'sticker') return;
+    if (bubble.dataset.figFeita) return;
+    if (!msg.media_url) return;
+
     bubble.dataset.figFeita = '1';
     bubble.innerHTML = `
       <div style="display:flex;flex-direction:column;gap:4px;">
-        <img src="${st.media_url}" style="width:120px;height:120px;object-fit:contain;border-radius:8px;"/>
-        ${!st.from_me ? `<button class="btn btn-sm" style="font-size:11px;padding:2px 8px;" onclick="favoritarFigurinha('${st.media_url}')"><i class="ti ti-star"></i> Favoritar</button>` : ''}
+        <img src="${msg.media_url}" style="width:120px;height:120px;object-fit:contain;border-radius:8px;"/>
+        <button class="btn btn-sm" style="font-size:11px;padding:2px 8px;" onclick="favoritarFigurinha('${msg.media_url}')"><i class="ti ti-star"></i> Favoritar</button>
       </div>`;
   });
 }
