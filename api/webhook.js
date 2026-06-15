@@ -100,11 +100,8 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
     try {
       if (!clinic_id || !phone || !content) return;
       const resp = String(content).trim().toLowerCase();
-      console.log('[CONFIRM] resposta recebida:', JSON.stringify(resp), 'phone:', phone, 'clinic:', clinic_id);
       const ehConfirmar = ['1', '1️⃣', 'sim', 'confirmar', 'confirmo', 'confirmado', 'confirmada', 'ok', 'pode ser', 'vou', 'estarei', 'estarei la', 'estarei lá'].includes(resp);
       const ehRemarcar = ['2', '2️⃣', 'nao', 'não', 'remarcar', 'reagendar', 'nao posso', 'não posso', 'nao vou', 'não vou'].includes(resp);
-      console.log('[CONFIRM] ehConfirmar:', ehConfirmar, '| ehRemarcar:', ehRemarcar);
-      if (!ehConfirmar && !ehRemarcar) { console.log('[CONFIRM] resposta não reconhecida, ignorando'); return; }
       const digitos = String(phone).replace(/\D/g, '');
       const sufixo = digitos.slice(-8);
       if (sufixo.length < 8) return;
@@ -114,8 +111,6 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       );
       if (!leadResp.ok) return;
       const leadsEnc = await leadResp.json();
-      console.log('[CONFIRM] leads encontrados:', leadsEnc.length, leadsEnc.map(l=>l.nome).join(','));
-      if (!leadsEnc.length) { console.log('[CONFIRM] nenhum lead com sufixo', sufixo); return; }
       const lead = leadsEnc[0];
       const hojeBRT = new Date(Date.now() - 3 * 3600 * 1000).toISOString().split('T')[0];
       const consResp = await fetch(
@@ -124,20 +119,36 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       );
       if (!consResp.ok) return;
       const consultasEnc = await consResp.json();
-      console.log('[CONFIRM] consultas encontradas:', consultasEnc.length);
-      if (!consultasEnc.length) { console.log('[CONFIRM] nenhuma consulta agendada/confirmada futura para', lead.nome); return; }
       const consulta = consultasEnc[0];
       const [ano, mes, dia] = consulta.data.split('-');
       const dataFmt = `${dia}/${mes}`;
       const horaFmt = (consulta.hora || '').slice(0, 5);
       const primeiroNome = (lead.nome || '').split(' ')[0];
-      console.log('[CONFIRM] vai atualizar consulta', consulta.id, 'ehConfirmar:', ehConfirmar);
       if (ehConfirmar) {
         await fetch(`${SUPABASE_URL}/rest/v1/consultas?id=eq.${consulta.id}`, {
           method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
           body: JSON.stringify({ status: 'confirmado' }),
         });
-        if (instanceName) await responderPaciente(instanceName, clinic_id, phone, `Consulta confirmada, ${primeiroNome}! ✅\n\nTe esperamos dia ${dataFmt} às *${horaFmt}*. Até lá! 🦷`);
+        // Busca endereco/mapa da clinica para a mensagem de boas-vindas
+        let endereco = '', linkMapa = '';
+        try {
+          const clinicaResp = await fetch(
+            `${SUPABASE_URL}/rest/v1/clinicas?id=eq.${clinic_id}&select=nome,endereco,link_mapa&limit=1`,
+            { headers: sbHeaders }
+          );
+          if (clinicaResp.ok) {
+            const cls = await clinicaResp.json();
+            if (cls?.length) {
+              endereco = cls[0].endereco || '';
+              linkMapa = cls[0].link_mapa || (endereco ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(endereco)}` : '');
+            }
+          }
+        } catch (e) {}
+        let boasVindas = `Que ótimo, ${primeiroNome}! 🎉\n\nSua presença está *confirmada* para dia ${dataFmt} às *${horaFmt}*.\nEstamos ansiosos para te atender! 💛`;
+        if (endereco) boasVindas += `\n\n📍 *Endereço:* ${endereco}`;
+        if (linkMapa) boasVindas += `\n🗺️ *Como chegar:* ${linkMapa}`;
+        boasVindas += `\n\nAté breve! 🦷`;
+        if (instanceName) await responderPaciente(instanceName, clinic_id, phone, boasVindas);
       } else if (ehRemarcar) {
         await fetch(`${SUPABASE_URL}/rest/v1/consultas?id=eq.${consulta.id}`, {
           method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
