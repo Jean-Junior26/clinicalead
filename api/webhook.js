@@ -175,6 +175,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
     const instanceName = body?.instance || body?.instanceName || null;
     let clinic_id = null;
     if (instanceName) {
+      // 1) Procura o número PRINCIPAL (clinicas.whatsapp_instance)
       const clinicResp = await fetch(
         `${SUPABASE_URL}/rest/v1/clinicas?whatsapp_instance=eq.${encodeURIComponent(instanceName)}&select=id&limit=1`,
         { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
@@ -182,6 +183,17 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       if (clinicResp.ok) {
         const clinics = await clinicResp.json();
         if (clinics?.length > 0) clinic_id = clinics[0].id;
+      }
+      // 2) Se não achou, procura nos números EXTRAS (tabela instancias)
+      if (!clinic_id) {
+        const instResp = await fetch(
+          `${SUPABASE_URL}/rest/v1/instancias?instance_name=eq.${encodeURIComponent(instanceName)}&select=clinic_id&limit=1`,
+          { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+        );
+        if (instResp.ok) {
+          const insts = await instResp.json();
+          if (insts?.length > 0) clinic_id = insts[0].clinic_id;
+        }
       }
     }
 
@@ -246,7 +258,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
           content = '[mídia]'; type = 'unknown';
         }
 
-        const payload = { clinic_id, phone, contact_name, content, type, from_me: fromMe, media_url, message_id, created_at };
+        const payload = { clinic_id, phone, contact_name, content, type, from_me: fromMe, media_url, message_id, created_at, instance_name: instanceName };
         const insertResp = await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
           method: 'POST',
           headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
