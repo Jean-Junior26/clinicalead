@@ -19,20 +19,28 @@ export default async function handler(req, res) {
     const data = await resp.json();
     if (!resp.ok) return res.status(resp.status).json(data);
 
-    // Captura o message_id em qualquer formato que a v2.3.7 retorne
     const messageId = data?.key?.id || data?.message?.key?.id || data?.id
                    || data?.messageId || data?.response?.key?.id || null;
-    console.log('[SEND] message_id capturado:', messageId, '| chaves resposta:', Object.keys(data || {}).join(','));
+    console.log('[SEND] message_id capturado:', messageId, '| instance:', instance);
 
     if (SUPABASE_KEY && messageId) {
       try {
         let clinicId = clinic_id || null;
         if (!clinicId) {
+          // 1) Procura o número PRINCIPAL (clinicas.whatsapp_instance)
           const cResp = await fetch(
             `${SUPABASE_URL}/rest/v1/clinicas?whatsapp_instance=eq.${encodeURIComponent(instance)}&select=id&limit=1`,
             { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
           );
           if (cResp.ok) { const cs = await cResp.json(); if (cs?.length) clinicId = cs[0].id; }
+          // 2) Se não achou, procura nos números EXTRAS (tabela instancias)
+          if (!clinicId) {
+            const iResp = await fetch(
+              `${SUPABASE_URL}/rest/v1/instancias?instance_name=eq.${encodeURIComponent(instance)}&select=clinic_id&limit=1`,
+              { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+            );
+            if (iResp.ok) { const is = await iResp.json(); if (is?.length) clinicId = is[0].clinic_id; }
+          }
         }
         await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
           method: 'POST',
@@ -50,6 +58,7 @@ export default async function handler(req, res) {
             type: 'text',
             from_me: true,
             message_id: messageId,
+            instance_name: instance,
             read_at: new Date().toISOString(),
             created_at: new Date().toISOString(),
           }),
