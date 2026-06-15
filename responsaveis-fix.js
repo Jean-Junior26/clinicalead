@@ -1,0 +1,173 @@
+// ============================================================
+// CLINICALEAD — RESPONSÁVEIS: "Agendado por" / "Fechado por" (Fatia 2)
+// Lista personalizável de responsáveis por clínica + seletor no
+// agendamento (agendado_por). Prepara terreno para comissionamento.
+// ============================================================
+
+let RESP = { lista: [] };
+
+// Carrega a lista de responsáveis da clínica ativa
+async function carregarResponsaveis() {
+  const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
+  if (!clinic) return [];
+  try {
+    const { data } = await db.from('responsaveis').select('*').eq('clinic_id', clinic.id).eq('ativo', true).order('nome');
+    RESP.lista = data || [];
+  } catch (e) { RESP.lista = []; }
+  return RESP.lista;
+}
+
+// Monta as <option> de um select de responsáveis
+function optionsResponsaveis(selecionado) {
+  let html = '<option value="">— Selecione —</option>';
+  RESP.lista.forEach(r => {
+    html += `<option value="${r.nome}" ${selecionado === r.nome ? 'selected' : ''}>${r.nome}</option>`;
+  });
+  return html;
+}
+
+// ── Tela de gerenciar responsáveis ───────────────────────────
+async function abrirGerenciarResponsaveis() {
+  if (!document.getElementById('modalResponsaveis')) {
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'modalResponsaveis';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:480px;width:96vw;">
+        <div class="modal-header">
+          <h3><i class="ti ti-users" style="margin-right:8px;color:var(--gold);"></i>Responsáveis</h3>
+          <button class="btn btn-ghost btn-icon" onclick="closeModal('modalResponsaveis')"><i class="ti ti-x"></i></button>
+        </div>
+        <div class="modal-body" style="max-height:72vh;overflow-y:auto;">
+          <p style="font-size:13px;color:var(--text-secondary);margin-bottom:14px;">
+            Cadastre quem agenda e fecha na clínica (ex: Maria, João, Recepção, Comercial). Usado nos agendamentos e orçamentos.
+          </p>
+          <div style="display:flex;gap:8px;margin-bottom:16px;">
+            <input class="form-input" id="novoRespNome" placeholder="Nome do responsável" style="flex:1;"/>
+            <button class="btn btn-primary" onclick="adicionarResponsavel()"><i class="ti ti-plus"></i> Adicionar</button>
+          </div>
+          <div id="listaResponsaveis"></div>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+  }
+  await renderListaResponsaveis();
+  openModal('modalResponsaveis');
+}
+
+async function renderListaResponsaveis() {
+  await carregarResponsaveis();
+  const cont = document.getElementById('listaResponsaveis');
+  if (!cont) return;
+  if (!RESP.lista.length) {
+    cont.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px;">Nenhum responsável cadastrado ainda.</div>';
+    return;
+  }
+  cont.innerHTML = RESP.lista.map(r => `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:var(--bg-elevated);border-radius:10px;margin-bottom:8px;">
+      <span style="font-weight:500;">${r.nome}</span>
+      <button class="btn btn-sm btn-danger" onclick="removerResponsavel('${r.id}')"><i class="ti ti-trash"></i></button>
+    </div>`).join('');
+}
+
+async function adicionarResponsavel() {
+  const nome = (document.getElementById('novoRespNome')?.value || '').trim();
+  if (!nome) { toast('Digite o nome', 'error'); return; }
+  const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
+  if (!clinic) return;
+  const { error } = await db.from('responsaveis').insert({ clinic_id: clinic.id, nome });
+  if (error) { toast('Erro: ' + error.message, 'error'); return; }
+  document.getElementById('novoRespNome').value = '';
+  toast('Responsável adicionado!');
+  await renderListaResponsaveis();
+}
+
+async function removerResponsavel(id) {
+  const { error } = await db.from('responsaveis').update({ ativo: false }).eq('id', id);
+  if (error) { toast('Erro: ' + error.message, 'error'); return; }
+  toast('Responsável removido');
+  await renderListaResponsaveis();
+}
+
+// ── Injeta o seletor "Agendado por" no modal de agendamento ──
+async function injetarAgendadoPor() {
+  const modal = document.getElementById('modalNovoAgendamento');
+  if (!modal) return;
+  // Acha o campo de observações pra inserir o seletor antes dele
+  const obsField = document.getElementById('naObs');
+  if (!obsField || document.getElementById('naAgendadoPor')) return; // já injetado
+
+  await carregarResponsaveis();
+  // Cria o grupo do seletor
+  const grupo = document.createElement('div');
+  grupo.className = 'form-group';
+  grupo.id = 'grupoAgendadoPor';
+  grupo.innerHTML = `
+    <label class="form-label">Agendado por</label>
+    <select class="form-input" id="naAgendadoPor">${optionsResponsaveis()}</select>`;
+  // Insere antes do campo de observações (ou seu grupo pai)
+  const obsGrupo = obsField.closest('.form-group') || obsField;
+  obsGrupo.parentNode.insertBefore(grupo, obsGrupo);
+}
+
+// ── Intercepta abertura do agendamento e o salvamento ────────
+(function () {
+  // injeta o seletor quando abre o agendamento
+  ['openNovoAgendamento', 'openNovoAgendamentoHora'].forEach(fn => {
+    if (typeof window[fn] === 'function') {
+      const _orig = window[fn];
+      window[fn] = function (...args) {
+        const r = _orig.apply(this, args);
+        setTimeout(injetarAgendadoPor, 100);
+        return r;
+      };
+    }
+  });
+
+  // intercepta o salvar pra incluir agendado_por
+  function instalarSalvar() {
+    if (typeof salvarNovoAgendamento !== 'function') return false;
+    const _orig = salvarNovoAgendamento;
+    salvarNovoAgendamento = async function (...args) {
+      // Guarda o agendado_por escolhido pra aplicar após o insert
+      const sel = document.getElementById('naAgendadoPor');
+      RESP._ultimoAgendadoPor = sel ? sel.value : '';
+      const r = await _orig.apply(this, args);
+      // Após salvar, atualiza a última consulta criada com agendado_por
+      if (RESP._ultimoAgendadoPor && typeof CAL !== 'undefined' && CAL.consultas?.length) {
+        // pega a consulta mais recente (a recém-criada)
+        const ultima = CAL.consultas[CAL.consultas.length - 1];
+        if (ultima && !ultima.agendado_por) {
+          await db.from('consultas').update({ agendado_por: RESP._ultimoAgendadoPor }).eq('id', ultima.id);
+          ultima.agendado_por = RESP._ultimoAgendadoPor;
+        }
+      }
+      return r;
+    };
+    return true;
+  }
+  if (!instalarSalvar()) {
+    const iv = setInterval(() => { if (instalarSalvar()) clearInterval(iv); }, 600);
+    setTimeout(() => clearInterval(iv), 15000);
+  }
+
+  console.log('✅ responsaveis-fix.js carregado (Fatia 2 - agendado por)');
+})();
+
+// ── Injeta o item "Responsáveis" no menu lateral ─────────────
+(function () {
+  function injetarMenu() {
+    const menuAutomacoes = document.querySelector('.nav-item[data-page="automacoes"]');
+    if (!menuAutomacoes || document.getElementById('navResponsaveis')) return;
+    const btn = document.createElement('button');
+    btn.className = 'nav-item';
+    btn.id = 'navResponsaveis';
+    btn.innerHTML = '<i class="ti ti-users"></i> Responsáveis';
+    btn.onclick = function () { abrirGerenciarResponsaveis(); };
+    // insere logo após Automações
+    menuAutomacoes.parentNode.insertBefore(btn, menuAutomacoes.nextSibling);
+  }
+  injetarMenu();
+  setTimeout(injetarMenu, 1500);
+  setTimeout(injetarMenu, 4000);
+})();
