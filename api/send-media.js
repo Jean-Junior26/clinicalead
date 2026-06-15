@@ -77,6 +77,19 @@ export default async function handler(req, res) {
           media_url = `${SUPABASE_URL}/storage/v1/object/public/midias/${fname}`;
         }
 
+        // Resolve clinic_id: principal (clinicas) ou número extra (instancias)
+        let clinicId = clinic_id || null;
+        if (!clinicId) {
+          const cR = await fetch(`${SUPABASE_URL}/rest/v1/clinicas?whatsapp_instance=eq.${encodeURIComponent(instance)}&select=id&limit=1`,
+            { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } });
+          if (cR.ok) { const cs = await cR.json(); if (cs?.length) clinicId = cs[0].id; }
+          if (!clinicId) {
+            const iR = await fetch(`${SUPABASE_URL}/rest/v1/instancias?instance_name=eq.${encodeURIComponent(instance)}&select=clinic_id&limit=1`,
+              { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } });
+            if (iR.ok) { const is = await iR.json(); if (is?.length) clinicId = is[0].clinic_id; }
+          }
+        }
+
         const labels = { image: '📷 Imagem', video: '🎥 Vídeo', sticker: '🖼️ Sticker', document: fileName || '📄 Documento' };
         await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
           method: 'POST',
@@ -87,7 +100,7 @@ export default async function handler(req, res) {
             Prefer: 'return=minimal',
           },
           body: JSON.stringify({
-            clinic_id: clinic_id || null,
+            clinic_id: clinicId,
             phone: number,
             contact_name: null,
             content: caption || labels[tipo],
@@ -95,6 +108,7 @@ export default async function handler(req, res) {
             from_me: true,
             media_url,
             message_id: evoData?.key?.id || null,
+            instance_name: instance,
             created_at: new Date().toISOString(),
           }),
         });
