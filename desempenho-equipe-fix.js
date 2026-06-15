@@ -52,35 +52,82 @@ async function renderDesempenhoEquipe() {
       agendPorResp[c.agendado_por] = (agendPorResp[c.agendado_por] || 0) + 1;
     });
 
-    // 2) VALOR FECHADO por responsável (orcamentos.fechado_por + itens aprovados)
-    let qOrc = db.from('orcamentos').select('id, fechado_por, created_at').eq('clinic_id', clinic.id).not('fechado_por', 'is', null);
+    // 2) ORÇAMENTOS FECHADOS (com lead_id pra cruzar com quem agendou)
+    let qOrc = db.from('orcamentos').select('id, fechado_por, lead_id, created_at').eq('clinic_id', clinic.id).not('fechado_por', 'is', null);
     const { data: orcs } = await qOrc;
 
-    // Filtra por período (created_at do orçamento)
     const orcsFiltrados = (orcs || []).filter(o => {
       if (!DESEMP.inicio) return true;
       const d = (o.created_at || '').split('T')[0];
       return d >= DESEMP.inicio && d <= DESEMP.fim;
     });
 
-    // Soma os itens aprovados de cada orçamento
-    const fechadoPorResp = {};
+    // Mapa: lead_id -> quem agendou (pega o agendamento mais recente daquele lead)
+    const agendadorDoLead = {};
+    let consultasComLead = [];
+    {
+      const { data: cl } = await db.from('consultas').select('lead_id, agendado_por, data').eq('clinic_id', clinic.id).not('agendado_por', 'is', null);
+      consultasComLead = cl || [];
+      consultasComLead.forEach(c => {
+        if (!c.lead_id || !c.agendado_por) return;
+        // mantém o agendamento mais recente
+        if (!agendadorDoLead[c.lead_id] || c.data > agendadorDoLead[c.lead_id].data) {
+          agendadorDoLead[c.lead_id] = { nome: c.agendado_por, data: c.data };
+        }
+      });
+    }
+
+    // Valor aprovado por orçamento
+    const valorPorOrc = {};
     if (orcsFiltrados.length) {
       const ids = orcsFiltrados.map(o => o.id);
       const { data: itens } = await db.from('orcamento_itens').select('orcamento_id, valor, qtd, aprovado').in('orcamento_id', ids);
-      const valorPorOrc = {};
       (itens || []).forEach(i => {
         if (!i.aprovado) return;
         valorPorOrc[i.orcamento_id] = (valorPorOrc[i.orcamento_id] || 0) + Number(i.valor || 0) * Number(i.qtd || 1);
       });
-      orcsFiltrados.forEach(o => {
-        const v = valorPorOrc[o.id] || 0;
-        if (v > 0) fechadoPorResp[o.fechado_por] = (fechadoPorResp[o.fechado_por] || 0) + v;
-      });
     }
 
-    // 3) Junta todos os responsáveis (de agendamentos + fechamentos)
-    const todos = new Set([...Object.keys(agendPorResp), ...Object.keys(fechadoPorResp)]);
+    // Regras de comissão por nome (da tabela responsaveis)
+    const regras = {};
+    {
+      const { data: resps } = await db.from('responsaveis').select('*').eq('clinic_id', clinic.id);
+      (resps || []).forEach(r => { regras[r.nome] = r; });
+    }
+    const calcComissao = (tipo, valor, valorFechado) => {
+      if (tipo === 'fixo') return Number(valor || 0);
+      if (tipo === 'percentual') return valorFechado * Number(valor || 0) / 100;
+      return 0;
+    };
+
+    // Acumuladores
+    const fechadoPorResp = {};   // valor fechado por quem fechou
+    const comissaoResp = {};     // comissão total por pessoa
+
+    orcsFiltrados.forEach(o => {
+      const valorFechado = valorPorOrc[o.id] || 0;
+      if (valorFechado <= 0) return;
+
+      // a) quem FECHOU
+      const fechador = o.fechado_por;
+      fechadoPorResp[fechador] = (fechadoPorResp[fechador] || 0) + valorFechado;
+      const rF = regras[fechador];
+      if (rF) {
+        comissaoResp[fechador] = (comissaoResp[fechador] || 0) + calcComissao(rF.com_fechar_tipo, rF.com_fechar_valor, valorFechado);
+      }
+
+      // b) quem AGENDOU aquele paciente (só ganha porque fechou)
+      const ag = agendadorDoLead[o.lead_id];
+      if (ag && ag.nome) {
+        const rA = regras[ag.nome];
+        if (rA) {
+          comissaoResp[ag.nome] = (comissaoResp[ag.nome] || 0) + calcComissao(rA.com_agendar_tipo, rA.com_agendar_valor, valorFechado);
+        }
+      }
+    });
+
+    // 3) Junta todos os responsáveis (agendamentos + fechamentos + comissões)
+    const todos = new Set([...Object.keys(agendPorResp), ...Object.keys(fechadoPorResp), ...Object.keys(comissaoResp)]);
 
     const fmt = (typeof fmtCurrency === 'function') ? fmtCurrency : (v => 'R$ ' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 }));
 
@@ -89,12 +136,13 @@ async function renderDesempenhoEquipe() {
       return;
     }
 
-    // Ordena por valor fechado (maior primeiro)
-    const ordenados = [...todos].sort((a, b) => (fechadoPorResp[b] || 0) - (fechadoPorResp[a] || 0));
+    // Ordena por comissão (maior primeiro)
+    const ordenados = [...todos].sort((a, b) => (comissaoResp[b] || 0) - (comissaoResp[a] || 0));
 
     cont.querySelector('#desempCards').innerHTML = ordenados.map(nome => {
       const agend = agendPorResp[nome] || 0;
       const fechado = fechadoPorResp[nome] || 0;
+      const comissao = comissaoResp[nome] || 0;
       return `
         <div class="card" style="padding:16px;margin-bottom:12px;">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
@@ -104,14 +152,18 @@ async function renderDesempenhoEquipe() {
               </div>
               <strong style="font-size:15px;">${nome}</strong>
             </div>
-            <div style="display:flex;gap:24px;flex-wrap:wrap;">
+            <div style="display:flex;gap:20px;flex-wrap:wrap;">
               <div style="text-align:center;">
                 <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;">Agendamentos</div>
-                <div style="font-size:20px;font-weight:700;color:var(--blue, #5B8DB8);">${agend}</div>
+                <div style="font-size:19px;font-weight:700;color:var(--blue, #5B8DB8);">${agend}</div>
               </div>
               <div style="text-align:center;">
                 <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;">Fechou</div>
-                <div style="font-size:20px;font-weight:700;color:var(--gold);font-family:var(--mono);">${fmt(fechado)}</div>
+                <div style="font-size:19px;font-weight:700;color:var(--text-secondary);font-family:var(--mono);">${fmt(fechado)}</div>
+              </div>
+              <div style="text-align:center;">
+                <div style="font-size:11px;color:var(--gold);text-transform:uppercase;font-weight:600;">Comissão</div>
+                <div style="font-size:19px;font-weight:700;color:var(--gold);font-family:var(--mono);">${fmt(comissao)}</div>
               </div>
             </div>
           </div>
