@@ -104,7 +104,7 @@ function aplicarSemaforoAgenda() {
     if (!consulta) return;
 
     // RESET defensivo: remove botões/cores aplicados antes (evita "vazar" de outro item)
-    item.querySelectorAll('.btn-atendido, .btn-ver-registro').forEach(b => b.remove());
+    item.querySelectorAll('.btn-atendido, .btn-ver-registro, .sched-agendado-por').forEach(b => b.remove());
     item.style.borderLeft = '';
     item.style.paddingLeft = '';
     const nm = item.querySelector('.sched-name');
@@ -125,6 +125,19 @@ function aplicarSemaforoAgenda() {
     item.style.paddingLeft = '17px';
     const nomeEl = item.querySelector('.sched-name');
     if (nomeEl) nomeEl.style.color = cor.nome;
+
+    // Mostra "agendado por" na linha (se houver)
+    const procEl = item.querySelector('.sched-proc');
+    if (procEl && consulta.agendado_por) {
+      let tag = item.querySelector('.sched-agendado-por');
+      if (!tag) {
+        tag = document.createElement('div');
+        tag.className = 'sched-agendado-por';
+        tag.style.cssText = 'font-size:11px;color:var(--text-muted);margin-top:2px;';
+        procEl.parentNode.insertBefore(tag, procEl.nextSibling);
+      }
+      tag.innerHTML = `<i class="ti ti-user" style="font-size:11px;"></i> Agendado por: <strong style="color:var(--text-secondary);">${consulta.agendado_por}</strong>`;
+    }
 
     // Corrige o texto do badge (o render original força "Agendado" mesmo se confirmado)
     const badge = item.querySelector('.badge');
