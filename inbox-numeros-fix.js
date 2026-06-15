@@ -8,6 +8,76 @@
 
 let INBOXNUM = { lista: [], ativa: 'todos' };
 
+// ── Reescreve o agrupamento do inbox: por TELEFONE + NÚMERO ──
+// Assim a mesma pessoa falando em 2 números vira 2 conversas
+// separadas (financeiro com financeiro, comercial com comercial).
+function instalarLoadInbox() {
+  if (typeof loadInboxChats !== 'function' || typeof currentClinic !== 'function') return false;
+
+  loadInboxChats = async function () {
+    const clinic = currentClinic();
+    if (!clinic) return;
+    try {
+      const { data: msgs, error } = await db
+        .from('mensagens').select('*')
+        .eq('clinic_id', clinic.id)
+        .order('created_at', { ascending: false })
+        .limit(500);
+      if (error) throw error;
+
+      // Descobre o número principal (pra mensagens sem instance_name)
+      const principal = clinic.whatsapp_instance || null;
+
+      const chatMap = {};
+      (msgs || []).forEach(m => {
+        const phone = (m.phone || '').replace(/\D/g, '');
+        if (!phone) return;
+        const inst = m.instance_name || principal || 'sem_numero';
+        const chave = phone + '|' + inst; // ← agrupa por telefone + número
+        if (!chatMap[chave]) {
+          const lead = STATE.leads.find(l =>
+            l.telefone && l.telefone.replace(/\D/g, '').slice(-9) === phone.slice(-9)
+          );
+          chatMap[chave] = {
+            id: chave,            // id único por telefone+número
+            phone,
+            instance_name: inst,  // de qual número é essa conversa
+            name: m.contact_name || lead?.nome || phone,
+            lastMsg: '', time: new Date(m.created_at),
+            unread: 0, lead, messages: [],
+          };
+        }
+        chatMap[chave].messages.push(m);
+        if (!m.from_me && !m.read_at) chatMap[chave].unread++;
+      });
+
+      Object.values(chatMap).forEach(chat => {
+        chat.messages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+        const last = chat.messages[chat.messages.length - 1];
+        chat.lastMsg = (typeof formatLastMsg === 'function') ? formatLastMsg(last) : (last?.content || '');
+        chat.time = new Date(last.created_at);
+      });
+
+      INBOX.chats = Object.values(chatMap).sort((a, b) => b.time - a.time);
+
+      const totalUnread = INBOX.chats.reduce((s, c) => s + c.unread, 0);
+      const badge = document.getElementById('inboxUnreadBadge');
+      if (badge) { badge.textContent = totalUnread; badge.style.display = totalUnread > 0 ? '' : 'none'; }
+      const statusEl = document.getElementById('inboxStatusText');
+      if (statusEl) statusEl.textContent = INBOX.chats.length + ' conversa' + (INBOX.chats.length !== 1 ? 's' : '');
+
+      renderInboxList();
+      setTimeout(renderSeletorNumero, 80);
+
+      if (INBOX.activeChat) {
+        const updated = INBOX.chats.find(c => c.id === INBOX.activeChat.id);
+        if (updated) { INBOX.activeChat = updated; renderMessages(updated.messages, updated); }
+      }
+    } catch (e) { console.error('loadInboxChats (multi-número):', e); }
+  };
+  return true;
+}
+
 // Carrega os números da clínica (principal + extras)
 async function carregarNumerosInbox() {
   const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
@@ -43,9 +113,15 @@ async function renderSeletorNumero() {
   const botoes = [{ instance_name: 'todos', nome: 'Todos' }, ...lista];
   cont.innerHTML = botoes.map(b => {
     const ativo = INBOXNUM.ativa === b.instance_name;
+    // conta quantas conversas pertencem a esse número (debug + informativo)
+    let qtd = 0;
+    if (typeof INBOX !== 'undefined' && INBOX.chats) {
+      if (b.instance_name === 'todos') qtd = INBOX.chats.length;
+      else qtd = INBOX.chats.filter(c => c.instance_name === b.instance_name).length;
+    }
     return `<button class="btn btn-sm" style="${ativo ? 'background:var(--gold-pale);border-color:var(--gold-border);color:var(--gold);font-weight:600;' : ''}"
       onclick="selecionarNumeroInbox('${b.instance_name}')">
-      ${b.principal === false && b.instance_name !== 'todos' ? '<i class="ti ti-brand-whatsapp" style="color:#25D366;"></i> ' : ''}${b.nome}
+      ${b.principal === false && b.instance_name !== 'todos' ? '<i class="ti ti-brand-whatsapp" style="color:#25D366;"></i> ' : ''}${b.nome} <span style="opacity:.6;">(${qtd})</span>
     </button>`;
   }).join('');
 }
@@ -54,6 +130,10 @@ function selecionarNumeroInbox(instanceName) {
   INBOXNUM.ativa = instanceName;
   renderSeletorNumero();
   if (typeof renderInboxList === 'function') renderInboxList();
+  // Reaplica algumas vezes pra garantir (caso o render demore ou venha do realtime)
+  setTimeout(aplicarFiltroNumero, 50);
+  setTimeout(aplicarFiltroNumero, 250);
+  setTimeout(aplicarFiltroNumero, 600);
 }
 
 // Descobre qual número (instance_name) usar para responder uma conversa.
@@ -79,13 +159,25 @@ function instanciaParaResponder(chat) {
 }
 
 // Helper: a conversa pertence ao número selecionado?
+// Agora cada chat tem UM instance_name (agrupado por telefone+número).
 function chatPertenceNumero(chat) {
   if (INBOXNUM.ativa === 'todos') return true;
-  // Verifica se alguma mensagem do chat é da instância ativa
-  if (chat.messages && chat.messages.length) {
-    return chat.messages.some(m => m.instance_name === INBOXNUM.ativa);
-  }
   return chat.instance_name === INBOXNUM.ativa;
+}
+
+// Aplica o filtro de número escondendo/mostrando os itens do inbox.
+// Robusto: roda mesmo que o render tenha vindo do realtime.
+function aplicarFiltroNumero() {
+  const itens = document.querySelectorAll('#inboxList .inbox-item');
+  itens.forEach(item => {
+    const onclick = item.getAttribute('onclick') || '';
+    const m = onclick.match(/openChat\('([^']+)'\)/);
+    if (!m) return;
+    if (INBOXNUM.ativa === 'todos') { item.style.display = ''; return; }
+    const chat = (typeof INBOX !== 'undefined' && INBOX.chats) ? INBOX.chats.find(c => c.id === m[1]) : null;
+    if (chat && !chatPertenceNumero(chat)) item.style.display = 'none';
+    else item.style.display = '';
+  });
 }
 
 // ── Intercepta renderInboxList pra filtrar pelo número ───────
@@ -93,23 +185,14 @@ function chatPertenceNumero(chat) {
   function instalar() {
     if (typeof renderInboxList !== 'function' || typeof loadInboxChats !== 'function') return false;
 
+    // Reescreve o agrupamento (telefone + número)
+    instalarLoadInbox();
+
     // Filtra a lista renderizada pelo número ativo
     const _origRender = renderInboxList;
     renderInboxList = function (...args) {
       _origRender.apply(this, args);
-      if (INBOXNUM.ativa !== 'todos') {
-        // Esconde os chats que não são da instância ativa
-        document.querySelectorAll('#inboxList .inbox-item').forEach(item => {
-          const onclick = item.getAttribute('onclick') || '';
-          const m = onclick.match(/openChat\('([^']+)'\)/);
-          if (!m) return;
-          const chat = (INBOX.chats || []).find(c => c.id === m[1]);
-          if (chat && !chatPertenceNumero(chat)) item.style.display = 'none';
-          else item.style.display = '';
-        });
-      } else {
-        document.querySelectorAll('#inboxList .inbox-item').forEach(item => { item.style.display = ''; });
-      }
+      aplicarFiltroNumero();
     };
 
     // Renderiza o seletor quando carrega os chats
