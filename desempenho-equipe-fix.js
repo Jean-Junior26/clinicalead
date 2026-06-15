@@ -24,6 +24,18 @@ function desempSetPeriodo(p) {
   renderDesempenhoEquipe();
 }
 
+// Período personalizado (datas escolhidas no calendário)
+function desempSetPersonalizado() {
+  const ini = document.getElementById('desempDataIni')?.value;
+  const fim = document.getElementById('desempDataFim')?.value;
+  if (!ini || !fim) { if (typeof toast === 'function') toast('Escolha as duas datas', 'error'); return; }
+  if (ini > fim) { if (typeof toast === 'function') toast('A data inicial não pode ser maior que a final', 'error'); return; }
+  DESEMP.inicio = ini;
+  DESEMP.fim = fim;
+  DESEMP.periodo = 'personalizado';
+  renderDesempenhoEquipe();
+}
+
 // Renderiza a seção de desempenho
 async function renderDesempenhoEquipe() {
   const cont = document.getElementById('desempenhoEquipe');
@@ -175,6 +187,13 @@ async function renderDesempenhoEquipe() {
   }
 }
 
+// Mostra/esconde os campos de data personalizada
+function desempTogglePersonalizado() {
+  const div = document.getElementById('desempPersonalizado');
+  if (!div) return;
+  div.style.display = div.style.display === 'none' ? 'flex' : 'none';
+}
+
 // ── Injeta a seção na página de Relatórios ───────────────────
 (function () {
   function injetar() {
@@ -187,11 +206,19 @@ async function renderDesempenhoEquipe() {
     sec.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;flex-wrap:wrap;">
         <h3 style="font-size:16px;display:flex;align-items:center;gap:8px;"><i class="ti ti-trophy" style="color:var(--gold);"></i> Desempenho da Equipe</h3>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
           <button class="btn btn-sm desemp-per-btn" data-per="mes" onclick="desempSetPeriodo('mes')">Este mês</button>
           <button class="btn btn-sm desemp-per-btn" data-per="mes_passado" onclick="desempSetPeriodo('mes_passado')">Mês passado</button>
           <button class="btn btn-sm desemp-per-btn" data-per="tudo" onclick="desempSetPeriodo('tudo')">Tudo</button>
+          <button class="btn btn-sm desemp-per-btn" data-per="personalizado" onclick="desempTogglePersonalizado()"><i class="ti ti-calendar"></i> Personalizado</button>
         </div>
+      </div>
+      <div id="desempPersonalizado" style="display:none;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;background:var(--bg-elevated);padding:10px 12px;border-radius:10px;">
+        <span style="font-size:12px;color:var(--text-secondary);">De</span>
+        <input type="date" id="desempDataIni" class="form-input" style="font-size:12px;padding:5px 8px;width:auto;"/>
+        <span style="font-size:12px;color:var(--text-secondary);">até</span>
+        <input type="date" id="desempDataFim" class="form-input" style="font-size:12px;padding:5px 8px;width:auto;"/>
+        <button class="btn btn-sm btn-primary" onclick="desempSetPersonalizado()"><i class="ti ti-search"></i> Aplicar</button>
       </div>
       <div id="desempCards"></div>`;
     page.appendChild(sec);
