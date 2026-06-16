@@ -101,21 +101,24 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       if (!clinic_id || !phone || !content) return;
       const resp = String(content).trim().toLowerCase();
       const ehConfirmar = ['1', '1️⃣', 'sim', 'confirmar', 'confirmo', 'confirmado', 'confirmada', 'ok', 'pode ser', 'vou', 'estarei', 'estarei la', 'estarei lá'].includes(resp);
-      // CANCELAMENTO: lista generosa (erros de português, abreviações, gírias). Verificado ANTES de remarcar.
-      const FRASES_CANCELAR = [
-        'cancelar', 'cancela', 'cancelaa', 'cancelar consulta', 'cancelar a consulta',
-        'quero cancelar', 'vou cancelar', 'gostaria de cancelar', 'preciso cancelar', 'pode cancelar',
-        'desmarcar', 'desmarca', 'desmarcaa', 'quero desmarcar', 'vou desmarcar', 'preciso desmarcar', 'pode desmarcar',
-        'desistir', 'vou desistir', 'quero desistir', 'desisto', 'desisti',
-        'nao quero mais', 'não quero mais', 'naum quero mais', 'nao quero mas', 'nao quero',
-        'nao vou mais', 'não vou mais', 'naum vou mais', 'nao vou mas',
-        'nao da mais', 'não dá mais', 'nao da', 'não da', 'nao vai dar', 'não vai dar', 'naum vai dar',
-        'nao consigo mais', 'não consigo mais', 'nao consigo ir', 'não consigo ir',
-        'nao poderei ir', 'não poderei ir', 'nao vou poder ir', 'não vou poder ir',
-        'cancele', 'cancelado', 'cancelada', 'pode cancelar mesmo',
-      ];
-      const ehCancelar = FRASES_CANCELAR.includes(resp);
-      const ehRemarcar = ['2', '2️⃣', 'nao', 'não', 'remarcar', 'reagendar', 'nao posso', 'não posso', 'nao vou', 'não vou'].includes(resp);
+
+      // ── CANCELAMENTO: detecção por PALAVRA-CHAVE (robusto a erros de português) ──
+      // Normaliza: tira acentos pra "não" e "nao" caírem na mesma regra
+      const semAcento = resp.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      // 1) Raízes que indicam cancelamento direto (contém em qualquer lugar da frase)
+      const raizesCancelar = ['cancel', 'desmarc', 'desist'];
+      let ehCancelar = raizesCancelar.some(r => semAcento.includes(r));
+      // 2) Negação + intenção de não ir (ex: "nao vou mais", "nao vai dar", "nao tenho como ir", "nao quero mais")
+      if (!ehCancelar) {
+        const temNegacao = /\bn[ao]o?\b|\bnaum\b|\bnem\b/.test(semAcento); // nao, não, naum, nem
+        const temIntencaoIr = /(vou|vai|quero|posso|consigo|da|dar|tenho como|poderei|poder)\b.*\b(mais|ir|comparecer)|(\bmais\b)|(\bir\b)|(comparecer)/.test(semAcento)
+          || /(vou|vai|quero|posso|consigo|tenho|poderei)/.test(semAcento);
+        // só marca cancelamento por negação se a frase for curta (resposta ao lembrete), evitando falso positivo em conversa longa
+        if (temNegacao && temIntencaoIr && semAcento.length <= 40) ehCancelar = true;
+      }
+
+      const ehRemarcar = ['2', '2️⃣', 'nao', 'não', 'remarcar', 'reagendar', 'nao posso', 'não posso', 'nao vou', 'não vou'].includes(resp)
+        || /remarc|reagend|outro dia|outro horario|outra data|mudar.*dia|mudar.*horario/.test(semAcento);
       const digitos = String(phone).replace(/\D/g, '');
       const sufixo = digitos.slice(-8);
       if (sufixo.length < 8) return;
