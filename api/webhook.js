@@ -101,6 +101,20 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       if (!clinic_id || !phone || !content) return;
       const resp = String(content).trim().toLowerCase();
       const ehConfirmar = ['1', '1️⃣', 'sim', 'confirmar', 'confirmo', 'confirmado', 'confirmada', 'ok', 'pode ser', 'vou', 'estarei', 'estarei la', 'estarei lá'].includes(resp);
+      // CANCELAMENTO: lista generosa (erros de português, abreviações, gírias). Verificado ANTES de remarcar.
+      const FRASES_CANCELAR = [
+        'cancelar', 'cancela', 'cancelaa', 'cancelar consulta', 'cancelar a consulta',
+        'quero cancelar', 'vou cancelar', 'gostaria de cancelar', 'preciso cancelar', 'pode cancelar',
+        'desmarcar', 'desmarca', 'desmarcaa', 'quero desmarcar', 'vou desmarcar', 'preciso desmarcar', 'pode desmarcar',
+        'desistir', 'vou desistir', 'quero desistir', 'desisto', 'desisti',
+        'nao quero mais', 'não quero mais', 'naum quero mais', 'nao quero mas', 'nao quero',
+        'nao vou mais', 'não vou mais', 'naum vou mais', 'nao vou mas',
+        'nao da mais', 'não dá mais', 'nao da', 'não da', 'nao vai dar', 'não vai dar', 'naum vai dar',
+        'nao consigo mais', 'não consigo mais', 'nao consigo ir', 'não consigo ir',
+        'nao poderei ir', 'não poderei ir', 'nao vou poder ir', 'não vou poder ir',
+        'cancele', 'cancelado', 'cancelada', 'pode cancelar mesmo',
+      ];
+      const ehCancelar = FRASES_CANCELAR.includes(resp);
       const ehRemarcar = ['2', '2️⃣', 'nao', 'não', 'remarcar', 'reagendar', 'nao posso', 'não posso', 'nao vou', 'não vou'].includes(resp);
       const digitos = String(phone).replace(/\D/g, '');
       const sufixo = digitos.slice(-8);
@@ -149,6 +163,13 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
         if (linkMapa) boasVindas += `\n🗺️ *Como chegar:* ${linkMapa}`;
         boasVindas += `\n\nAté breve! 🦷`;
         if (instanceName) await responderPaciente(instanceName, clinic_id, phone, boasVindas);
+      } else if (ehCancelar) {
+        // NÃO cancela a consulta — só marca o pedido pra equipe reverter (tarefa urgente no CRC)
+        await fetch(`${SUPABASE_URL}/rest/v1/consultas?id=eq.${consulta.id}`, {
+          method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
+          body: JSON.stringify({ cancelar_solicitado: true }),
+        });
+        if (instanceName) await responderPaciente(instanceName, clinic_id, phone, `Entendi, ${primeiroNome}. 😊\n\nVou avisar nossa equipe para te ajudar. Em breve alguém entra em contato com você!`);
       } else if (ehRemarcar) {
         await fetch(`${SUPABASE_URL}/rest/v1/consultas?id=eq.${consulta.id}`, {
           method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
