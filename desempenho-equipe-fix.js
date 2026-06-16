@@ -89,51 +89,66 @@ async function renderDesempenhoEquipe() {
       });
     }
 
-    // Valor aprovado por orçamento
-    const valorPorOrc = {};
-    if (orcsFiltrados.length) {
-      const ids = orcsFiltrados.map(o => o.id);
-      const { data: itens } = await db.from('orcamento_itens').select('orcamento_id, valor, qtd, aprovado').in('orcamento_id', ids);
-      (itens || []).forEach(i => {
-        if (!i.aprovado) return;
-        valorPorOrc[i.orcamento_id] = (valorPorOrc[i.orcamento_id] || 0) + Number(i.valor || 0) * Number(i.qtd || 1);
-      });
-    }
-
     // Regras de comissão por nome (da tabela responsaveis)
     const regras = {};
     {
       const { data: resps } = await db.from('responsaveis').select('*').eq('clinic_id', clinic.id);
       (resps || []).forEach(r => { regras[r.nome] = r; });
     }
-    const calcComissao = (tipo, valor, valorFechado) => {
-      if (tipo === 'fixo') return Number(valor || 0);
-      if (tipo === 'percentual') return valorFechado * Number(valor || 0) / 100;
-      return 0;
-    };
+
+    // Busca os PAGAMENTOS do período (a comissão sai sobre o que foi pago)
+    let qPag = db.from('pagamentos').select('orcamento_id, valor, data').eq('clinic_id', clinic.id);
+    if (DESEMP.inicio) qPag = qPag.gte('data', DESEMP.inicio).lte('data', DESEMP.fim);
+    const { data: pagamentos } = await qPag;
+
+    // Mapa: orcamento_id -> { fechado_por, lead_id }
+    const orcInfo = {};
+    (orcs || []).forEach(o => { orcInfo[o.id] = o; });
 
     // Acumuladores
-    const fechadoPorResp = {};   // valor fechado por quem fechou
-    const comissaoResp = {};     // comissão total por pessoa
+    const fechadoPorResp = {};       // valor PAGO atribuído a quem fechou
+    const comissaoResp = {};         // comissão total por pessoa
+    const fixoJaContado = {};        // controla o fixo (1x por orçamento+pessoa+papel)
 
-    orcsFiltrados.forEach(o => {
-      const valorFechado = valorPorOrc[o.id] || 0;
-      if (valorFechado <= 0) return;
+    (pagamentos || []).forEach(pag => {
+      const orc = orcInfo[pag.orcamento_id];
+      if (!orc) return; // pagamento de orçamento sem fechado_por definido
+      const valorPago = Number(pag.valor || 0);
+      if (valorPago <= 0) return;
 
-      // a) quem FECHOU
-      const fechador = o.fechado_por;
-      fechadoPorResp[fechador] = (fechadoPorResp[fechador] || 0) + valorFechado;
-      const rF = regras[fechador];
-      if (rF) {
-        comissaoResp[fechador] = (comissaoResp[fechador] || 0) + calcComissao(rF.com_fechar_tipo, rF.com_fechar_valor, valorFechado);
+      // ── quem FECHOU ──
+      const fechador = orc.fechado_por;
+      if (fechador) {
+        fechadoPorResp[fechador] = (fechadoPorResp[fechador] || 0) + valorPago;
+        const rF = regras[fechador];
+        if (rF) {
+          if (rF.com_fechar_tipo === 'percentual') {
+            comissaoResp[fechador] = (comissaoResp[fechador] || 0) + valorPago * Number(rF.com_fechar_valor || 0) / 100;
+          } else if (rF.com_fechar_tipo === 'fixo') {
+            // fixo: conta 1x por orçamento (no primeiro pagamento dele)
+            const chave = 'F_' + pag.orcamento_id + '_' + fechador;
+            if (!fixoJaContado[chave]) {
+              comissaoResp[fechador] = (comissaoResp[fechador] || 0) + Number(rF.com_fechar_valor || 0);
+              fixoJaContado[chave] = true;
+            }
+          }
+        }
       }
 
-      // b) quem AGENDOU aquele paciente (só ganha porque fechou)
-      const ag = agendadorDoLead[o.lead_id];
+      // ── quem AGENDOU aquele paciente ──
+      const ag = agendadorDoLead[orc.lead_id];
       if (ag && ag.nome) {
         const rA = regras[ag.nome];
         if (rA) {
-          comissaoResp[ag.nome] = (comissaoResp[ag.nome] || 0) + calcComissao(rA.com_agendar_tipo, rA.com_agendar_valor, valorFechado);
+          if (rA.com_agendar_tipo === 'percentual') {
+            comissaoResp[ag.nome] = (comissaoResp[ag.nome] || 0) + valorPago * Number(rA.com_agendar_valor || 0) / 100;
+          } else if (rA.com_agendar_tipo === 'fixo') {
+            const chave = 'A_' + pag.orcamento_id + '_' + ag.nome;
+            if (!fixoJaContado[chave]) {
+              comissaoResp[ag.nome] = (comissaoResp[ag.nome] || 0) + Number(rA.com_agendar_valor || 0);
+              fixoJaContado[chave] = true;
+            }
+          }
         }
       }
     });
@@ -170,7 +185,7 @@ async function renderDesempenhoEquipe() {
                 <div style="font-size:19px;font-weight:700;color:var(--blue, #5B8DB8);">${agend}</div>
               </div>
               <div style="text-align:center;">
-                <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;">Fechou</div>
+                <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;">Recebido</div>
                 <div style="font-size:19px;font-weight:700;color:var(--text-secondary);font-family:var(--mono);">${fmt(fechado)}</div>
               </div>
               <div style="text-align:center;">
