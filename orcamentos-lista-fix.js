@@ -9,7 +9,39 @@
 // Filtros por estado + cards de resumo. Clicar abre o orçamento.
 // ============================================================
 
-let ORCLISTA = { todos: [], filtro: 'todos' };
+let ORCLISTA = { todos: [], filtro: 'todos', periodo: 'tudo', inicio: null, fim: null };
+
+// ── Período por data de CRIAÇÃO do orçamento ─────────────────
+function orcListaIsoLocal(d) {
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().split('T')[0];
+}
+function orcListaDiasAtras(n) { const d = new Date(); d.setDate(d.getDate() - n); return orcListaIsoLocal(d); }
+
+function orcSetPeriodo(p) {
+  const hoje = new Date();
+  const y = hoje.getFullYear(), m = hoje.getMonth();
+  if (p === 'hoje') { ORCLISTA.inicio = orcListaIsoLocal(hoje); ORCLISTA.fim = orcListaIsoLocal(hoje); }
+  else if (p === '7') { ORCLISTA.inicio = orcListaDiasAtras(7); ORCLISTA.fim = orcListaIsoLocal(hoje); }
+  else if (p === '30') { ORCLISTA.inicio = orcListaDiasAtras(30); ORCLISTA.fim = orcListaIsoLocal(hoje); }
+  else if (p === 'mes') { ORCLISTA.inicio = orcListaIsoLocal(new Date(y, m, 1)); ORCLISTA.fim = orcListaIsoLocal(new Date(y, m + 1, 0)); }
+  else if (p === 'tudo') { ORCLISTA.inicio = null; ORCLISTA.fim = null; }
+  ORCLISTA.periodo = p;
+  renderOrcamentosPage();
+}
+
+function orcSetPeriodoPersonalizado() {
+  const ini = document.getElementById('orcDataIni')?.value;
+  const fim = document.getElementById('orcDataFim')?.value;
+  if (!ini || !fim) { if (typeof toast === 'function') toast('Escolha as duas datas', 'error'); return; }
+  if (ini > fim) { if (typeof toast === 'function') toast('Data inicial maior que a final', 'error'); return; }
+  ORCLISTA.inicio = ini; ORCLISTA.fim = fim; ORCLISTA.periodo = 'personalizado';
+  renderOrcamentosPage();
+}
+
+function orcTogglePersonalizado() {
+  const div = document.getElementById('orcPersonalizado');
+  if (div) div.style.display = div.style.display === 'none' ? 'flex' : 'none';
+}
 
 // Calcula o estado real de um orçamento
 function orcEstado(o) {
@@ -79,15 +111,24 @@ async function renderOrcamentosPage() {
   // calcula estado de cada um
   todos.forEach(o => { o._estado = orcEstado(o); });
 
-  // resumo por estado
+  // aplica filtro de DATA (criação) primeiro
+  let baseData = todos;
+  if (ORCLISTA.inicio) {
+    baseData = todos.filter(o => {
+      const d = (o.created_at || '').split('T')[0];
+      return d >= ORCLISTA.inicio && d <= ORCLISTA.fim;
+    });
+  }
+
+  // resumo por estado (sobre os filtrados por data)
   const resumo = { pendente: 0, aprovado: 0, pago_parcial: 0, quitado: 0, recusado: 0 };
-  todos.forEach(o => { resumo[o._estado] = (resumo[o._estado] || 0) + 1; });
+  baseData.forEach(o => { resumo[o._estado] = (resumo[o._estado] || 0) + 1; });
 
-  // aplica filtro
-  const filtrados = ORCLISTA.filtro === 'todos' ? todos : todos.filter(o => o._estado === ORCLISTA.filtro);
+  // aplica filtro de ESTADO
+  const filtrados = ORCLISTA.filtro === 'todos' ? baseData : baseData.filter(o => o._estado === ORCLISTA.filtro);
 
-  // botões de filtro
-  const botoes = [{ k: 'todos', label: 'Todos', n: todos.length }]
+  // botões de filtro de estado
+  const botoes = [{ k: 'todos', label: 'Todos', n: baseData.length }]
     .concat(Object.keys(ORCLISTA_ESTADOS).map(k => ({ k, label: ORCLISTA_ESTADOS[k].label, n: resumo[k] || 0 })));
 
   const filtrosHtml = botoes.map(b => {
@@ -132,12 +173,33 @@ async function renderOrcamentosPage() {
       </div>`;
   }).join('');
 
+  // botões de período (data de criação)
+  const periodos = [
+    { k: 'hoje', label: 'Hoje' }, { k: '7', label: '7 dias' }, { k: '30', label: '30 dias' },
+    { k: 'mes', label: 'Este mês' }, { k: 'tudo', label: 'Tudo' },
+  ];
+  const periodosHtml = periodos.map(p => {
+    const ativo = ORCLISTA.periodo === p.k;
+    return `<button class="btn btn-sm" style="${ativo ? 'background:var(--gold-pale);border-color:var(--gold-border);color:var(--gold);font-weight:600;' : ''}" onclick="orcSetPeriodo('${p.k}')">${p.label}</button>`;
+  }).join('') + `<button class="btn btn-sm" style="${ORCLISTA.periodo === 'personalizado' ? 'background:var(--gold-pale);border-color:var(--gold-border);color:var(--gold);font-weight:600;' : ''}" onclick="orcTogglePersonalizado()"><i class="ti ti-calendar"></i> Personalizado</button>`;
+
   page.innerHTML = `
     <div class="page-header" style="margin-bottom:16px;">
       <div class="page-header-left">
         <h2>Orçamentos</h2>
-        <p>${todos.length} orçamento${todos.length !== 1 ? 's' : ''} no total</p>
+        <p>${baseData.length} orçamento${baseData.length !== 1 ? 's' : ''}${ORCLISTA.inicio ? ' no período' : ' no total'}</p>
       </div>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">
+      <span style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-right:4px;">Criados em:</span>
+      ${periodosHtml}
+    </div>
+    <div id="orcPersonalizado" style="display:none;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;background:var(--bg-elevated);padding:10px 12px;border-radius:10px;">
+      <span style="font-size:12px;color:var(--text-secondary);">De</span>
+      <input type="date" id="orcDataIni" class="form-input" style="font-size:12px;padding:5px 8px;width:auto;"/>
+      <span style="font-size:12px;color:var(--text-secondary);">até</span>
+      <input type="date" id="orcDataFim" class="form-input" style="font-size:12px;padding:5px 8px;width:auto;"/>
+      <button class="btn btn-sm btn-primary" onclick="orcSetPeriodoPersonalizado()"><i class="ti ti-search"></i> Aplicar</button>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px;">${filtrosHtml}</div>
     <div>${linhas || '<div style="text-align:center;padding:40px;color:var(--text-muted);font-size:13px;">Nenhum orçamento neste filtro.</div>'}</div>`;
