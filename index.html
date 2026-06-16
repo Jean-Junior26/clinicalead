@@ -3336,5 +3336,37 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   <script src="/acessar-clinica-fix.js"></script>
   <script src="/trocar-senha-fix.js"></script>
   <script src="/esqueci-senha-fix.js"></script>
+  <!-- ESCONDER PAINEL ADMIN DE NÃO-ADMIN (CSS garantido) -->
+<style>
+  /* Quando o body tem a classe nao-admin, esconde os menus de admin */
+  body.nao-admin .nav-item[data-page="clinicas"],
+  body.nao-admin .nav-item[data-page="meu-plano"] {
+    display: none !important;
+  }
+</style>
+<script>
+(function () {
+  const ADMIN_EMAIL = 'jeanjunior.digital@gmail.com';
+  function marcarBody() {
+    try {
+      var role = (window.STATE && STATE.profile && STATE.profile.role)
+              || (window.STATE && STATE.user && STATE.user.user_metadata && STATE.user.user_metadata.role);
+      var email = (window.STATE && STATE.user && STATE.user.email)
+              || (window.STATE && STATE.profile && STATE.profile.email);
+      var ehAdmin = (role === 'admin' || role === 'administrador' || email === ADMIN_EMAIL);
+      if (window.STATE && STATE.user) {
+        // só decide quando já tem usuário logado
+        document.body.classList.toggle('nao-admin', !ehAdmin);
+      }
+    } catch (e) {}
+  }
+  // roda repetido nos primeiros segundos até o login carregar
+  var n = 0;
+  var iv = setInterval(function () {
+    marcarBody();
+    if (++n > 60) clearInterval(iv); // ~30s
+  }, 500);
+})();
+</script>
 </body>
 </html>
