@@ -1,39 +1,41 @@
 // ============================================================
 // CLINICALEAD — ESCONDER PAINEL ADMIN DE QUEM NÃO É ADMIN MASTER
 // O menu "Clínicas" (Gestão de TODAS as clínicas) e "Meu Plano"
-// são EXCLUSIVOS do admin master (dono do SaaS). Donos de clínica
-// e colaboradores NÃO podem ver/acessar — veriam/mexeriam nas
-// clínicas dos outros.
-// Esconde no menu E bloqueia a navegação direta.
+// são EXCLUSIVOS do admin master. Donos e colaboradores não veem.
+// v2: timing reforçado (roda repetido até o menu existir) +
+// fallback que identifica admin de várias formas.
 // CARREGAR DEPOIS de permissoes-fix.js e dono-nao-colaborador-fix.js.
 // ============================================================
 
 (function () {
   'use strict';
 
-  // Páginas que SÓ o admin master pode ver
   const PAGINAS_ADMIN = ['clinicas', 'clinics', 'meu-plano', 'meuplano'];
 
   function ehAdminMaster() {
-    const role = STATE?.profile?.role;
-    return role === 'admin' || role === 'administrador';
+    // tenta de várias formas pra ser robusto
+    const role = STATE?.profile?.role || STATE?.user?.user_metadata?.role
+      || STATE?.user?.raw_user_meta_data?.role;
+    if (role === 'admin' || role === 'administrador') return true;
+    // fallback por e-mail do admin master conhecido
+    const email = STATE?.user?.email || STATE?.profile?.email;
+    if (email === 'jeanjunior.digital@gmail.com') return true;
+    return false;
   }
 
-  // Esconde os itens de menu exclusivos do admin
   function esconderMenusAdmin() {
-    if (typeof STATE === 'undefined' || !STATE.profile) return false;
-    if (ehAdminMaster()) return true; // admin vê tudo, não esconde nada
+    if (typeof STATE === 'undefined' || !STATE.user) return;
+    if (ehAdminMaster()) return; // admin vê tudo
 
     document.querySelectorAll('.nav-item[data-page]').forEach(item => {
       const page = (item.getAttribute('data-page') || '').toLowerCase();
       if (PAGINAS_ADMIN.includes(page)) {
         item.style.display = 'none';
+        item.style.setProperty('display', 'none', 'important');
       }
     });
-    return true;
   }
 
-  // Bloqueia navegação direta pras páginas de admin (defesa extra)
   function blindarShowPage() {
     if (typeof showPage !== 'function' || showPage.__blindadoAdmin) return;
     const _orig = showPage;
@@ -48,19 +50,28 @@
     showPage.__blindadoAdmin = true;
   }
 
+  // Roda repetidamente nos primeiros segundos (garante pegar o menu
+  // mesmo que ele seja renderizado depois do login)
+  function marteloInicial() {
+    let tentativas = 0;
+    const iv = setInterval(() => {
+      tentativas++;
+      blindarShowPage();
+      esconderMenusAdmin();
+      if (tentativas > 40) clearInterval(iv); // ~20s
+    }, 500);
+  }
+
   function iniciar() {
-    if (typeof STATE === 'undefined' || !STATE.profile) return false;
-    blindarShowPage();
-    esconderMenusAdmin();
-    // observa re-render do menu pra reesconder se reaparecer
+    if (typeof STATE === 'undefined') return false;
+    marteloInicial();
+    // observa mudanças no DOM pra reesconder se o menu re-renderizar
     const obs = new MutationObserver(() => {
-      if (!ehAdminMaster()) {
-        clearTimeout(window.__escondeAdminTimer);
-        window.__escondeAdminTimer = setTimeout(esconderMenusAdmin, 250);
-      }
+      clearTimeout(window.__escondeAdminTimer);
+      window.__escondeAdminTimer = setTimeout(esconderMenusAdmin, 200);
     });
     obs.observe(document.body, { childList: true, subtree: true });
-    console.log('✅ esconder-painel-admin-fix.js carregado');
+    console.log('✅ esconder-painel-admin-fix.js v2 carregado');
     return true;
   }
 
