@@ -204,9 +204,20 @@
 
   // ── inicialização ────────────────────────────────────────
   function iniciar() {
-    if (typeof STATE === 'undefined' || !STATE.profile) return false;
+    if (typeof STATE === 'undefined') return false;
     garantirPagina();
     injetarMenu();
+    // MARTELO: tenta injetar repetidamente nos primeiros segundos.
+    // Necessário porque o role do usuário pode ser corrigido DEPOIS
+    // do primeiro carregamento (corrige-role-admin-fix). A cada tentativa
+    // reavalia ehAdminMaster(), então quando o dono deixa de ser "admin
+    // falso", o menu é finalmente injetado.
+    let n = 0;
+    const iv = setInterval(() => {
+      garantirPagina();
+      injetarMenu();
+      if (++n > 40) clearInterval(iv); // ~20s
+    }, 500);
     // observa re-render do menu pra reinjetar
     const obs = new MutationObserver(() => {
       if (!ehAdminMaster() && !document.getElementById('navMinhaClinica')) {
