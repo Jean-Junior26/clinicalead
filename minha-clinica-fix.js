@@ -62,7 +62,6 @@
     const page = document.createElement('div');
     page.className = 'page';
     page.id = 'page-minha-clinica';
-    page.style.display = 'none';
     page.innerHTML = `
       <div class="page-header" style="margin-bottom:18px;">
         <div>
@@ -77,14 +76,14 @@
   // ── abre a página "Minha Clínica" ────────────────────────
   window.abrirMinhaClinica = function () {
     garantirPagina();
-    // mostra a página usando o showPage do sistema (mantém o destaque do menu)
+    // usa o sistema de classe 'active' do app (igual showPage faz)
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    const page = document.getElementById('page-minha-clinica');
+    if (page) page.classList.add('active');
     const item = document.getElementById('navMinhaClinica');
-    if (typeof showPage === 'function') {
-      showPage('minha-clinica', item);
-    } else {
-      document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
-      document.getElementById('page-minha-clinica').style.display = 'block';
-    }
+    if (item) item.classList.add('active');
+    // renderiza o conteúdo (não depende do renderPage do sistema)
     renderMinhaClinica();
   };
 
