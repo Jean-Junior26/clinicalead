@@ -131,12 +131,23 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       const lead = leadsEnc[0];
       const hojeBRT = new Date(Date.now() - 3 * 3600 * 1000).toISOString().split('T')[0];
       const consResp = await fetch(
-        `${SUPABASE_URL}/rest/v1/consultas?lead_id=eq.${lead.id}&clinic_id=eq.${clinic_id}&status=in.(agendado,confirmado)&data=gte.${hojeBRT}&order=data.asc,hora.asc&select=id,data,hora&limit=1`,
+        `${SUPABASE_URL}/rest/v1/consultas?lead_id=eq.${lead.id}&clinic_id=eq.${clinic_id}&status=in.(agendado,confirmado)&data=gte.${hojeBRT}&order=data.asc,hora.asc&select=id,data,hora,lembrete_24h&limit=1`,
         { headers: sbHeaders }
       );
       if (!consResp.ok) return;
       const consultasEnc = await consResp.json();
       const consulta = consultasEnc[0];
+      if (!consulta) return; // sem consulta futura: não processa nada (só salva a mensagem)
+
+      // ── JANELA DE CONTEXTO (Opção B) ──
+      // Só trata a mensagem como resposta ao lembrete se a consulta for
+      // hoje/amanhã E o lembrete já tiver sido enviado. Fora disso, o
+      // paciente está só conversando: não dispara automação nem resposta.
+      const amanhaBRT = new Date(Date.now() - 3 * 3600 * 1000 + 24 * 3600 * 1000).toISOString().split('T')[0];
+      const consultaProxima = (consulta.data === hojeBRT || consulta.data === amanhaBRT);
+      const dentroDaJanela = consultaProxima && consulta.lembrete_24h === true;
+      if (!dentroDaJanela) return; // fora de contexto: ignora (mensagem já foi salva no inbox)
+
       const [ano, mes, dia] = consulta.data.split('-');
       const dataFmt = `${dia}/${mes}`;
       const horaFmt = (consulta.hora || '').slice(0, 5);
@@ -172,7 +183,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
           method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
           body: JSON.stringify({ cancelar_solicitado: true }),
         });
-        if (instanceName) await responderPaciente(instanceName, clinic_id, phone, `Entendi, ${primeiroNome}. 😊\n\nVou avisar nossa equipe para te ajudar. Em breve alguém entra em contato com você!`);
+        if (instanceName) await responderPaciente(instanceName, clinic_id, phone, `Recebi sua mensagem, ${primeiroNome}! 😊\n\nJá vou repassar para nossa equipe. Em breve alguém entra em contato com você!`);
       } else if (ehRemarcar) {
         await fetch(`${SUPABASE_URL}/rest/v1/consultas?id=eq.${consulta.id}`, {
           method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
