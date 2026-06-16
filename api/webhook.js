@@ -145,7 +145,13 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       // paciente está só conversando: não dispara automação nem resposta.
       const amanhaBRT = new Date(Date.now() - 3 * 3600 * 1000 + 24 * 3600 * 1000).toISOString().split('T')[0];
       const consultaProxima = (consulta.data === hojeBRT || consulta.data === amanhaBRT);
-      const dentroDaJanela = consultaProxima && consulta.lembrete_24h === true;
+      // lembrete_24h é um TIMESTAMP (quando foi enviado), não booleano.
+      // Considera "lembrete enviado" se o campo tiver qualquer valor.
+      const lembreteEnviado = !!consulta.lembrete_24h;
+      // Janela de contexto: aceita a resposta se a consulta é próxima
+      // (hoje/amanhã). Isso cobre tanto quem respondeu o lembrete 24h
+      // quanto quem respondeu a confirmação do agendamento manual.
+      const dentroDaJanela = consultaProxima;
       if (!dentroDaJanela) return; // fora de contexto: ignora (mensagem já foi salva no inbox)
 
       const [ano, mes, dia] = consulta.data.split('-');
