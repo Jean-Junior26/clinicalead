@@ -149,11 +149,19 @@
             <div style="font-size:13px;color:var(--text-muted);">Status do número principal</div>
             <div style="font-size:15px;font-weight:600;color:${waCor};margin-top:4px;">● ${waLabel}</div>
           </div>
-          <p style="font-size:13px;color:var(--text-secondary);margin-bottom:14px;">
-            Conecte ou reconecte o WhatsApp da sua clínica, e gerencie números extras (recepção, comercial, etc).
+          ${!waConectado ? `
+          <p style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;">
+            Seu WhatsApp principal ainda não está conectado. Conecte agora escaneando o QR Code:
           </p>
-          <button class="btn btn-primary" onclick="abrirGerenciarNumeros('${c.id}')" style="width:100%;">
-            <i class="ti ti-qrcode"></i> Gerenciar / Conectar WhatsApp
+          <button class="btn btn-primary" onclick="mcConectarPrincipal('${c.id}')" style="width:100%;margin-bottom:12px;">
+            <i class="ti ti-qrcode"></i> Conectar WhatsApp principal
+          </button>
+          ` : ''}
+          <p style="font-size:13px;color:var(--text-secondary);margin-bottom:14px;">
+            ${waConectado ? 'Reconecte o WhatsApp ou gerencie números extras (recepção, comercial, etc).' : 'Você também pode adicionar e gerenciar números extras:'}
+          </p>
+          <button class="btn ${waConectado ? 'btn-primary' : ''}" onclick="abrirGerenciarNumeros('${c.id}')" style="width:100%;${waConectado ? '' : 'background:var(--bg-elevated);'}">
+            <i class="ti ti-${waConectado ? 'qrcode' : 'plus'}"></i> ${waConectado ? 'Gerenciar / Reconectar WhatsApp' : 'Gerenciar números extras'}
           </button>
         </div>
 
@@ -198,6 +206,18 @@
       console.error('[minha-clinica] erro ao salvar:', e);
       setMsg('Erro ao salvar: ' + (e.message || 'tente de novo'), 'var(--coral)');
       btn.disabled = false; btn.style.opacity = '1';
+    }
+  };
+
+  // ── conectar o WhatsApp principal (reaproveita a função do sistema) ──
+  window.mcConectarPrincipal = function (clinicId) {
+    if (typeof conectarWhatsAppClinica === 'function') {
+      conectarWhatsAppClinica(clinicId);
+    } else if (typeof abrirGerenciarNumeros === 'function') {
+      // fallback: abre o gerenciador de números
+      abrirGerenciarNumeros(clinicId);
+    } else {
+      if (typeof toast === 'function') toast('Função de conexão não disponível', 'error');
     }
   };
 
