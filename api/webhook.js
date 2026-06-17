@@ -130,29 +130,36 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       const leadsEnc = await leadResp.json();
       const lead = leadsEnc[0];
       const hojeBRT = new Date(Date.now() - 3 * 3600 * 1000).toISOString().split('T')[0];
+      const amanhaBRT = new Date(Date.now() - 3 * 3600 * 1000 + 24 * 3600 * 1000).toISOString().split('T')[0];
+      // Busca as consultas próximas (hoje/amanhã) do lead. Traz várias
+      // pra escolher a MAIS RELEVANTE (a que a pessoa está respondendo),
+      // não simplesmente a mais antiga.
       const consResp = await fetch(
-        `${SUPABASE_URL}/rest/v1/consultas?lead_id=eq.${lead.id}&clinic_id=eq.${clinic_id}&status=in.(agendado,confirmado)&data=gte.${hojeBRT}&order=data.asc,hora.asc&select=id,data,hora,lembrete_24h&limit=1`,
+        `${SUPABASE_URL}/rest/v1/consultas?lead_id=eq.${lead.id}&clinic_id=eq.${clinic_id}&status=in.(agendado,confirmado)&data=in.(${hojeBRT},${amanhaBRT})&select=id,data,hora,lembrete_24h,status&limit=10`,
         { headers: sbHeaders }
       );
       if (!consResp.ok) return;
       const consultasEnc = await consResp.json();
-      const consulta = consultasEnc[0];
-      if (!consulta) return; // sem consulta futura: não processa nada (só salva a mensagem)
+      if (!consultasEnc.length) return; // sem consulta próxima: só salva a mensagem
 
-      // ── JANELA DE CONTEXTO (Opção B) ──
-      // Só trata a mensagem como resposta ao lembrete se a consulta for
-      // hoje/amanhã E o lembrete já tiver sido enviado. Fora disso, o
-      // paciente está só conversando: não dispara automação nem resposta.
-      const amanhaBRT = new Date(Date.now() - 3 * 3600 * 1000 + 24 * 3600 * 1000).toISOString().split('T')[0];
-      const consultaProxima = (consulta.data === hojeBRT || consulta.data === amanhaBRT);
-      // lembrete_24h é um TIMESTAMP (quando foi enviado), não booleano.
-      // Considera "lembrete enviado" se o campo tiver qualquer valor.
-      const lembreteEnviado = !!consulta.lembrete_24h;
-      // Janela de contexto: aceita a resposta se a consulta é próxima
-      // (hoje/amanhã). Isso cobre tanto quem respondeu o lembrete 24h
-      // quanto quem respondeu a confirmação do agendamento manual.
+      // Escolhe a consulta mais relevante:
+      // 1º) a que tem lembrete_24h mais RECENTE (foi a última lembrada)
+      // 2º) se nenhuma tem lembrete, a mais próxima no tempo (data+hora asc)
+      const comLembrete = consultasEnc.filter(c => c.lembrete_24h);
+      let consulta;
+      if (comLembrete.length) {
+        comLembrete.sort((a, b) => new Date(b.lembrete_24h) - new Date(a.lembrete_24h));
+        consulta = comLembrete[0];
+      } else {
+        consultasEnc.sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora));
+        consulta = consultasEnc[0];
+      }
+
+      // ── JANELA DE CONTEXTO ──
+      // A consulta já é hoje/amanhã (filtro na query), então está na janela.
+      const consultaProxima = true;
       const dentroDaJanela = consultaProxima;
-      if (!dentroDaJanela) return; // fora de contexto: ignora (mensagem já foi salva no inbox)
+      if (!dentroDaJanela) return;
 
       const [ano, mes, dia] = consulta.data.split('-');
       const dataFmt = `${dia}/${mes}`;
