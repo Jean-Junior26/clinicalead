@@ -155,11 +155,41 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
         consulta = consultasEnc[0];
       }
 
-      // ── JANELA DE CONTEXTO ──
-      // A consulta já é hoje/amanhã (filtro na query), então está na janela.
-      const consultaProxima = true;
-      const dentroDaJanela = consultaProxima;
-      if (!dentroDaJanela) return;
+      // ── JANELA DE CONTEXTO (anti-conversa-aleatória) ──
+      // Só trata como resposta a lembrete se:
+      //  (1) a mensagem é CURTA (resposta objetiva, não conversa), E
+      //  (2) a clínica enviou um lembrete/confirmação pra esse número
+      //      nas últimas 18h (fonte: tabela mensagens, from_me=true).
+      // Isso evita disparar gatilho em conversa aleatória.
+
+      // (1) mensagem curta
+      const respCurta = resp.length <= 25;
+      if (!respCurta) return; // mensagem longa = conversa, não resposta
+
+      // (2) houve lembrete/confirmação recente pra esse número?
+      const dezoitoHorasAtras = new Date(Date.now() - 18 * 3600 * 1000).toISOString();
+      const numeroDigitos = String(phone).replace(/\D/g, '');
+      const sufixoNum = numeroDigitos.slice(-8);
+      let houveLembreteRecente = false;
+      try {
+        const msgResp = await fetch(
+          `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixoNum}&from_me=eq.true&created_at=gte.${dezoitoHorasAtras}&order=created_at.desc&select=content&limit=10`,
+          { headers: sbHeaders }
+        );
+        if (msgResp.ok) {
+          const msgs = await msgResp.json();
+          // frases que marcam um lembrete/confirmação enviado pela clínica
+          const marcadores = ['confirma sua presença', 'confirma sua presenca', 'sua consulta',
+            'lembrar que', 'consulta está', 'consulta esta', 'confirmar', 'remarcar',
+            'te esperamos', 'sua presença', 'sua presenca'];
+          houveLembreteRecente = msgs.some(m => {
+            const c = String(m.content || '').toLowerCase();
+            return marcadores.some(mk => c.includes(mk));
+          });
+        }
+      } catch (e) { /* em erro, não processa (mais seguro) */ }
+
+      if (!houveLembreteRecente) return; // sem lembrete recente = conversa aleatória, ignora
 
       const [ano, mes, dia] = consulta.data.split('-');
       const dataFmt = `${dia}/${mes}`;
