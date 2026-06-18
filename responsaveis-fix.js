@@ -66,6 +66,7 @@ async function renderListaResponsaveis() {
   cont.innerHTML = RESP.lista.map(r => {
     const aTipo = r.com_agendar_tipo || 'nenhum';
     const fTipo = r.com_fechar_tipo || 'nenhum';
+    const cTipo = r.com_comparecer_tipo || 'nenhum';
     const selTipo = (val, atual) => `<option value="${val}" ${atual === val ? 'selected' : ''}>`;
     return `
     <div style="padding:14px;background:var(--bg-elevated);border-radius:10px;margin-bottom:10px;">
@@ -74,7 +75,7 @@ async function renderListaResponsaveis() {
         <button class="btn btn-sm btn-danger" onclick="removerResponsavel('${r.id}')"><i class="ti ti-trash"></i></button>
       </div>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
         <div style="background:var(--bg);border-radius:8px;padding:10px;">
           <div style="font-size:11px;color:var(--blue,#5B8DB8);text-transform:uppercase;font-weight:600;margin-bottom:6px;"><i class="ti ti-calendar-plus"></i> Por agendar</div>
           <select class="form-input" id="cat_${r.id}" style="font-size:12px;padding:5px 8px;margin-bottom:6px;">
@@ -83,6 +84,17 @@ async function renderListaResponsaveis() {
             ${selTipo('percentual', aTipo)}Percentual (%)</option>
           </select>
           <input type="number" step="0.01" class="form-input" id="cav_${r.id}" value="${r.com_agendar_valor || ''}" placeholder="0" style="font-size:12px;padding:5px 8px;"/>
+        </div>
+
+        <div style="background:var(--bg);border-radius:8px;padding:10px;">
+          <div style="font-size:11px;color:var(--green,#5BA877);text-transform:uppercase;font-weight:600;margin-bottom:6px;"><i class="ti ti-user-check"></i> Por comparecer</div>
+          <select class="form-input" id="cct_${r.id}" style="font-size:12px;padding:5px 8px;margin-bottom:6px;">
+            ${selTipo('nenhum', cTipo)}Não ganha</option>
+            ${selTipo('fixo', cTipo)}Valor fixo (R$)</option>
+            ${selTipo('percentual', cTipo)}Percentual (%)</option>
+          </select>
+          <input type="number" step="0.01" class="form-input" id="ccv_${r.id}" value="${r.com_comparecer_valor || ''}" placeholder="0" style="font-size:12px;padding:5px 8px;"/>
+          <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Só p/ avaliação</div>
         </div>
 
         <div style="background:var(--bg);border-radius:8px;padding:10px;">
@@ -106,6 +118,8 @@ async function salvarComissaoResp(id) {
   const dados = {
     com_agendar_tipo: document.getElementById('cat_' + id).value,
     com_agendar_valor: parseFloat(document.getElementById('cav_' + id).value) || 0,
+    com_comparecer_tipo: document.getElementById('cct_' + id).value,
+    com_comparecer_valor: parseFloat(document.getElementById('ccv_' + id).value) || 0,
     com_fechar_tipo: document.getElementById('cft_' + id).value,
     com_fechar_valor: parseFloat(document.getElementById('cfv_' + id).value) || 0,
   };
