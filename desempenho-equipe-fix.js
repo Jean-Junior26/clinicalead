@@ -153,6 +153,34 @@ async function renderDesempenhoEquipe() {
       }
     });
 
+    // ── COMISSÃO POR COMPARECIMENTO (só avaliação) ──
+    // Quem AGENDOU ganha quando o paciente COMPARECE a uma AVALIAÇÃO.
+    // Busca consultas 'compareceu' cujo procedimento seja avaliação, no período.
+    try {
+      let qComp = db.from('consultas')
+        .select('id, agendado_por, procedimento, status, data')
+        .eq('clinic_id', clinic.id)
+        .eq('status', 'compareceu')
+        .not('agendado_por', 'is', null);
+      if (DESEMP.inicio) qComp = qComp.gte('data', DESEMP.inicio).lte('data', DESEMP.fim);
+      const { data: comparecimentos } = await qComp;
+
+      (comparecimentos || []).forEach(c => {
+        // só conta se o procedimento for avaliação
+        const proc = (c.procedimento || '').toLowerCase();
+        if (!proc.includes('avalia')) return;
+        const nome = c.agendado_por;
+        const rC = regras[nome];
+        if (!rC) return;
+        if (rC.com_comparecer_tipo === 'fixo') {
+          comissaoResp[nome] = (comissaoResp[nome] || 0) + Number(rC.com_comparecer_valor || 0);
+        } else if (rC.com_comparecer_tipo === 'percentual') {
+          // percentual de comparecimento não tem "valor pago" — usa 0 como base
+          // (mantido por consistência da UI; o uso esperado é 'fixo')
+        }
+      });
+    } catch (e) { console.error('[comissao comparecer]', e); }
+
     // 3) Junta todos os responsáveis (agendamentos + fechamentos + comissões)
     const todos = new Set([...Object.keys(agendPorResp), ...Object.keys(fechadoPorResp), ...Object.keys(comissaoResp)]);
 
