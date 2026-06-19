@@ -135,6 +135,21 @@
               <input class="form-input" id="mcLinkMapa" value="${(c.link_mapa || '').replace(/"/g, '&quot;')}" placeholder="Cole o link do Google Maps, ou deixe vazio pra gerar automático" style="width:100%;"/>
               <span style="font-size:11px;color:var(--text-muted);">Se deixar vazio, geramos o link a partir do endereço.</span>
             </div>
+            <div>
+              <label class="form-label" style="font-size:12px;color:var(--text-muted);">Logo da clínica (aparece nos orçamentos e receitas)</label>
+              <div style="display:flex;align-items:center;gap:12px;margin-top:4px;">
+                <div id="mcLogoPreview" style="width:64px;height:64px;border-radius:10px;border:1px solid var(--border-subtle,#2a2a2a);background:var(--bg-elevated);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;">
+                  ${c.logo_url ? `<img src="${c.logo_url}" style="width:100%;height:100%;object-fit:contain;">` : '<i class="ti ti-photo" style="color:var(--text-muted);font-size:24px;"></i>'}
+                </div>
+                <div style="flex:1;">
+                  <input type="file" id="mcLogoInput" accept="image/*" style="display:none;" onchange="uploadLogoClinica(this)">
+                  <button type="button" class="btn btn-sm" onclick="document.getElementById('mcLogoInput').click()" style="background:var(--bg-elevated);border:1px solid var(--border-subtle,#2a2a2a);">
+                    <i class="ti ti-upload"></i> ${c.logo_url ? 'Trocar logo' : 'Enviar logo'}
+                  </button>
+                  <div id="mcLogoMsg" style="font-size:11px;color:var(--text-muted);margin-top:4px;">PNG ou JPG, de preferência fundo transparente.</div>
+                </div>
+              </div>
+            </div>
             <button class="btn btn-primary" id="mcBtnSalvar" onclick="salvarMinhaClinica()" style="margin-top:4px;">
               <i class="ti ti-device-floppy"></i> Salvar dados
             </button>
@@ -169,6 +184,54 @@
   }
 
   // ── salva os dados editados ──────────────────────────────
+  // ── Upload da logo da clínica pro Storage ────────────────
+  window.uploadLogoClinica = async function (input) {
+    const c = MC.clinic;
+    if (!c || !input.files || !input.files[0]) return;
+    const file = input.files[0];
+    const msg = document.getElementById('mcLogoMsg');
+    const setMsg = (t, cor) => { if (msg) { msg.textContent = t; msg.style.color = cor || 'var(--text-muted)'; } };
+
+    // valida tamanho (máx 2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      setMsg('Imagem muito grande (máx 2MB).', 'var(--coral)');
+      return;
+    }
+
+    setMsg('Enviando logo…');
+    try {
+      // nome único: logo da clínica + timestamp (evita cache velho)
+      const ext = (file.name.split('.').pop() || 'png').toLowerCase();
+      const caminho = `${c.id}/logo_${Date.now()}.${ext}`;
+
+      const { error: upErr } = await db.storage.from('logos').upload(caminho, file, {
+        upsert: true, contentType: file.type,
+      });
+      if (upErr) throw upErr;
+
+      // pega a URL pública
+      const { data: pub } = db.storage.from('logos').getPublicUrl(caminho);
+      const logo_url = pub.publicUrl;
+
+      // salva na clínica
+      const { error: dbErr } = await db.from('clinicas').update({ logo_url }).eq('id', c.id);
+      if (dbErr) throw dbErr;
+
+      // atualiza estado + preview
+      c.logo_url = logo_url;
+      const idx = (STATE.clinics || []).findIndex(x => x.id === c.id);
+      if (idx >= 0) STATE.clinics[idx].logo_url = logo_url;
+      const prev = document.getElementById('mcLogoPreview');
+      if (prev) prev.innerHTML = `<img src="${logo_url}" style="width:100%;height:100%;object-fit:contain;">`;
+
+      setMsg('Logo enviada! ✓', 'var(--gold)');
+      if (typeof toast === 'function') toast('Logo atualizada! ✓');
+    } catch (e) {
+      console.error('[logo] erro:', e);
+      setMsg('Erro ao enviar: ' + (e.message || 'tente de novo'), 'var(--coral)');
+    }
+  };
+
   window.salvarMinhaClinica = async function () {
     const c = MC.clinic;
     if (!c) return;
