@@ -56,11 +56,14 @@
 </style></head><body>
 
   <div class="cab">
-    <div>
-      <div class="clinica-nome">${clinic.nome || 'Clínica'}</div>
-      <div class="clinica-info">
-        ${clinic.endereco ? clinic.endereco + '<br>' : ''}
-        ${clinic.telefone ? 'Tel: ' + clinic.telefone : ''}
+    <div style="display:flex;align-items:center;gap:14px;">
+      ${clinic.logo_url ? `<img src="${clinic.logo_url}" style="max-width:80px;max-height:80px;object-fit:contain;">` : ''}
+      <div>
+        <div class="clinica-nome">${clinic.nome || 'Clínica'}</div>
+        <div class="clinica-info">
+          ${clinic.endereco ? clinic.endereco + '<br>' : ''}
+          ${clinic.telefone ? 'Tel: ' + clinic.telefone : ''}
+        </div>
       </div>
     </div>
     <div>
@@ -126,34 +129,36 @@
     win.document.close();
   };
 
-  // injeta o botão "Imprimir" no modal de orçamento
+  // injeta o botão "Imprimir" dentro do corpo do orçamento (orcBody)
   function injetarBotaoImprimir() {
     const modal = document.getElementById('modalOrcamento');
     if (!modal || !modal.classList.contains('open')) return;
-    const header = modal.querySelector('.modal-header');
-    if (!header || header.querySelector('.btn-imprimir-orc')) return;
+    const body = document.getElementById('orcBody');
+    if (!body) return;
+    // já existe? não duplica
+    if (document.getElementById('btnImprimirOrcTop')) return;
+    // só injeta quando já há conteúdo de orçamento renderizado
+    if (!body.innerHTML || body.innerHTML.trim().length < 20) return;
 
-    // pega o orçamento atual (o primeiro/único aberto)
     const orc = (typeof ORC !== 'undefined' && ORC.orcamentos || [])[0];
     if (!orc) return;
 
-    const btn = document.createElement('button');
-    btn.className = 'btn btn-sm btn-imprimir-orc';
-    btn.style.cssText = 'margin-left:auto;margin-right:8px;';
-    btn.innerHTML = '<i class="ti ti-printer"></i> Imprimir';
-    btn.onclick = () => imprimirOrcamento(orc.id);
-    // insere antes do botão de fechar
-    const fechar = header.querySelector('.btn-ghost.btn-icon, button:last-child');
-    header.insertBefore(btn, fechar);
+    // barra com o botão, fixada no topo do corpo
+    const barra = document.createElement('div');
+    barra.id = 'btnImprimirOrcTop';
+    barra.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px;position:sticky;top:0;background:var(--bg-surface,#141414);padding:4px 0;z-index:5;';
+    barra.innerHTML = `
+      <button type="button" onclick="imprimirOrcamento('${orc.id}')" style="background:var(--gold,#C9A84C);color:#1a1a1a;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+        <i class="ti ti-printer"></i> Imprimir / PDF
+      </button>`;
+    body.insertBefore(barra, body.firstChild);
   }
 
-  // observa a abertura do modal pra injetar o botão
-  const obs = new MutationObserver(() => {
-    if (document.getElementById('modalOrcamento')?.classList.contains('open')) {
-      setTimeout(injetarBotaoImprimir, 150);
-    }
-  });
-  obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+  // verifica periodicamente se o modal está aberto pra injetar o botão
+  setInterval(() => {
+    const m = document.getElementById('modalOrcamento');
+    if (m && m.classList.contains('open')) injetarBotaoImprimir();
+  }, 600);
 
   console.log('✅ orcamento-imprimir-fix.js carregado');
 })();
