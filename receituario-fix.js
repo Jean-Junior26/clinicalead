@@ -1,8 +1,6 @@
 // ============================================================
 // CLINICALEAD — RECEITUÁRIO (Fase 1: receita comum)
 // Cria, lista e imprime receitas de um paciente.
-// Acoplado ao cadastro do paciente (botão "Receitas").
-// Tabelas: receitas + receita_itens. Impressão com a logo da clínica.
 // ============================================================
 
 (function () {
@@ -10,7 +8,6 @@
 
   const REC = { leadId: null, lead: null, receitas: [] };
 
-  // ── carrega receitas de um paciente ──────────────────────
   async function carregarReceitas(leadId) {
     const clinic = currentClinic();
     if (!clinic) return [];
@@ -29,11 +26,9 @@
     return REC.receitas;
   }
 
-  // ── abre o modal de receitas do paciente ─────────────────
   window.abrirReceitas = async function (leadId) {
     REC.leadId = leadId;
     REC.lead = (STATE.leads || []).find(l => l.id === leadId) || {};
-
     if (!document.getElementById('modalReceitas')) {
       const ov = document.createElement('div');
       ov.className = 'modal-overlay';
@@ -55,11 +50,9 @@
     renderReceitas();
   };
 
-  // ── renderiza a lista + botão nova ───────────────────────
   function renderReceitas() {
     const body = document.getElementById('recBody');
     if (!body) return;
-
     const lista = REC.receitas.map(r => {
       const itensTxt = (r.itens || []).map(i => i.medicamento).join(', ');
       const data = new Date(r.created_at).toLocaleDateString('pt-BR');
@@ -77,7 +70,6 @@
           </div>
         </div>`;
     }).join('');
-
     body.innerHTML = `
       <button class="btn btn-primary" onclick="novaReceita()" style="width:100%;margin-bottom:16px;">
         <i class="ti ti-plus"></i> Nova receita
@@ -85,7 +77,6 @@
       ${lista || '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px;">Nenhuma receita ainda.</div>'}`;
   }
 
-  // ── formulário de nova receita ───────────────────────────
   window.novaReceita = function () {
     const body = document.getElementById('recBody');
     if (!body) return;
@@ -105,7 +96,7 @@
         <i class="ti ti-device-floppy"></i> Salvar receita
       </button>
       <div id="recMsg" style="font-size:12px;color:var(--coral);min-height:14px;margin-top:8px;"></div>`;
-    recAddItem(); // começa com 1 item
+    recAddItem();
   };
 
   window.renderReceitasVoltar = function () { renderReceitas(); };
@@ -130,12 +121,10 @@
     cont.appendChild(div);
   };
 
-  // ── salva a receita ──────────────────────────────────────
   window.salvarReceita = async function () {
     const clinic = currentClinic();
     const msg = document.getElementById('recMsg');
     const setMsg = (t) => { if (msg) msg.textContent = t || ''; };
-
     const itensDom = document.querySelectorAll('#recItens .rec-item');
     const itens = [];
     itensDom.forEach((d, idx) => {
@@ -149,19 +138,15 @@
       });
     });
     if (!itens.length) { setMsg('Adicione pelo menos um medicamento.'); return; }
-
     const observacoes = (document.getElementById('recObs')?.value || '').trim();
-
     try {
       const { data: rec, error } = await db.from('receitas').insert({
         clinic_id: clinic.id, lead_id: REC.leadId, tipo: 'comum', observacoes,
       }).select().single();
       if (error) throw error;
-
       const itensInsert = itens.map(i => ({ ...i, receita_id: rec.id }));
       const { error: errItens } = await db.from('receita_itens').insert(itensInsert);
       if (errItens) throw errItens;
-
       if (typeof toast === 'function') toast('Receita salva! 💊');
       await carregarReceitas(REC.leadId);
       renderReceitas();
@@ -183,20 +168,17 @@
     }
   };
 
-  // ── impressão da receita ─────────────────────────────────
   window.imprimirReceita = function (id) {
     const rec = REC.receitas.find(r => r.id === id);
     if (!rec) return;
     const lead = REC.lead || {};
     const clinic = currentClinic() || {};
     const hoje = new Date(rec.created_at).toLocaleDateString('pt-BR');
-
     const itens = (rec.itens || []).map((i, idx) => `
       <div style="margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid #eee;">
         <div style="font-size:15px;font-weight:600;">${idx + 1}. ${i.medicamento}${i.quantidade ? ` <span style="font-weight:400;color:#666;">— ${i.quantidade}</span>` : ''}</div>
         ${i.posologia ? `<div style="font-size:14px;color:#444;margin-top:4px;">${i.posologia}</div>` : ''}
       </div>`).join('');
-
     const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Receita - ${lead.nome || ''}</title>
 <style>
   * { box-sizing:border-box;margin:0;padding:0; }
@@ -219,49 +201,36 @@
       <div class="clinica-info">${clinic.endereco ? clinic.endereco + '<br>' : ''}${clinic.telefone ? 'Tel: ' + clinic.telefone : ''}</div>
     </div>
   </div>
-
   <div class="titulo-doc">Receituário</div>
-
   <div class="paciente"><strong>Paciente:</strong> ${lead.nome || '—'}　　<strong>Data:</strong> ${hoje}</div>
-
   <div>${itens || '<div style="color:#999;">Nenhum medicamento.</div>'}</div>
-
   ${rec.observacoes ? `<div class="obs"><strong>Orientações:</strong> ${rec.observacoes}</div>` : ''}
-
   <div class="assinatura">
     <div class="assinatura-linha">${clinic.responsavel || clinic.nome || 'Responsável'}</div>
   </div>
-
   <div class="rodape">${clinic.nome || ''} · ${clinic.endereco || ''}</div>
-
   <div class="no-print" style="text-align:center;margin-top:28px;">
     <button onclick="window.print()" style="padding:12px 24px;background:#C9A84C;color:#fff;border:none;border-radius:8px;font-size:14px;cursor:pointer;font-weight:600;">🖨️ Imprimir / Salvar PDF</button>
   </div>
 </body></html>`;
-
     const win = window.open('', '_blank');
     if (!win) { if (typeof toast === 'function') toast('Permita pop-ups para imprimir', 'error'); return; }
     win.document.write(html);
     win.document.close();
   };
 
-  // ── injeta o botão "Receitas" no cadastro do paciente ────
   function injetarBotaoReceitas() {
     const modal = document.getElementById('modalLead');
     if (!modal || !modal.classList.contains('open')) return;
     const body = document.getElementById('modalLeadBody');
     if (!body || document.getElementById('btnReceitasLead')) return;
-
-    // pega o id do lead aberto via botão de editar
     const editBtn = body.querySelector('button[onclick*="openEditLead"]');
     if (!editBtn) return;
     const m = editBtn.getAttribute('onclick').match(/openEditLead\('([^']+)'\)/);
     if (!m) return;
     const leadId = m[1];
-
     const btnRow = editBtn.parentElement;
     if (!btnRow) return;
-
     const btn = document.createElement('button');
     btn.className = 'btn';
     btn.id = 'btnReceitasLead';
