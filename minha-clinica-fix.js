@@ -30,7 +30,6 @@
   // ── injeta o item no menu lateral (seção GESTÃO) ──────────
   function injetarMenu() {
     if (typeof STATE === 'undefined' || !STATE.profile) return false;
-    if (ehAdminMaster()) return true; // admin não precisa (tem o painel Clínicas)
     if (document.getElementById('navMinhaClinica')) return true; // já existe
 
     // acha a lista de navegação
