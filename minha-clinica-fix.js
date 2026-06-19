@@ -149,6 +149,11 @@
                 </div>
               </div>
             </div>
+            <div>
+              <label class="form-label" style="font-size:12px;color:var(--text-muted);">Mensagem do rodapé do orçamento (opcional)</label>
+              <textarea class="form-input" id="mcOrcRodape" rows="2" placeholder="Ex: Este orçamento é válido por 7 dias. Agradecemos a confiança!" style="width:100%;resize:vertical;">${(c.orcamento_rodape || '').replace(/</g, '&lt;')}</textarea>
+              <span style="font-size:11px;color:var(--text-muted);">Aparece no fim dos orçamentos impressos. Se vazio, usamos um texto padrão.</span>
+            </div>
             <button class="btn btn-primary" id="mcBtnSalvar" onclick="salvarMinhaClinica()" style="margin-top:4px;">
               <i class="ti ti-device-floppy"></i> Salvar dados
             </button>
@@ -246,19 +251,20 @@
     const endereco = (document.getElementById('mcEndereco').value || '').trim();
     const linkManual = (document.getElementById('mcLinkMapa').value || '').trim();
     const link_mapa = montarLinkMapa(endereco, linkManual);
+    const orcamento_rodape = (document.getElementById('mcOrcRodape')?.value || '').trim();
 
     btn.disabled = true; btn.style.opacity = '0.6';
     setMsg('Salvando…');
     try {
       const { error } = await db.from('clinicas')
-        .update({ nome, responsavel, email, telefone, endereco, link_mapa })
+        .update({ nome, responsavel, email, telefone, endereco, link_mapa, orcamento_rodape })
         .eq('id', c.id);
       if (error) throw error;
 
       // atualiza o estado local pra refletir na hora
-      Object.assign(c, { nome, responsavel, email, telefone, endereco, link_mapa });
+      Object.assign(c, { nome, responsavel, email, telefone, endereco, link_mapa, orcamento_rodape });
       const idx = (STATE.clinics || []).findIndex(x => x.id === c.id);
-      if (idx >= 0) Object.assign(STATE.clinics[idx], { nome, responsavel, email, telefone, endereco, link_mapa });
+      if (idx >= 0) Object.assign(STATE.clinics[idx], { nome, responsavel, email, telefone, endereco, link_mapa, orcamento_rodape });
 
       setMsg('Dados salvos com sucesso! ✓', 'var(--gold)');
       if (typeof toast === 'function') toast('Clínica atualizada! ✓');
