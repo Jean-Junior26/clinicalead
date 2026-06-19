@@ -39,9 +39,9 @@
     return role === 'admin' || role === 'administrador';
   }
 
-  // eventos que usam "espera" (tempo). Os instantâneos não mostram tempo.
+  // eventos que usam "espera" (tempo). 'lead_criado' é instantâneo puro.
   function usaEspera(evento) {
-    return ['dias_sem_resposta', 'apos_consulta'].includes(evento);
+    return ['dias_sem_resposta', 'apos_consulta', 'faltou', 'compareceu', 'lead_agendou'].includes(evento);
   }
 
   // ── carrega regras do banco (globais + da clínica) ───────
