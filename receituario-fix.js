@@ -247,20 +247,19 @@
 
   // ── injeta o botão "Receitas" no cadastro do paciente ────
   function injetarBotaoReceitas() {
-    const body = document.getElementById('modalLeadBody');
     const modal = document.getElementById('modalLead');
-    if (!modal || !modal.classList.contains('active') && !modal.classList.contains('open')) return;
+    if (!modal || !modal.classList.contains('open')) return;
+    const body = document.getElementById('modalLeadBody');
     if (!body || document.getElementById('btnReceitasLead')) return;
 
-    // pega o id do lead aberto (pelo título ou estado)
-    // acha o botão de editar pra pegar o contexto
+    // pega o id do lead aberto via botão de editar
     const editBtn = body.querySelector('button[onclick*="openEditLead"]');
     if (!editBtn) return;
     const m = editBtn.getAttribute('onclick').match(/openEditLead\('([^']+)'\)/);
     if (!m) return;
     const leadId = m[1];
 
-    const btnRow = editBtn.closest('div');
+    const btnRow = editBtn.parentElement;
     if (!btnRow) return;
 
     const btn = document.createElement('button');
@@ -274,7 +273,7 @@
 
   setInterval(() => {
     const m = document.getElementById('modalLead');
-    if (m && (m.classList.contains('active') || m.classList.contains('open'))) injetarBotaoReceitas();
+    if (m && m.classList.contains('open')) injetarBotaoReceitas();
   }, 600);
 
   console.log('✅ receituario-fix.js carregado');
