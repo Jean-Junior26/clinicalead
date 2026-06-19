@@ -103,7 +103,7 @@
   </div>
 
   <div class="rodape">
-    Este orçamento é válido por 30 dias. ${clinic.nome || ''} agradece a confiança! 🦷
+    ${clinic.orcamento_rodape ? clinic.orcamento_rodape.replace(/</g, '&lt;') : `${clinic.nome || ''} agradece a confiança! 🦷`}
   </div>
 
   <div class="no-print" style="text-align:center;margin-top:24px;">
