@@ -129,32 +129,38 @@
     win.document.close();
   };
 
-  // injeta o botão "Imprimir" dentro do corpo do orçamento (orcBody)
+  // injeta um botão "Imprimir" em CADA card de orçamento do orcBody
   function injetarBotaoImprimir() {
     const modal = document.getElementById('modalOrcamento');
     if (!modal || !modal.classList.contains('open')) return;
     const body = document.getElementById('orcBody');
     if (!body) return;
-    // já existe? não duplica
-    if (document.getElementById('btnImprimirOrcTop')) return;
-    // só injeta quando já há conteúdo de orçamento renderizado
-    if (!body.innerHTML || body.innerHTML.trim().length < 20) return;
 
-    const orc = (typeof ORC !== 'undefined' && ORC.orcamentos || [])[0];
-    if (!orc) return;
+    const orcs = (typeof ORC !== 'undefined' && ORC.orcamentos) || [];
+    if (!orcs.length) return;
 
-    // barra com o botão, fixada no topo do corpo
-    const barra = document.createElement('div');
-    barra.id = 'btnImprimirOrcTop';
-    barra.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px;position:sticky;top:0;background:var(--bg-surface,#141414);padding:4px 0;z-index:5;';
-    barra.innerHTML = `
-      <button type="button" onclick="imprimirOrcamento('${orc.id}')" style="background:var(--gold,#C9A84C);color:#1a1a1a;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
-        <i class="ti ti-printer"></i> Imprimir / PDF
-      </button>`;
-    body.insertBefore(barra, body.firstChild);
+    // cada orçamento é um .card direto dentro do orcBody
+    const cards = body.querySelectorAll(':scope > .card');
+    if (!cards.length) return;
+
+    cards.forEach((card, idx) => {
+      // já tem botão? pula
+      if (card.querySelector('.btn-imprimir-orc')) return;
+      // associa pelo índice (mesma ordem do render)
+      const orc = orcs[idx];
+      if (!orc) return;
+
+      const barra = document.createElement('div');
+      barra.style.cssText = 'display:flex;justify-content:flex-end;margin-top:10px;padding-top:10px;border-top:1px dashed var(--border-subtle,#2a2a2a);';
+      barra.innerHTML = `
+        <button type="button" class="btn-imprimir-orc" onclick="imprimirOrcamento('${orc.id}')" style="background:var(--gold,#C9A84C);color:#1a1a1a;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;">
+          <i class="ti ti-printer"></i> Imprimir / PDF
+        </button>`;
+      card.appendChild(barra);
+    });
   }
 
-  // verifica periodicamente se o modal está aberto pra injetar o botão
+  // verifica periodicamente se o modal está aberto pra injetar os botões
   setInterval(() => {
     const m = document.getElementById('modalOrcamento');
     if (m && m.classList.contains('open')) injetarBotaoImprimir();
