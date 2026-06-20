@@ -7,6 +7,14 @@
 // - Pula duplicados (mesmo telefone na clínica)
 // - Status escolhido na importação (padrão 'novo')
 // Fica no "Minha Clínica". Lê Excel via SheetJS (CDN sob demanda).
+//
+// Detecção de telefone ROBUSTA:
+//   1) por NOME da coluna (sem acento, sem espaço): telefone/celular/
+//      cel/fone/tel/whatsapp/whats/zap/contato/phone/mobile...
+//   2) fallback por CONTEÚDO: varre as colunas e escolhe a que mais
+//      parece telefone BR — EXCLUINDO cpf/cnpj/rg/código/data/nasc,
+//      pra nunca importar CPF como telefone.
+//   3) se mesmo assim não achar, AVISA na tela em vez de zerar tudo.
 // ============================================================
 
 (function () {
@@ -26,9 +34,66 @@
     });
   }
 
+  // ── helpers de telefone ──────────────────────────────────
   // normaliza telefone: só dígitos
   function normTel(t) {
     return String(t || '').replace(/\D/g, '');
+  }
+  // normaliza nome de coluna: minúsculo, sem acento, só letras/números
+  function normCab(s) {
+    return String(s || '')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+  }
+  // parece telefone BR? (10 fixo c/DDD, 11 celular c/DDD, 12-13 com 55)
+  function pareceTelefoneBR(v) {
+    const d = normTel(v);
+    if (d.length === 12 || d.length === 13) return d.startsWith('55');
+    return d.length === 10 || d.length === 11;
+  }
+  // sinal forte de celular: 11 dígitos com 9 na 3ª posição (DD9XXXXXXXX)
+  function pareceCelular9(v) {
+    const d = normTel(v);
+    return d.length === 11 && d[2] === '9';
+  }
+
+  // dicionário de apelidos por campo
+  const ALIAS = {
+    nome:  ['nome', 'paciente', 'cliente', 'name', 'nomecompleto', 'razaosocial'],
+    tel:   ['telefone', 'celular', 'whatsapp', 'whats', 'contato', 'mobile', 'phone', 'cel', 'tel', 'fone', 'zap'],
+    nasc:  ['datanascimento', 'nascimento', 'dtnascimento', 'dtnasc', 'nasc', 'aniversario', 'aniver', 'birth', 'birthday'],
+    email: ['email', 'emailpaciente', 'correio'],
+  };
+  // cabeçalhos que NUNCA são telefone (protege o fallback por conteúdo)
+  const NAO_TEL = ['cpf', 'cnpj', 'rg', 'codigo', 'cod', 'id', 'data', 'nascimento', 'nasc'];
+
+  // casa um cabeçalho normalizado contra uma lista de apelidos.
+  // apelidos curtos (<5) exigem igualdade/início pra evitar falso-positivo
+  // (ex.: "cancelado" NÃO casa com "cel"); longos usam "contém".
+  function casaCab(cab, aliases) {
+    return aliases.some(a => (a.length >= 5) ? cab.indexOf(a) >= 0 : (cab === a || cab.indexOf(a) === 0));
+  }
+
+  // acha índice da coluna pelo nome
+  function acharPorNome(aliases) {
+    return IMP.colunas.findIndex(c => casaCab(normCab(c), aliases));
+  }
+
+  // fallback: acha a coluna de telefone pelo CONTEÚDO
+  function acharTelefonePorConteudo() {
+    let melhor = -1, melhorScore = 0;
+    for (let i = 0; i < IMP.colunas.length; i++) {
+      const cab = normCab(IMP.colunas[i]);
+      if (NAO_TEL.some(x => cab.indexOf(x) >= 0)) continue; // pula CPF/CNPJ/RG/data/...
+      const vals = IMP.linhas.map(l => l[i]).filter(v => String(v).trim() !== '');
+      if (!vals.length) continue;
+      const ratio = vals.filter(pareceTelefoneBR).length / vals.length;
+      const cel9  = vals.filter(pareceCelular9).length / vals.length;
+      const score = ratio + cel9 * 0.5; // bônus se tiver cara de celular
+      if (ratio >= 0.6 && score > melhorScore) { melhorScore = score; melhor = i; }
+    }
+    return melhor;
   }
 
   // ── abre o modal do importador ───────────────────────────
@@ -48,6 +113,7 @@
         <div class="modal-body" id="impBody" style="max-height:76vh;overflow-y:auto;">
           <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;">
             Importe seus pacientes de outro sistema. Exporte a lista como <b>CSV</b> ou <b>Excel</b> e suba aqui.
+            <br><span style="color:var(--text-muted);">Dica: a planilha precisa ter uma coluna de <b>telefone/celular</b> — sem ela não dá pra criar os pacientes.</span>
           </p>
           <div style="border:2px dashed var(--border-subtle,#333);border-radius:12px;padding:30px;text-align:center;">
             <input type="file" id="impArquivo" accept=".csv,.xlsx,.xls" style="display:none;" onchange="impLerArquivo(this)">
@@ -125,17 +191,38 @@
       <option value="">— ignorar —</option>
       ${IMP.colunas.map((c, i) => `<option value="${i}" ${sel === i ? 'selected' : ''}>${c || ('Coluna ' + (i + 1))}</option>`).join('')}`;
 
-    // tenta adivinhar colunas pelo nome
-    const adivinha = (termos) => IMP.colunas.findIndex(c => termos.some(t => c.toLowerCase().includes(t)));
-    const gNome = adivinha(['nome', 'paciente', 'name']);
-    const gTel = adivinha(['tel', 'celular', 'fone', 'whats', 'phone']);
-    const gNasc = adivinha(['nasc', 'birth', 'aniver']);
-    const gEmail = adivinha(['email', 'e-mail']);
+    // adivinha colunas: telefone por NOME e, se falhar, por CONTEÚDO
+    const gNome  = acharPorNome(ALIAS.nome);
+    let   gTel   = acharPorNome(ALIAS.tel);
+    let   telPorConteudo = false;
+    if (gTel < 0) {
+      const c = acharTelefonePorConteudo();
+      if (c >= 0) { gTel = c; telPorConteudo = true; }
+    }
+    const gNasc  = acharPorNome(ALIAS.nasc);
+    const gEmail = acharPorNome(ALIAS.email);
+
+    // aviso quando não há coluna de telefone reconhecível
+    let avisoTel = '';
+    if (gTel < 0) {
+      avisoTel = `
+        <div style="border:1px solid var(--coral);background:rgba(224,108,108,.08);border-radius:10px;padding:12px;margin-bottom:14px;font-size:12px;color:var(--coral);">
+          <b><i class="ti ti-alert-triangle"></i> Não encontrei uma coluna de telefone.</b><br>
+          Selecione a coluna certa abaixo. Se nenhuma coluna tiver telefone, volte ao seu sistema e
+          <b>re-exporte a planilha incluindo o campo de celular/telefone</b> — sem número não dá pra importar o paciente.
+        </div>`;
+    } else if (telPorConteudo) {
+      avisoTel = `
+        <div style="border:1px solid var(--gold);background:rgba(201,168,76,.08);border-radius:10px;padding:10px;margin-bottom:14px;font-size:12px;color:var(--gold);">
+          <i class="ti ti-info-circle"></i> Detectei a coluna de telefone pelo conteúdo (“<b>${IMP.colunas[gTel] || ('Coluna ' + (gTel + 1))}</b>”). Confira se está certa.
+        </div>`;
+    }
 
     body.innerHTML = `
       <div style="font-size:13px;color:var(--text-secondary);margin-bottom:14px;">
         Encontramos <b>${IMP.linhas.length}</b> pacientes. Diga qual coluna é cada informação:
       </div>
+      ${avisoTel}
       <div style="display:flex;flex-direction:column;gap:12px;">
         <div>
           <label class="form-label" style="font-size:12px;">Nome <span style="color:var(--coral);">*</span></label>
@@ -184,22 +271,52 @@
       status: document.getElementById('mapStatus').value,
     };
 
-    // monta os pacientes
-    const pacientes = IMP.linhas.map(l => ({
+    // monta todos os registros (sem filtrar ainda), pra conseguir diagnosticar
+    const brutos = IMP.linhas.map(l => ({
       nome: String(l[IMP.mapa.nome] || '').trim(),
       telefone: normTel(l[IMP.mapa.tel]),
       data_nascimento: IMP.mapa.nasc !== null ? converterData(l[IMP.mapa.nasc]) : null,
       email: IMP.mapa.email !== null ? String(l[IMP.mapa.email] || '').trim() : null,
-    })).filter(p => p.nome && p.telefone.length >= 8);
+    }));
+
+    // válido = tem nome E telefone com pelo menos 10 dígitos (DDD + número)
+    const pacientes  = brutos.filter(p => p.nome && p.telefone.length >= 10);
+    const semNome    = brutos.filter(p => !p.nome).length;
+    const semTel     = brutos.filter(p => p.nome && p.telefone.length === 0).length;
+    const telCurto   = brutos.filter(p => p.nome && p.telefone.length > 0 && p.telefone.length < 10).length;
 
     IMP.pacientes = pacientes;
-
     const body = document.getElementById('impBody');
+
+    // caso nenhum válido: explica o PORQUÊ em vez de oferecer importar 0
+    if (pacientes.length === 0) {
+      body.innerHTML = `
+        <div style="border:1px solid var(--coral);background:rgba(224,108,108,.08);border-radius:10px;padding:14px;margin-bottom:14px;font-size:13px;color:var(--coral);">
+          <b><i class="ti ti-alert-triangle"></i> Nenhum paciente válido encontrado.</b>
+          <ul style="margin:10px 0 0 18px;color:var(--text-secondary);font-size:12px;line-height:1.7;">
+            ${semTel ? `<li><b>${semTel}</b> com nome mas <b>sem telefone</b> na coluna escolhida.</li>` : ''}
+            ${telCurto ? `<li><b>${telCurto}</b> com telefone incompleto (menos de 10 dígitos / provável falta de DDD).</li>` : ''}
+            ${semNome ? `<li><b>${semNome}</b> sem nome.</li>` : ''}
+          </ul>
+          <div style="margin-top:10px;color:var(--text-secondary);">
+            Provavelmente a <b>coluna de telefone</b> está errada — ou a planilha não tem telefone.
+            Volte e escolha a coluna certa, ou re-exporte do seu sistema incluindo o celular.
+          </div>
+        </div>
+        <button class="btn btn-ghost" onclick="renderMapeamentoVoltar()" style="width:100%;"><i class="ti ti-arrow-left"></i> Voltar e corrigir o mapeamento</button>
+        <div id="impMsg" style="font-size:12px;min-height:14px;margin-top:10px;"></div>`;
+      return;
+    }
+
+    const descartados = brutos.length - pacientes.length;
     const amostra = pacientes.slice(0, 5);
     body.innerHTML = `
       <div style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;">
         <b>${pacientes.length}</b> pacientes válidos prontos pra importar. Confira os primeiros:
       </div>
+      ${descartados > 0 ? `<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
+        <i class="ti ti-info-circle"></i> ${descartados} linha(s) ficaram de fora${semTel ? ` — ${semTel} sem telefone` : ''}${telCurto ? `, ${telCurto} com número incompleto` : ''}${semNome ? `, ${semNome} sem nome` : ''}.
+      </div>` : ''}
       <div style="border:1px solid var(--border-subtle,#2a2a2a);border-radius:10px;overflow:hidden;margin-bottom:16px;">
         <table style="width:100%;border-collapse:collapse;font-size:12px;">
           <thead><tr style="background:var(--bg-elevated);">
