@@ -26,17 +26,20 @@ function fichaGarantirEstrutura() {
     <button class="ficha-tab-btn" data-tab="dados" onclick="fichaTab('dados')">Dados</button>
     <button class="ficha-tab-btn" data-tab="consultas" onclick="fichaTab('consultas')">Consultas</button>
     <button class="ficha-tab-btn" data-tab="orcamentos" onclick="fichaTab('orcamentos')">Orçamentos</button>
-    <button class="ficha-tab-btn" data-tab="pagamentos" onclick="fichaTab('pagamentos')">Pagamentos</button>`;
+    <button class="ficha-tab-btn" data-tab="pagamentos" onclick="fichaTab('pagamentos')">Pagamentos</button>
+    <button class="ficha-tab-btn" data-tab="receitas" onclick="fichaTab('receitas')">Receitas</button>`;
 
   const consultas = document.createElement('div'); consultas.id = 'fichaTabConsultas'; consultas.className = 'ficha-tab'; consultas.style.display = 'none';
   const orcamentos = document.createElement('div'); orcamentos.id = 'fichaTabOrcamentos'; orcamentos.className = 'ficha-tab'; orcamentos.style.display = 'none';
   const pagamentos = document.createElement('div'); pagamentos.id = 'fichaTabPagamentos'; pagamentos.className = 'ficha-tab'; pagamentos.style.display = 'none';
+  const receitas = document.createElement('div'); receitas.id = 'fichaTabReceitas'; receitas.className = 'ficha-tab'; receitas.style.display = 'none';
 
   modal.appendChild(tabs);
   modal.appendChild(dados);
   modal.appendChild(consultas);
   modal.appendChild(orcamentos);
   modal.appendChild(pagamentos);
+  modal.appendChild(receitas);
 
   if (!document.getElementById('fichaCSS')) {
     const st = document.createElement('style');
@@ -51,7 +54,7 @@ function fichaGarantirEstrutura() {
 }
 
 function fichaTab(qual) {
-  ['dados', 'consultas', 'orcamentos', 'pagamentos'].forEach(t => {
+  ['dados', 'consultas', 'orcamentos', 'pagamentos', 'receitas'].forEach(t => {
     const el = document.getElementById('fichaTab' + t.charAt(0).toUpperCase() + t.slice(1));
     if (el) el.style.display = t === qual ? 'block' : 'none';
   });
@@ -61,6 +64,7 @@ function fichaTab(qual) {
   if (qual === 'consultas') fichaCarregarConsultas();
   if (qual === 'orcamentos') fichaCarregarOrcamentos();
   if (qual === 'pagamentos') fichaCarregarPagamentos();
+  if (qual === 'receitas') fichaCarregarReceitas();
 }
 
 function fichaFmt(v) { return 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 }); }
@@ -126,6 +130,158 @@ async function fichaCarregarPagamentos() {
       <strong style="font-family:var(--mono);color:var(--gold);">${fichaFmt(p.valor)}</strong>
     </div>`).join('');
 }
+
+// ── Aba Receitas ─────────────────────────────────────────────
+let FICHA_REC = { receitas: [] };
+
+async function fichaCarregarReceitas() {
+  const box = document.getElementById('fichaTabReceitas');
+  if (!box) return;
+  box.innerHTML = '<div class="ficha-vazio">Carregando...</div>';
+  const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
+  const { data: receitas } = await db.from('receitas')
+    .select('*').eq('lead_id', FICHA.leadId).order('created_at', { ascending: false });
+  FICHA_REC.receitas = receitas || [];
+  if (FICHA_REC.receitas.length) {
+    const ids = FICHA_REC.receitas.map(r => r.id);
+    const { data: itens } = await db.from('receita_itens').select('*').in('receita_id', ids).order('ordem');
+    FICHA_REC.receitas.forEach(r => { r.itens = (itens || []).filter(i => i.receita_id === r.id); });
+  }
+  fichaRenderReceitas();
+}
+
+function fichaRenderReceitas() {
+  const box = document.getElementById('fichaTabReceitas');
+  if (!box) return;
+  const lista = FICHA_REC.receitas.map(r => {
+    const itensTxt = (r.itens || []).map(i => i.medicamento).join(', ');
+    const data = new Date(r.created_at).toLocaleDateString('pt-BR');
+    return `<div class="ficha-linha" style="display:flex;align-items:flex-start;gap:10px;">
+      <i class="ti ti-prescription" style="color:var(--gold);margin-top:2px;"></i>
+      <div style="flex:1;"><strong>${data}</strong><div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${itensTxt || 'Sem medicamentos'}</div></div>
+      <button class="btn btn-sm" onclick="fichaImprimirReceita('${r.id}')" title="Imprimir" style="background:var(--gold,#C9A84C);color:#1a1a1a;"><i class="ti ti-printer"></i></button>
+      <button class="btn btn-sm btn-ghost btn-icon" onclick="fichaExcluirReceita('${r.id}')" title="Excluir"><i class="ti ti-trash" style="color:var(--coral);"></i></button>
+    </div>`;
+  }).join('');
+  box.innerHTML = `
+    <button class="btn btn-sm btn-primary" style="margin-bottom:14px;" onclick="fichaNovaReceita()"><i class="ti ti-plus"></i> Nova receita</button>
+    ${lista || '<div class="ficha-vazio">Nenhuma receita para este paciente.</div>'}`;
+}
+
+window.fichaNovaReceita = function () {
+  const box = document.getElementById('fichaTabReceitas');
+  if (!box) return;
+  box.innerHTML = `
+    <button class="btn btn-sm btn-ghost" style="margin-bottom:12px;" onclick="fichaCarregarReceitas()"><i class="ti ti-arrow-left"></i> Voltar</button>
+    <div id="fichaRecItens"></div>
+    <button class="btn" onclick="fichaRecAddItem()" style="width:100%;margin:8px 0 14px;border:1px dashed var(--border-subtle,#444);"><i class="ti ti-plus"></i> Adicionar medicamento</button>
+    <div style="margin-bottom:12px;">
+      <label class="form-label" style="font-size:12px;color:var(--text-muted);">Orientações gerais (opcional)</label>
+      <textarea class="form-input" id="fichaRecObs" rows="2" placeholder="Ex: Tomar após as refeições." style="width:100%;resize:vertical;"></textarea>
+    </div>
+    <button class="btn btn-primary" onclick="fichaSalvarReceita()" style="width:100%;"><i class="ti ti-device-floppy"></i> Salvar receita</button>
+    <div id="fichaRecMsg" style="font-size:12px;color:var(--coral);min-height:14px;margin-top:8px;"></div>`;
+  fichaRecAddItem();
+};
+
+let fichaRecSeq = 0;
+window.fichaRecAddItem = function () {
+  const cont = document.getElementById('fichaRecItens');
+  if (!cont) return;
+  const id = 'fri_' + (fichaRecSeq++);
+  const div = document.createElement('div');
+  div.className = 'ficha-rec-item';
+  div.id = id;
+  div.style.cssText = 'background:var(--bg-elevated);border-radius:10px;padding:12px;margin-bottom:10px;';
+  div.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <span style="font-size:11px;color:var(--text-muted);text-transform:uppercase;font-weight:600;">Medicamento</span>
+      <button class="btn btn-sm btn-ghost btn-icon" onclick="document.getElementById('${id}').remove()"><i class="ti ti-x"></i></button>
+    </div>
+    <input class="form-input fr-med" placeholder="Ex: Amoxicilina 500mg" style="width:100%;margin-bottom:8px;"/>
+    <input class="form-input fr-pos" placeholder="Posologia — ex: 1 cápsula de 8/8h por 7 dias" style="width:100%;margin-bottom:8px;"/>
+    <input class="form-input fr-qtd" placeholder="Quantidade — ex: 21 cápsulas" style="width:100%;"/>`;
+  cont.appendChild(div);
+};
+
+window.fichaSalvarReceita = async function () {
+  const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
+  const msg = document.getElementById('fichaRecMsg');
+  const setMsg = (t) => { if (msg) msg.textContent = t || ''; };
+  const itens = [];
+  document.querySelectorAll('#fichaRecItens .ficha-rec-item').forEach((d, idx) => {
+    const med = d.querySelector('.fr-med').value.trim();
+    if (!med) return;
+    itens.push({ medicamento: med, posologia: d.querySelector('.fr-pos').value.trim(), quantidade: d.querySelector('.fr-qtd').value.trim(), ordem: idx });
+  });
+  if (!itens.length) { setMsg('Adicione pelo menos um medicamento.'); return; }
+  const observacoes = (document.getElementById('fichaRecObs')?.value || '').trim();
+  try {
+    const { data: rec, error } = await db.from('receitas').insert({
+      clinic_id: clinic.id, lead_id: FICHA.leadId, tipo: 'comum', observacoes,
+    }).select().single();
+    if (error) throw error;
+    const { error: e2 } = await db.from('receita_itens').insert(itens.map(i => ({ ...i, receita_id: rec.id })));
+    if (e2) throw e2;
+    if (typeof toast === 'function') toast('Receita salva! 💊');
+    fichaCarregarReceitas();
+  } catch (e) {
+    setMsg('Erro ao salvar: ' + (e.message || 'tente de novo'));
+    console.error('[ficha receita]', e);
+  }
+};
+
+window.fichaExcluirReceita = async function (id) {
+  if (!confirm('Excluir esta receita?')) return;
+  try { await db.from('receitas').delete().eq('id', id); if (typeof toast === 'function') toast('Receita excluída'); fichaCarregarReceitas(); }
+  catch (e) { if (typeof toast === 'function') toast('Erro ao excluir', 'error'); }
+};
+
+window.fichaImprimirReceita = function (id) {
+  const rec = FICHA_REC.receitas.find(r => r.id === id);
+  if (!rec) return;
+  const lead = (STATE.leads || []).find(l => l.id === FICHA.leadId) || {};
+  const clinic = (typeof currentClinic === 'function') ? currentClinic() : {};
+  const hoje = new Date(rec.created_at).toLocaleDateString('pt-BR');
+  const itens = (rec.itens || []).map((i, idx) => `
+    <div style="margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid #eee;">
+      <div style="font-size:15px;font-weight:600;">${idx + 1}. ${i.medicamento}${i.quantidade ? ` <span style="font-weight:400;color:#666;">— ${i.quantidade}</span>` : ''}</div>
+      ${i.posologia ? `<div style="font-size:14px;color:#444;margin-top:4px;">${i.posologia}</div>` : ''}
+    </div>`).join('');
+  const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Receita - ${lead.nome || ''}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Segoe UI',Arial,sans-serif;color:#222;padding:40px;max-width:720px;margin:0 auto;}
+  .cab{display:flex;align-items:center;gap:14px;border-bottom:2px solid #C9A84C;padding-bottom:16px;margin-bottom:24px;}
+  .clinica-nome{font-size:22px;font-weight:700;color:#C9A84C;}
+  .clinica-info{font-size:12px;color:#666;margin-top:4px;line-height:1.5;}
+  .titulo-doc{text-align:center;font-size:18px;font-weight:700;letter-spacing:2px;color:#444;margin-bottom:24px;text-transform:uppercase;}
+  .paciente{font-size:14px;margin-bottom:24px;padding-bottom:12px;border-bottom:1px dashed #ccc;}
+  .obs{margin-top:20px;padding:14px;background:#faf6ec;border-radius:8px;font-size:13px;color:#555;}
+  .assinatura{margin-top:64px;text-align:center;}
+  .assinatura-linha{border-top:1px solid #333;width:280px;margin:0 auto;padding-top:6px;font-size:13px;color:#666;}
+  .rodape{margin-top:32px;text-align:center;font-size:11px;color:#999;}
+  @media print{body{padding:16px;}.no-print{display:none;}}
+</style></head><body>
+  <div class="cab">
+    ${clinic.logo_url ? `<img src="${clinic.logo_url}" style="max-width:72px;max-height:72px;object-fit:contain;">` : ''}
+    <div><div class="clinica-nome">${clinic.nome || 'Clínica'}</div>
+    <div class="clinica-info">${clinic.endereco ? clinic.endereco + '<br>' : ''}${clinic.telefone ? 'Tel: ' + clinic.telefone : ''}</div></div>
+  </div>
+  <div class="titulo-doc">Receituário</div>
+  <div class="paciente"><strong>Paciente:</strong> ${lead.nome || '—'}　　<strong>Data:</strong> ${hoje}</div>
+  <div>${itens || '<div style="color:#999;">Nenhum medicamento.</div>'}</div>
+  ${rec.observacoes ? `<div class="obs"><strong>Orientações:</strong> ${rec.observacoes}</div>` : ''}
+  <div class="assinatura"><div class="assinatura-linha">${clinic.responsavel || clinic.nome || 'Responsável'}</div></div>
+  <div class="rodape">${clinic.nome || ''} · ${clinic.endereco || ''}</div>
+  <div class="no-print" style="text-align:center;margin-top:28px;">
+    <button onclick="window.print()" style="padding:12px 24px;background:#C9A84C;color:#fff;border:none;border-radius:8px;font-size:14px;cursor:pointer;font-weight:600;">🖨️ Imprimir / Salvar PDF</button>
+  </div>
+</body></html>`;
+  const win = window.open('', '_blank');
+  if (!win) { if (typeof toast === 'function') toast('Permita pop-ups para imprimir', 'error'); return; }
+  win.document.write(html); win.document.close();
+};
 
 // ── Engata no openEditLead ───────────────────────────────────
 (function () {
