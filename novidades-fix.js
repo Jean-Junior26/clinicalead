@@ -16,8 +16,16 @@
   // ⭐ LISTA DE NOVIDADES (a mais nova no TOPO) ⭐
   const NOVIDADES = [
     {
-       id: 7, data: "19/06/2026", icone: "ti-prescription", titulo: "Receituário digital", texto: "Agora você cria e imprime receitas direto na ficha do paciente, com a logo da sua clínica!" },
-{ id: 8, data: "19/06/2026", icone: "ti-printer", titulo: "Orçamentos impressos", texto: "Imprima orçamentos personalizados com sua logo e mensagem no rodapé." },
+      id: 8, data: "19/06/2026", icone: "ti-printer",
+      titulo: "Orçamentos impressos",
+      texto: "Imprima orçamentos personalizados com a logo da sua clínica e mensagem no rodapé!"
+    },
+    {
+      id: 7, data: "19/06/2026", icone: "ti-prescription",
+      titulo: "Receituário digital",
+      texto: "Agora você cria e imprime receitas direto na ficha do paciente, com a logo da sua clínica!"
+    },
+    {
       id: 6, data: "18/06/2026", icone: "ti-confetti",
       titulo: "Recuperação de faltas automática",
       texto: "Quando um paciente falta, o sistema marca automaticamente e cria uma tarefa pra equipe entrar em contato e reagendar. Nenhum paciente fica esquecido!"
