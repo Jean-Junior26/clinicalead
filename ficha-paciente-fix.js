@@ -168,20 +168,92 @@ function fichaRenderReceitas() {
     ${lista || '<div class="ficha-vazio">Nenhuma receita para este paciente.</div>'}`;
 }
 
-window.fichaNovaReceita = function () {
+window.fichaNovaReceita = async function () {
   const box = document.getElementById('fichaTabReceitas');
   if (!box) return;
+  // carrega modelos da clínica
+  const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
+  let modelos = [];
+  if (clinic) {
+    const { data } = await db.from('receita_modelos').select('*').eq('clinic_id', clinic.id).order('nome');
+    modelos = data || [];
+  }
+  FICHA_REC.modelos = modelos;
+
+  const optsModelos = modelos.map(m => `<option value="${m.id}">${m.nome}</option>`).join('');
+
   box.innerHTML = `
     <button class="btn btn-sm btn-ghost" style="margin-bottom:12px;" onclick="fichaCarregarReceitas()"><i class="ti ti-arrow-left"></i> Voltar</button>
+    ${modelos.length ? `
+    <div style="margin-bottom:14px;">
+      <label class="form-label" style="font-size:12px;color:var(--text-muted);">Usar um modelo (opcional)</label>
+      <select class="form-input" id="fichaRecModelo" onchange="fichaAplicarModelo(this.value)" style="width:100%;">
+        <option value="">— Começar do zero —</option>
+        ${optsModelos}
+      </select>
+    </div>` : ''}
     <div id="fichaRecItens"></div>
     <button class="btn" onclick="fichaRecAddItem()" style="width:100%;margin:8px 0 14px;border:1px dashed var(--border-subtle,#444);"><i class="ti ti-plus"></i> Adicionar medicamento</button>
     <div style="margin-bottom:12px;">
       <label class="form-label" style="font-size:12px;color:var(--text-muted);">Orientações gerais (opcional)</label>
       <textarea class="form-input" id="fichaRecObs" rows="2" placeholder="Ex: Tomar após as refeições." style="width:100%;resize:vertical;"></textarea>
     </div>
-    <button class="btn btn-primary" onclick="fichaSalvarReceita()" style="width:100%;"><i class="ti ti-device-floppy"></i> Salvar receita</button>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-primary" onclick="fichaSalvarReceita()" style="flex:1;"><i class="ti ti-device-floppy"></i> Salvar receita</button>
+      <button class="btn" onclick="fichaSalvarModelo()" style="border:1px solid var(--gold,#C9A84C);color:var(--gold,#C9A84C);" title="Salvar estes medicamentos como modelo reutilizável"><i class="ti ti-bookmark"></i> Salvar como modelo</button>
+    </div>
     <div id="fichaRecMsg" style="font-size:12px;color:var(--coral);min-height:14px;margin-top:8px;"></div>`;
   fichaRecAddItem();
+};
+
+// aplica um modelo: preenche os itens no formulário
+window.fichaAplicarModelo = function (modeloId) {
+  if (!modeloId) return;
+  const modelo = (FICHA_REC.modelos || []).find(m => m.id === modeloId);
+  if (!modelo) return;
+  // limpa itens atuais
+  const cont = document.getElementById('fichaRecItens');
+  if (cont) cont.innerHTML = '';
+  // adiciona os itens do modelo
+  (modelo.itens || []).forEach(it => {
+    fichaRecAddItem();
+    const itens = document.querySelectorAll('#fichaRecItens .ficha-rec-item');
+    const ultimo = itens[itens.length - 1];
+    if (ultimo) {
+      ultimo.querySelector('.fr-med').value = it.medicamento || '';
+      ultimo.querySelector('.fr-pos').value = it.posologia || '';
+      ultimo.querySelector('.fr-qtd').value = it.quantidade || '';
+    }
+  });
+  // observações do modelo
+  if (modelo.observacoes) {
+    const obs = document.getElementById('fichaRecObs');
+    if (obs) obs.value = modelo.observacoes;
+  }
+  if (typeof toast === 'function') toast('Modelo aplicado ✓');
+};
+
+// salva os medicamentos atuais como um modelo
+window.fichaSalvarModelo = async function () {
+  const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
+  if (!clinic) return;
+  const itens = [];
+  document.querySelectorAll('#fichaRecItens .ficha-rec-item').forEach(d => {
+    const med = d.querySelector('.fr-med').value.trim();
+    if (!med) return;
+    itens.push({ medicamento: med, posologia: d.querySelector('.fr-pos').value.trim(), quantidade: d.querySelector('.fr-qtd').value.trim() });
+  });
+  if (!itens.length) { if (typeof toast === 'function') toast('Adicione medicamentos primeiro', 'error'); return; }
+  const nome = prompt('Nome do modelo (ex: Pós-extração):');
+  if (!nome || !nome.trim()) return;
+  const observacoes = (document.getElementById('fichaRecObs')?.value || '').trim();
+  try {
+    await db.from('receita_modelos').insert({ clinic_id: clinic.id, nome: nome.trim(), observacoes, itens });
+    if (typeof toast === 'function') toast('Modelo salvo! 📑');
+  } catch (e) {
+    if (typeof toast === 'function') toast('Erro ao salvar modelo', 'error');
+    console.error('[modelo]', e);
+  }
 };
 
 let fichaRecSeq = 0;
