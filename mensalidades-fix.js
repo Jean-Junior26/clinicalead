@@ -1,48 +1,48 @@
 // ============================================================
 // CLINICALEAD — MENSALIDADES (cobrança recorrente do paciente) — Fase 1
 // Aba "Mensalidades" na ficha do paciente (#modalEditLead).
-//   - Cria/edita o plano (valor, dia de vencimento, início, nº parcelas ou contínuo)
-//   - Gera as parcelas mês a mês
-//   - Marca parcela como paga -> cria um pagamento (entra no financeiro)
-//   - "Atrasado" é calculado na hora (pendente + vencimento já passou)
-// Tudo isolado por clínica via RLS (tabelas mensalidades / mensalidade_parcelas).
+//   - Cria/edita o plano (valor, dia, início, nº parcelas ou contínuo)
+//   - Gera parcelas mês a mês
+//   - PAGAMENTO PARCIAL: paga um pedaço -> status "Parcial", resto em aberto
+//   - Cada pagamento liga na parcela (parcela_id) -> dá pra desfazer
+//   - "Atrasado" é calculado na hora (em aberto + vencimento já passou)
 // ============================================================
 
 (function () {
   'use strict';
 
   const MENS = { leadId: null, plano: null, parcelas: [], marcando: null };
-
   const FORMA = { pix: 'Pix', cartao_credito: 'Crédito', cartao_debito: 'Débito', dinheiro: 'Dinheiro', boleto: 'Boleto', transferencia: 'Transferência' };
 
-  // ── helpers ──────────────────────────────────────────────
   const fmt = (v) => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
   const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
   const hojeISO = () => new Date().toISOString().slice(0, 10);
   const esc = (s) => String(s || '').replace(/"/g, '&quot;');
+  const restante = (p) => Math.max(0, Number(p.valor || 0) - Number(p.valor_pago || 0));
+  const aberta = (p) => !['pago', 'cancelado', 'renegociado'].includes(p.status);
 
   function brData(iso) {
     if (!iso) return '—';
     const d = new Date(iso + 'T12:00');
     return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('pt-BR');
   }
-  // vencimento de (ano, mes 0-11, dia) — corrige meses curtos (ex.: dia 31 em fev)
   function venc(ano, mes, dia) {
     const ult = new Date(ano, mes + 1, 0).getDate();
-    const d = Math.min(dia, ult);
-    return `${ano}-${String(mes + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    return `${ano}-${String(mes + 1).padStart(2, '0')}-${String(Math.min(dia, ult)).padStart(2, '0')}`;
   }
   function comp(ano, mes) { return `${ano}-${String(mes + 1).padStart(2, '0')}-01`; }
 
-  function statusParcela(p) {
-    if (p.status === 'pago') return 'pago';
-    if (p.status === 'cancelado') return 'cancelado';
-    const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
-    const v = new Date(p.vencimento + 'T00:00');
-    return (v < hoje) ? 'atrasado' : 'pendente';
+  // status visual (label + cor)
+  function statusVis(p) {
+    if (p.status === 'pago') return { label: 'Pago', cor: '#7FB069' };
+    if (p.status === 'cancelado') return { label: 'Cancelado', cor: '#8A8570' };
+    if (p.status === 'renegociado') return { label: 'Renegociada', cor: '#8A8570' };
+    const atrasada = p.vencimento < hojeISO();
+    if (Number(p.valor_pago || 0) > 0) return { label: atrasada ? 'Parcial · atrasada' : 'Parcial', cor: '#C9A84C' };
+    if (atrasada) return { label: 'Atrasada', cor: '#C0624A' };
+    return { label: 'Pendente', cor: '#5B8DB8' };
   }
 
-  // gera 'qtd' parcelas a partir de (anoIni, mesIni 0-11, numIni)
   function gerarParcelas(plano, anoIni, mesIni, numIni, qtd) {
     const out = [];
     for (let i = 0; i < qtd; i++) {
@@ -153,38 +153,41 @@
   function renderPlano() {
     const box = document.getElementById('fichaTabMensalidades');
     if (!box) return;
-    const p = MENS.plano, parc = MENS.parcelas;
+    const p = MENS.plano, parc = MENS.parcelas, hoje = hojeISO();
     let pago = 0, aberto = 0, atrasado = 0;
     parc.forEach(x => {
-      const s = statusParcela(x), v = Number(x.valor || 0);
-      if (s === 'pago') pago += v;
-      else if (s === 'atrasado') { aberto += v; atrasado += v; }
-      else if (s === 'pendente') aberto += v;
+      pago += Number(x.valor_pago || 0);
+      if (!aberta(x)) return;
+      const rest = restante(x);
+      aberto += rest;
+      if (x.vencimento < hoje) atrasado += rest;
     });
 
     const linhas = parc.map(x => {
-      const s = statusParcela(x);
-      const cor = s === 'pago' ? '#7FB069' : s === 'atrasado' ? '#C0624A' : s === 'cancelado' ? '#8A8570' : '#5B8DB8';
-      const label = s === 'pago' ? 'Pago' : s === 'atrasado' ? 'Atrasado' : s === 'cancelado' ? 'Cancelado' : 'Pendente';
+      const sv = statusVis(x);
+      const rest = restante(x);
+      const vp = Number(x.valor_pago || 0);
       let acao = '';
-      if (MENS.marcando === x.id && s !== 'pago' && s !== 'cancelado') {
+      if (MENS.marcando === x.id && aberta(x)) {
         acao = `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:8px;">
+          <input class="form-input" id="mfValor_${x.id}" type="number" step="0.01" value="${rest}" title="Valor a pagar" style="font-size:12px;padding:4px 6px;width:96px;"/>
           <select class="form-input" id="mfForma_${x.id}" style="font-size:12px;padding:4px 6px;width:auto;">
             ${Object.entries(FORMA).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}
           </select>
-          <input class="form-input" id="mfData_${x.id}" type="date" value="${hojeISO()}" style="font-size:12px;padding:4px 6px;width:auto;"/>
+          <input class="form-input" id="mfData_${x.id}" type="date" value="${hoje}" style="font-size:12px;padding:4px 6px;width:auto;"/>
           <button class="btn btn-sm btn-primary" onclick="mensConfirmarPagamento('${x.id}')">Confirmar</button>
           <button class="btn btn-sm btn-ghost" onclick="mensCancelarMarcacao()">Cancelar</button>
         </div>`;
-      } else if (s !== 'pago' && s !== 'cancelado') {
-        acao = `<button class="btn btn-sm" style="border:1px solid var(--gold,#C9A84C);color:var(--gold,#C9A84C);" onclick="mensMarcarPaga('${x.id}')"><i class="ti ti-check"></i> Marcar paga</button>`;
-      } else if (s === 'pago') {
+      } else if (aberta(x)) {
+        acao = `<button class="btn btn-sm" style="border:1px solid var(--gold,#C9A84C);color:var(--gold,#C9A84C);" onclick="mensMarcarPaga('${x.id}')"><i class="ti ti-check"></i> ${vp > 0 ? 'Pagar restante' : 'Marcar paga'}</button>`;
+      } else if (x.status === 'pago') {
         acao = `<button class="btn btn-sm btn-ghost" onclick="mensDesmarcar('${x.id}')" title="Desfazer"><i class="ti ti-arrow-back-up"></i> Desmarcar</button>`;
       }
+      const detPago = vp > 0 ? `<span style="color:var(--text-muted);"> · pago ${fmt(vp)}${rest > 0 ? ` · falta ${fmt(rest)}` : ''}</span>` : '';
       return `<div class="ficha-linha">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
-          <div><strong>#${x.numero}</strong> · venc. ${brData(x.vencimento)} · <strong style="font-family:var(--mono);">${fmt(x.valor)}</strong></div>
-          <span class="badge" style="background:${cor}22;color:${cor};border:1px solid ${cor}44;">${label}</span>
+          <div><strong>#${x.numero}</strong> · venc. ${brData(x.vencimento)} · <strong style="font-family:var(--mono);">${fmt(x.valor)}</strong>${detPago}</div>
+          <span class="badge" style="background:${sv.cor}22;color:${sv.cor};border:1px solid ${sv.cor}44;">${sv.label}</span>
         </div>
         ${acao}
       </div>`;
@@ -220,19 +223,27 @@
     const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
     if (!clinic) return;
     const p = MENS.parcelas.find(x => x.id === id); if (!p) return;
+    const rest = restante(p);
+    const inp = parseFloat(document.getElementById('mfValor_' + id)?.value);
+    let amount = isNaN(inp) ? rest : inp;
+    if (amount <= 0) { const m = document.getElementById('mensMsg'); if (m) m.textContent = 'Valor inválido.'; return; }
+    if (amount > rest) amount = rest; // não paga mais que o restante
     const forma = document.getElementById('mfForma_' + id)?.value || 'pix';
     const data = document.getElementById('mfData_' + id)?.value || hojeISO();
     try {
       const { data: pag, error } = await db.from('pagamentos').insert({
-        clinic_id: clinic.id, lead_id: MENS.leadId, valor: p.valor, forma, data,
+        clinic_id: clinic.id, lead_id: MENS.leadId, valor: amount, forma, data, parcela_id: id,
         observacao: `Mensalidade${MENS.plano?.descricao ? (' - ' + MENS.plano.descricao) : ''} (parcela ${p.numero})`,
       }).select().single();
       if (error) throw error;
-      const { error: e2 } = await db.from('mensalidade_parcelas')
-        .update({ status: 'pago', pago_em: data, pagamento_id: pag.id }).eq('id', id);
+      const novoPago = Number(p.valor_pago || 0) + amount;
+      const quitado = novoPago >= Number(p.valor || 0) - 0.005;
+      const { error: e2 } = await db.from('mensalidade_parcelas').update({
+        valor_pago: novoPago, status: quitado ? 'pago' : 'parcial', pago_em: quitado ? data : null,
+      }).eq('id', id);
       if (e2) throw e2;
       MENS.marcando = null;
-      if (typeof toast === 'function') toast('Parcela paga! ✅');
+      if (typeof toast === 'function') toast(quitado ? 'Parcela quitada! ✅' : 'Pagamento parcial registrado 💵');
       window.mensCarregar();
     } catch (e) {
       const m = document.getElementById('mensMsg'); if (m) m.textContent = 'Erro: ' + (e.message || '');
@@ -242,11 +253,11 @@
 
   window.mensDesmarcar = async function (id) {
     const p = MENS.parcelas.find(x => x.id === id); if (!p) return;
-    if (!confirm('Desfazer o pagamento desta parcela?')) return;
+    if (!confirm('Desfazer os pagamentos desta parcela? Os lançamentos no financeiro serão removidos.')) return;
     try {
-      if (p.pagamento_id) await db.from('pagamentos').delete().eq('id', p.pagamento_id);
-      await db.from('mensalidade_parcelas').update({ status: 'pendente', pago_em: null, pagamento_id: null }).eq('id', id);
-      if (typeof toast === 'function') toast('Pagamento desfeito');
+      await db.from('pagamentos').delete().eq('parcela_id', id);
+      await db.from('mensalidade_parcelas').update({ status: 'pendente', valor_pago: 0, pago_em: null, pagamento_id: null }).eq('id', id);
+      if (typeof toast === 'function') toast('Pagamentos desfeitos');
       window.mensCarregar();
     } catch (e) { console.error('[mensalidade desmarcar]', e); if (typeof toast === 'function') toast('Erro ao desfazer', 'error'); }
   };
@@ -267,7 +278,7 @@
             <input class="form-input" id="meDia" type="number" min="1" max="31" value="${p.dia_vencimento}"/></div>
         </div>
         <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:6px;">
-          <input type="checkbox" id="meAplicar" checked/> Aplicar novo valor/vencimento às parcelas em aberto
+          <input type="checkbox" id="meAplicar" checked/> Aplicar novo valor/vencimento às parcelas em aberto (não pagas)
         </label>
         <button class="btn btn-primary" onclick="mensSalvarEdicao()"><i class="ti ti-device-floppy"></i> Salvar</button>
         <div id="mensMsg" style="font-size:12px;color:var(--coral);min-height:14px;"></div>
@@ -287,11 +298,10 @@
     try {
       await db.from('mensalidades').update({ descricao: desc || null, valor, dia_vencimento: dia }).eq('id', p.id);
       if (aplicar) {
-        const pend = MENS.parcelas.filter(x => x.status === 'pendente'); // não mexe em pago/cancelado
+        const pend = MENS.parcelas.filter(x => x.status === 'pendente'); // só as totalmente em aberto
         for (const x of pend) {
           const c = new Date(x.competencia + 'T12:00');
-          const novoVenc = venc(c.getFullYear(), c.getMonth(), dia);
-          await db.from('mensalidade_parcelas').update({ valor, vencimento: novoVenc }).eq('id', x.id);
+          await db.from('mensalidade_parcelas').update({ valor, vencimento: venc(c.getFullYear(), c.getMonth(), dia) }).eq('id', x.id);
         }
       }
       if (typeof toast === 'function') toast('Plano atualizado ✓');
@@ -304,7 +314,7 @@
     if (!confirm('Encerrar o plano? As parcelas em aberto serão canceladas (as pagas permanecem).')) return;
     try {
       await db.from('mensalidades').update({ ativo: false }).eq('id', p.id);
-      await db.from('mensalidade_parcelas').update({ status: 'cancelado' }).eq('mensalidade_id', p.id).eq('status', 'pendente');
+      await db.from('mensalidade_parcelas').update({ status: 'cancelado' }).eq('mensalidade_id', p.id).in('status', ['pendente', 'parcial']);
       if (typeof toast === 'function') toast('Plano encerrado');
       window.mensCarregar();
     } catch (e) { console.error('[mensalidade encerrar]', e); if (typeof toast === 'function') toast('Erro', 'error'); }
@@ -366,7 +376,6 @@
     if (typeof openEditLead !== 'function') return false;
     const _o = openEditLead;
     openEditLead = function () { const r = _o.apply(this, arguments); aoAbrir(arguments[0]); return r; };
-    // quando trocar pra uma aba do core, esconde a minha
     if (typeof fichaTab === 'function') {
       const _ft = fichaTab;
       fichaTab = function () {
@@ -384,5 +393,5 @@
     setTimeout(() => clearInterval(iv), 15000);
   }
 
-  console.log('✅ mensalidades-fix.js carregado — aba Mensalidades na ficha');
+  console.log('✅ mensalidades-fix.js carregado — aba Mensalidades (com pagamento parcial)');
 })();
