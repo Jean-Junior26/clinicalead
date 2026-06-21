@@ -1,19 +1,20 @@
 // ============================================================
-// CLINICALEAD — CAMPOS EXTRAS DO CADASTRO (CPF, Endereço, Responsável)
-// Injeta na aba "Dados" da ficha do paciente (#modalEditLead).
-//   - CPF (máscara + validação de dígito verificador) e Endereço.
-//   - Bloco "Responsável" aparece AUTOMÁTICO quando o paciente é
-//     menor de 18 anos (pela data de nascimento).
-// Salva direto na tabela leads (cpf, endereco, responsavel_*),
-// sem mexer no form nem na função de salvar do core: autosave ao
-// sair de cada campo. CPF e telefone são guardados só com dígitos
-// (a máscara é apenas visual), igual ao resto do sistema.
+// CLINICALEAD — CAMPOS EXTRAS DO CADASTRO (CPF, Endereço, Responsável financeiro)
+// Funciona em DOIS lugares:
+//   1) Ficha de edição do paciente (#modalEditLead, aba "Dados")  -> autosave por campo
+//   2) Novo lead (#modalNewLead)                                  -> grava junto ao criar
+// Regras:
+//   - CPF (máscara + validação de dígito) e Endereço.
+//   - "Responsável financeiro" aparece AUTOMÁTICO quando o paciente
+//     é menor de 18 (pela data de nascimento). No novo lead, como não
+//     havia campo de nascimento, ele é adicionado aqui também.
+//   - CPF e telefones são guardados só com dígitos (máscara é visual).
 // ============================================================
 
 (function () {
   'use strict';
 
-  const CE = { leadId: null };
+  const CE = { leadId: null };      // lead aberto na ficha de edição
 
   // ── helpers ──────────────────────────────────────────────
   const soDig = (v) => String(v || '').replace(/\D/g, '');
@@ -69,100 +70,131 @@
     else { h.textContent = ''; el.style.borderColor = ''; }
   }
 
-  // ── injeta os campos na aba "Dados" (uma vez) ─────────────
-  function injetar() {
+  // mostra/esconde o bloco do responsável conforme a idade
+  function avaliarMenor(p, dataISO) {
+    const box = document.getElementById(p + 'RespBox');
+    if (!box) return;
+    const a = idadeAnos(dataISO);
+    box.style.display = (a !== null && a < 18) ? 'block' : 'none';
+  }
+
+  // HTML dos campos extras. p = prefixo de id ('ce' edição, 'cl' criação)
+  function htmlExtras(p, incluirNasc) {
+    return `
+      <div id="${p}Box" style="margin-top:8px;padding-top:12px;border-top:1px solid var(--border-subtle,#2a2a2a);">
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;font-weight:600;margin-bottom:10px;">Dados complementares</div>
+        ${incluirNasc ? `
+        <div style="margin-bottom:10px;">
+          <label class="form-label" style="font-size:12px;">Data de nascimento</label>
+          <input class="form-input" type="date" id="${p}Nasc"/>
+        </div>` : ''}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px;">
+          <div>
+            <label class="form-label" style="font-size:12px;">CPF</label>
+            <input class="form-input" id="${p}Cpf" inputmode="numeric" placeholder="000.000.000-00" maxlength="14"/>
+            <div id="${p}CpfHint" style="font-size:11px;color:var(--coral);min-height:13px;"></div>
+          </div>
+          <div>
+            <label class="form-label" style="font-size:12px;">Endereço</label>
+            <input class="form-input" id="${p}Endereco" placeholder="Rua, nº, bairro, cidade"/>
+          </div>
+        </div>
+        <div id="${p}RespBox" style="display:none;border:1px solid var(--gold,#C9A84C);background:rgba(201,168,76,.06);border-radius:10px;padding:12px;margin-bottom:8px;">
+          <div style="font-size:12px;color:var(--gold);font-weight:600;margin-bottom:10px;">
+            <i class="ti ti-cash"></i> Paciente menor de idade — informe o responsável financeiro
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div>
+              <label class="form-label" style="font-size:12px;">Nome do responsável</label>
+              <input class="form-input" id="${p}RespNome" placeholder="Nome completo"/>
+            </div>
+            <div>
+              <label class="form-label" style="font-size:12px;">Parentesco</label>
+              <select class="form-input" id="${p}RespParentesco">
+                <option value="">—</option>
+                <option>Mãe</option><option>Pai</option>
+                <option>Avó</option><option>Avô</option>
+                <option>Tia</option><option>Tio</option>
+                <option>Irmã</option><option>Irmão</option>
+                <option>Tutor(a) legal</option><option>Outro</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label" style="font-size:12px;">Telefone do responsável</label>
+              <input class="form-input" id="${p}RespTelefone" inputmode="numeric" placeholder="(00) 00000-0000" maxlength="15"/>
+            </div>
+            <div>
+              <label class="form-label" style="font-size:12px;">CPF do responsável</label>
+              <input class="form-input" id="${p}RespCpf" inputmode="numeric" placeholder="000.000.000-00" maxlength="14"/>
+              <div id="${p}RespCpfHint" style="font-size:11px;color:var(--coral);min-height:13px;"></div>
+            </div>
+          </div>
+        </div>
+        <div id="${p}Msg" style="font-size:12px;color:var(--text-muted);min-height:15px;"></div>
+      </div>`;
+  }
+
+  // máscaras + (na edição) autosave por campo
+  function wireEventos(p, onAutosave) {
+    const cpf = document.getElementById(p + 'Cpf');
+    const rcpf = document.getElementById(p + 'RespCpf');
+    const rtel = document.getElementById(p + 'RespTelefone');
+    const nasc = document.getElementById(p + 'Nasc');
+    if (cpf) cpf.addEventListener('input', () => { cpf.value = mascararCPF(cpf.value); validarCpfHint(cpf, p + 'CpfHint'); });
+    if (rcpf) rcpf.addEventListener('input', () => { rcpf.value = mascararCPF(rcpf.value); validarCpfHint(rcpf, p + 'RespCpfHint'); });
+    if (rtel) rtel.addEventListener('input', () => { rtel.value = mascararTel(rtel.value); });
+    if (nasc) nasc.addEventListener('change', () => avaliarMenor(p, nasc.value));
+    if (onAutosave) {
+      [p + 'Cpf', p + 'Endereco', p + 'RespNome', p + 'RespTelefone', p + 'RespCpf'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('blur', onAutosave);
+      });
+      const sel = document.getElementById(p + 'RespParentesco');
+      if (sel) sel.addEventListener('change', onAutosave);
+    }
+  }
+
+  // lê os campos extras de um prefixo -> objeto pronto pro banco
+  function lerExtras(p, incluirNasc) {
+    const val = (id) => (document.getElementById(id)?.value || '').trim();
+    const o = {
+      cpf: soDig(val(p + 'Cpf')) || null,
+      endereco: val(p + 'Endereco') || null,
+      responsavel_nome: val(p + 'RespNome') || null,
+      responsavel_parentesco: val(p + 'RespParentesco') || null,
+      responsavel_telefone: soDig(val(p + 'RespTelefone')) || null,
+      responsavel_cpf: soDig(val(p + 'RespCpf')) || null,
+    };
+    if (incluirNasc) o.data_nascimento = val(p + 'Nasc') || null;
+    return o;
+  }
+
+  const temAlgo = (o) => Object.values(o).some(v => v !== null && v !== '' && v !== undefined);
+
+  // =========================================================
+  // 1) FICHA DE EDIÇÃO  (#modalEditLead -> aba Dados)
+  // =========================================================
+  function injetarEdit() {
     const dados = document.getElementById('fichaTabDados');
-    if (!dados) return false;                 // ficha ainda não montou
-    if (document.getElementById('ceBox')) return true; // já injetado
+    if (!dados) return false;
+    if (document.getElementById('ceBox')) return true;
 
-    const box = document.createElement('div');
-    box.id = 'ceBox';
-    box.style.cssText = 'margin-top:8px;padding-top:12px;border-top:1px solid var(--border-subtle,#2a2a2a);';
-    box.innerHTML = `
-      <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;font-weight:600;margin-bottom:10px;">Dados complementares</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px;">
-        <div>
-          <label class="form-label" style="font-size:12px;">CPF</label>
-          <input class="form-input" id="ceCpf" inputmode="numeric" placeholder="000.000.000-00" maxlength="14"/>
-          <div id="ceCpfHint" style="font-size:11px;color:var(--coral);min-height:13px;"></div>
-        </div>
-        <div>
-          <label class="form-label" style="font-size:12px;">Endereço</label>
-          <input class="form-input" id="ceEndereco" placeholder="Rua, nº, bairro, cidade"/>
-        </div>
-      </div>
-      <div id="ceRespBox" style="display:none;border:1px solid var(--gold,#C9A84C);background:rgba(201,168,76,.06);border-radius:10px;padding:12px;margin-bottom:8px;">
-        <div style="font-size:12px;color:var(--gold);font-weight:600;margin-bottom:10px;">
-          <i class="ti ti-shield-check"></i> Paciente menor de idade — informe o responsável
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-          <div>
-            <label class="form-label" style="font-size:12px;">Nome do responsável</label>
-            <input class="form-input" id="ceRespNome" placeholder="Nome completo"/>
-          </div>
-          <div>
-            <label class="form-label" style="font-size:12px;">Parentesco</label>
-            <select class="form-input" id="ceRespParentesco">
-              <option value="">—</option>
-              <option>Mãe</option><option>Pai</option>
-              <option>Avó</option><option>Avô</option>
-              <option>Tia</option><option>Tio</option>
-              <option>Irmã</option><option>Irmão</option>
-              <option>Tutor(a) legal</option><option>Outro</option>
-            </select>
-          </div>
-          <div>
-            <label class="form-label" style="font-size:12px;">Telefone do responsável</label>
-            <input class="form-input" id="ceRespTelefone" inputmode="numeric" placeholder="(00) 00000-0000" maxlength="15"/>
-          </div>
-          <div>
-            <label class="form-label" style="font-size:12px;">CPF do responsável</label>
-            <input class="form-input" id="ceRespCpf" inputmode="numeric" placeholder="000.000.000-00" maxlength="14"/>
-            <div id="ceRespCpfHint" style="font-size:11px;color:var(--coral);min-height:13px;"></div>
-          </div>
-        </div>
-      </div>
-      <div id="ceMsg" style="font-size:12px;color:var(--text-muted);min-height:15px;"></div>`;
+    const wrap = document.createElement('div');
+    wrap.innerHTML = htmlExtras('ce', false); // edição já tem o campo de nascimento no form do core
+    const box = wrap.firstElementChild;
 
-    // insere antes do bloco que contém o primeiro botão da aba (ex.: "Salvar"); senão, anexa ao fim
     let ref = dados.querySelector('button');
     if (ref) { while (ref && ref.parentNode !== dados) ref = ref.parentNode; }
     if (ref && ref.parentNode === dados) dados.insertBefore(box, ref);
     else dados.appendChild(box);
 
-    wireEventos();
+    wireEventos('ce', salvarEdit);
     return true;
   }
 
-  // ── eventos (máscaras + autosave) ────────────────────────
-  function wireEventos() {
-    const cpf = document.getElementById('ceCpf');
-    const rcpf = document.getElementById('ceRespCpf');
-    const rtel = document.getElementById('ceRespTelefone');
-    if (cpf) cpf.addEventListener('input', () => { cpf.value = mascararCPF(cpf.value); validarCpfHint(cpf, 'ceCpfHint'); });
-    if (rcpf) rcpf.addEventListener('input', () => { rcpf.value = mascararCPF(rcpf.value); validarCpfHint(rcpf, 'ceRespCpfHint'); });
-    if (rtel) rtel.addEventListener('input', () => { rtel.value = mascararTel(rtel.value); });
-
-    ['ceCpf', 'ceEndereco', 'ceRespNome', 'ceRespTelefone', 'ceRespCpf'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.addEventListener('blur', salvar);
-    });
-    const sel = document.getElementById('ceRespParentesco');
-    if (sel) sel.addEventListener('change', salvar);
-  }
-
-  // ── persiste os campos extras direto na tabela leads ─────
-  async function salvar() {
+  async function salvarEdit() {
     if (!CE.leadId || typeof db === 'undefined') return;
-    const val = (id) => (document.getElementById(id)?.value || '').trim();
-    const dados = {
-      cpf: soDig(val('ceCpf')) || null,
-      endereco: val('ceEndereco') || null,
-      responsavel_nome: val('ceRespNome') || null,
-      responsavel_parentesco: val('ceRespParentesco') || null,
-      responsavel_telefone: soDig(val('ceRespTelefone')) || null,
-      responsavel_cpf: soDig(val('ceRespCpf')) || null,
-    };
+    const dados = lerExtras('ce', false);
     const msg = document.getElementById('ceMsg');
     try {
       const { error } = await db.from('leads').update(dados).eq('id', CE.leadId);
@@ -174,12 +206,11 @@
       }
     } catch (e) {
       if (msg) { msg.style.color = 'var(--coral)'; msg.textContent = 'Erro ao salvar: ' + (e.message || ''); }
-      console.error('[cadastro-extra]', e);
+      console.error('[cadastro-extra edição]', e);
     }
   }
 
-  // ── popula os campos ao abrir a ficha de um lead ─────────
-  async function popular() {
+  async function popularEdit() {
     if (!CE.leadId || typeof db === 'undefined') return;
     let lead = {};
     try {
@@ -198,54 +229,113 @@
     set('ceRespCpf', lead.responsavel_cpf ? mascararCPF(lead.responsavel_cpf) : '');
     ['ceCpfHint', 'ceRespCpfHint'].forEach(id => { const h = document.getElementById(id); if (h) h.textContent = ''; });
 
-    avaliarMenor(lead.data_nascimento);
-    ligarToggleData();
+    avaliarMenor('ce', lead.data_nascimento);
+    // escuta o campo de data do form do core (toggle ao vivo)
+    const dadosTab = document.getElementById('fichaTabDados');
+    const dateInput = dadosTab && dadosTab.querySelector('input[type="date"]');
+    if (dateInput && !dateInput.dataset.ceBound) {
+      dateInput.dataset.ceBound = '1';
+      dateInput.addEventListener('change', () => avaliarMenor('ce', dateInput.value));
+    }
   }
 
-  // mostra/esconde o bloco do responsável conforme a idade
-  function avaliarMenor(dataISO) {
-    const box = document.getElementById('ceRespBox');
-    if (!box) return;
-    const a = idadeAnos(dataISO);
-    box.style.display = (a !== null && a < 18) ? 'block' : 'none';
-  }
-
-  // escuta o campo de data da aba pra reavaliar ao vivo
-  function ligarToggleData() {
-    const dados = document.getElementById('fichaTabDados');
-    if (!dados) return;
-    const dateInput = dados.querySelector('input[type="date"]');
-    if (!dateInput || dateInput.dataset.ceBound) return;
-    dateInput.dataset.ceBound = '1';
-    dateInput.addEventListener('change', () => avaliarMenor(dateInput.value));
-  }
-
-  // ── engata no openEditLead (independente da ordem de carga) ─
-  function aoAbrir(id) {
+  function aoAbrirEdit(id) {
     CE.leadId = id;
     let tries = 0;
     const iv = setInterval(() => {
       tries++;
-      if (injetar()) { popular(); clearInterval(iv); }
-      if (tries > 40) clearInterval(iv); // ~2.4s de segurança
+      if (injetarEdit()) { popularEdit(); clearInterval(iv); }
+      if (tries > 40) clearInterval(iv);
     }, 60);
   }
 
-  function instalarHook() {
+  let hookedEdit = false, hookedCriar = false;
+
+  function hookEdit() {
+    if (hookedEdit) return true;
     if (typeof openEditLead !== 'function') return false;
     const _orig = openEditLead;
     openEditLead = function () {
       const r = _orig.apply(this, arguments);
-      aoAbrir(arguments[0]);
+      aoAbrirEdit(arguments[0]);
       return r;
     };
+    hookedEdit = true;
     return true;
   }
 
-  if (!instalarHook()) {
-    const iv = setInterval(() => { if (instalarHook()) clearInterval(iv); }, 500);
+  // =========================================================
+  // 2) NOVO LEAD  (#modalNewLead -> saveNewLead)
+  // =========================================================
+  function injetarCriar() {
+    const modal = document.getElementById('modalNewLead');
+    if (!modal) return false;
+    if (document.getElementById('clBox')) return true;
+    const corpo = modal.querySelector('.modal-body') || modal;
+
+    const wrap = document.createElement('div');
+    wrap.innerHTML = htmlExtras('cl', true); // novo lead não tem nascimento -> incluímos
+    const box = wrap.firstElementChild;
+
+    let ref = corpo.querySelector('button');
+    if (ref) { while (ref && ref.parentNode !== corpo) ref = ref.parentNode; }
+    if (ref && ref.parentNode === corpo) corpo.insertBefore(box, ref);
+    else corpo.appendChild(box);
+
+    wireEventos('cl', null); // sem autosave: grava junto ao criar
+    return true;
+  }
+
+  function resetCriar() {
+    ['clNasc', 'clCpf', 'clEndereco', 'clRespNome', 'clRespParentesco', 'clRespTelefone', 'clRespCpf']
+      .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    ['clCpfHint', 'clRespCpfHint', 'clMsg'].forEach(id => { const h = document.getElementById(id); if (h) h.textContent = ''; });
+    avaliarMenor('cl', null);
+  }
+
+  function hookCriar() {
+    if (hookedCriar) return true;
+    if (typeof saveNewLead !== 'function' || typeof openModal !== 'function') return false;
+
+    // injeta + reseta sempre que o modal de novo lead abre
+    const _openModal = openModal;
+    openModal = function (id) {
+      const r = _openModal.apply(this, arguments);
+      if (id === 'modalNewLead') { injetarCriar(); resetCriar(); }
+      return r;
+    };
+
+    // intercepta o salvar pra gravar os campos extras no lead recém-criado
+    const _save = saveNewLead;
+    saveNewLead = async function () {
+      const extras = lerExtras('cl', true);          // lê ANTES (a original limpa/fecha o modal)
+      const antes = (typeof STATE !== 'undefined' && STATE.leads) ? STATE.leads.length : -1;
+      const r = await _save.apply(this, arguments);
+      try {
+        if (typeof STATE !== 'undefined' && STATE.leads && STATE.leads.length > antes) {
+          const novo = STATE.leads[0];               // saveNewLead faz unshift do novo lead
+          if (novo && novo.id && temAlgo(extras)) {
+            const { error } = await db.from('leads').update(extras).eq('id', novo.id);
+            if (!error) Object.assign(novo, extras);
+          }
+        }
+      } catch (e) { console.error('[cadastro-extra criar]', e); }
+      return r;
+    };
+    hookedCriar = true;
+    return true;
+  }
+
+  // ── instala os hooks (independente da ordem de carga) ────
+  function instalar() {
+    const okEdit = hookEdit();
+    const okCriar = hookCriar();
+    return okEdit && okCriar;
+  }
+  if (!instalar()) {
+    const iv = setInterval(() => { if (instalar()) clearInterval(iv); }, 500);
     setTimeout(() => clearInterval(iv), 15000);
   }
 
-  console.log('✅ cadastro-extra-fix.js carregado — CPF / Endereço / Responsável');
+  console.log('✅ cadastro-extra-fix.js carregado — CPF / Endereço / Responsável financeiro (edição + novo lead)');
 })();
