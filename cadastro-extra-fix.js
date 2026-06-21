@@ -267,14 +267,24 @@
   // =========================================================
   // 2) NOVO LEAD  (#modalNewLead -> saveNewLead)
   // =========================================================
+  let criarDate = null; // campo de nascimento que JÁ existe no modal de novo lead
+
   function injetarCriar() {
     const modal = document.getElementById('modalNewLead');
     if (!modal) return false;
+
+    // acha o campo de nascimento já existente no modal e usa ele pro toggle de menor
+    criarDate = modal.querySelector('input[type="date"]');
+    if (criarDate && !criarDate.dataset.clBound) {
+      criarDate.dataset.clBound = '1';
+      criarDate.addEventListener('change', () => avaliarMenor('cl', criarDate.value));
+    }
+
     if (document.getElementById('clBox')) return true;
     const corpo = modal.querySelector('.modal-body') || modal;
 
     const wrap = document.createElement('div');
-    wrap.innerHTML = htmlExtras('cl', true); // novo lead não tem nascimento -> incluímos
+    wrap.innerHTML = htmlExtras('cl', false); // o modal já tem data de nascimento -> NÃO duplicar
     const box = wrap.firstElementChild;
 
     let ref = corpo.querySelector('button');
@@ -287,10 +297,10 @@
   }
 
   function resetCriar() {
-    ['clNasc', 'clCpf', 'clEndereco', 'clRespNome', 'clRespParentesco', 'clRespTelefone', 'clRespCpf']
+    ['clCpf', 'clEndereco', 'clRespNome', 'clRespParentesco', 'clRespTelefone', 'clRespCpf']
       .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     ['clCpfHint', 'clRespCpfHint', 'clMsg'].forEach(id => { const h = document.getElementById(id); if (h) h.textContent = ''; });
-    avaliarMenor('cl', null);
+    avaliarMenor('cl', criarDate ? criarDate.value : null);
   }
 
   function hookCriar() {
@@ -308,7 +318,8 @@
     // intercepta o salvar pra gravar os campos extras no lead recém-criado
     const _save = saveNewLead;
     saveNewLead = async function () {
-      const extras = lerExtras('cl', true);          // lê ANTES (a original limpa/fecha o modal)
+      const extras = lerExtras('cl', false);         // lê ANTES (a original limpa/fecha o modal)
+      if (criarDate && criarDate.value) extras.data_nascimento = criarDate.value; // salva o nascimento (hoje não é salvo na criação)
       const antes = (typeof STATE !== 'undefined' && STATE.leads) ? STATE.leads.length : -1;
       const r = await _save.apply(this, arguments);
       try {
