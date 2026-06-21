@@ -49,6 +49,37 @@
     return `(${ddd}) ${resto.slice(0, 5)}-${resto.slice(5)}`;
   }
 
+  function mascararCEP(v) {
+    const d = soDig(v).slice(0, 8);
+    return d.length > 5 ? `${d.slice(0, 5)}-${d.slice(5)}` : d;
+  }
+
+  // busca o endereço pelo CEP (ViaCEP, grátis) e preenche o campo Endereço
+  async function buscarCEP(p, onDepois) {
+    const cepEl = document.getElementById(p + 'Cep');
+    const endEl = document.getElementById(p + 'Endereco');
+    const hint = document.getElementById(p + 'CepHint');
+    if (!cepEl) return;
+    const cep = soDig(cepEl.value);
+    if (cep.length !== 8) return;
+    if (cepEl.dataset.last === cep) return;     // evita refazer a mesma busca
+    cepEl.dataset.last = cep;
+    const setHint = (t, cor) => { if (hint) { hint.style.color = cor || 'var(--text-muted)'; hint.textContent = t || ''; } };
+    setHint('Buscando endereço…');
+    try {
+      const resp = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+      const d = await resp.json();
+      if (d.erro) { setHint('CEP não encontrado', 'var(--coral)'); return; }
+      const cidadeUf = (d.localidade && d.uf) ? `${d.localidade}/${d.uf}` : (d.localidade || '');
+      const txt = [d.logradouro, d.bairro, cidadeUf].filter(Boolean).join(', ');
+      if (endEl && txt) endEl.value = txt;
+      setHint('Endereço preenchido — complete o número');
+      if (typeof onDepois === 'function') onDepois();
+    } catch (e) {
+      setHint('Não consegui buscar o CEP', 'var(--coral)');
+    }
+  }
+
   function idadeAnos(dataISO) {
     if (!dataISO) return null;
     const m = String(dataISO).match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -95,9 +126,14 @@
             <div id="${p}CpfHint" style="font-size:11px;color:var(--coral);min-height:13px;"></div>
           </div>
           <div>
-            <label class="form-label" style="font-size:12px;">Endereço</label>
-            <input class="form-input" id="${p}Endereco" placeholder="Rua, nº, bairro, cidade"/>
+            <label class="form-label" style="font-size:12px;">CEP</label>
+            <input class="form-input" id="${p}Cep" inputmode="numeric" placeholder="00000-000" maxlength="9"/>
+            <div id="${p}CepHint" style="font-size:11px;color:var(--text-muted);min-height:13px;"></div>
           </div>
+        </div>
+        <div style="margin-bottom:10px;">
+          <label class="form-label" style="font-size:12px;">Endereço</label>
+          <input class="form-input" id="${p}Endereco" placeholder="Rua, nº, bairro, cidade"/>
         </div>
         <div id="${p}RespBox" style="display:none;border:1px solid var(--gold,#C9A84C);background:rgba(201,168,76,.06);border-radius:10px;padding:12px;margin-bottom:8px;">
           <div style="font-size:12px;color:var(--gold);font-weight:600;margin-bottom:10px;">
@@ -140,10 +176,18 @@
     const rcpf = document.getElementById(p + 'RespCpf');
     const rtel = document.getElementById(p + 'RespTelefone');
     const nasc = document.getElementById(p + 'Nasc');
+    const cep = document.getElementById(p + 'Cep');
     if (cpf) cpf.addEventListener('input', () => { cpf.value = mascararCPF(cpf.value); validarCpfHint(cpf, p + 'CpfHint'); });
     if (rcpf) rcpf.addEventListener('input', () => { rcpf.value = mascararCPF(rcpf.value); validarCpfHint(rcpf, p + 'RespCpfHint'); });
     if (rtel) rtel.addEventListener('input', () => { rtel.value = mascararTel(rtel.value); });
     if (nasc) nasc.addEventListener('change', () => avaliarMenor(p, nasc.value));
+    if (cep) {
+      cep.addEventListener('input', () => {
+        cep.value = mascararCEP(cep.value);
+        if (soDig(cep.value).length === 8) buscarCEP(p, onAutosave);
+      });
+      if (onAutosave) cep.addEventListener('blur', onAutosave);
+    }
     if (onAutosave) {
       [p + 'Cpf', p + 'Endereco', p + 'RespNome', p + 'RespTelefone', p + 'RespCpf'].forEach(id => {
         const el = document.getElementById(id);
@@ -159,6 +203,7 @@
     const val = (id) => (document.getElementById(id)?.value || '').trim();
     const o = {
       cpf: soDig(val(p + 'Cpf')) || null,
+      cep: soDig(val(p + 'Cep')) || null,
       endereco: val(p + 'Endereco') || null,
       responsavel_nome: val(p + 'RespNome') || null,
       responsavel_parentesco: val(p + 'RespParentesco') || null,
@@ -215,19 +260,21 @@
     let lead = {};
     try {
       const { data } = await db.from('leads')
-        .select('cpf,endereco,responsavel_nome,responsavel_parentesco,responsavel_telefone,responsavel_cpf,data_nascimento')
+        .select('cpf,cep,endereco,responsavel_nome,responsavel_parentesco,responsavel_telefone,responsavel_cpf,data_nascimento')
         .eq('id', CE.leadId).single();
       lead = data || {};
     } catch (e) { lead = {}; }
 
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
     set('ceCpf', lead.cpf ? mascararCPF(lead.cpf) : '');
+    set('ceCep', lead.cep ? mascararCEP(lead.cep) : '');
     set('ceEndereco', lead.endereco || '');
     set('ceRespNome', lead.responsavel_nome || '');
     set('ceRespParentesco', lead.responsavel_parentesco || '');
     set('ceRespTelefone', lead.responsavel_telefone ? mascararTel(lead.responsavel_telefone) : '');
     set('ceRespCpf', lead.responsavel_cpf ? mascararCPF(lead.responsavel_cpf) : '');
     ['ceCpfHint', 'ceRespCpfHint'].forEach(id => { const h = document.getElementById(id); if (h) h.textContent = ''; });
+    const cepEl = document.getElementById('ceCep'); if (cepEl && cepEl.dataset) delete cepEl.dataset.last;
 
     avaliarMenor('ce', lead.data_nascimento);
     // escuta o campo de data do form do core (toggle ao vivo)
@@ -297,9 +344,9 @@
   }
 
   function resetCriar() {
-    ['clCpf', 'clEndereco', 'clRespNome', 'clRespParentesco', 'clRespTelefone', 'clRespCpf']
-      .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
-    ['clCpfHint', 'clRespCpfHint', 'clMsg'].forEach(id => { const h = document.getElementById(id); if (h) h.textContent = ''; });
+    ['clCpf', 'clCep', 'clEndereco', 'clRespNome', 'clRespParentesco', 'clRespTelefone', 'clRespCpf']
+      .forEach(id => { const el = document.getElementById(id); if (el) { el.value = ''; if (el.dataset) delete el.dataset.last; } });
+    ['clCpfHint', 'clCepHint', 'clRespCpfHint', 'clMsg'].forEach(id => { const h = document.getElementById(id); if (h) h.textContent = ''; });
     avaliarMenor('cl', criarDate ? criarDate.value : null);
   }
 
