@@ -1,9 +1,8 @@
 // ============================================================
 // CLINICALEAD — COBRANÇAS (visão geral das mensalidades) — Fase 1
-// Item "Cobranças" no menu lateral -> abre um painel com as parcelas
-// da clínica: atrasadas, deste mês e do próximo mês, com o nome do
-// paciente, totais e "marcar paga" direto (cria pagamento).
-// Self-contained; usa as tabelas mensalidade_parcelas + leads (RLS).
+// Item "Cobranças" no menu lateral -> painel com as parcelas em aberto
+// da clínica (atrasadas, este mês, próximo mês), com nome do paciente,
+// totais e PAGAMENTO PARCIAL direto (cria pagamento ligado à parcela).
 // ============================================================
 
 (function () {
@@ -15,19 +14,16 @@
   const fmt = (v) => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
   const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const hojeISO = () => iso(new Date());
+  const restante = (p) => Math.max(0, Number(p.valor || 0) - Number(p.valor_pago || 0));
   function brData(s) { if (!s) return '—'; const d = new Date(s + 'T12:00'); return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('pt-BR'); }
 
   function periodo(filtro) {
     const h = new Date();
     if (filtro === 'atrasadas') return { tipo: 'atrasadas' };
-    if (filtro === 'proximo') {
-      return { tipo: 'range', de: iso(new Date(h.getFullYear(), h.getMonth() + 1, 1)), ate: iso(new Date(h.getFullYear(), h.getMonth() + 2, 0)) };
-    }
-    // este mês (padrão)
+    if (filtro === 'proximo') return { tipo: 'range', de: iso(new Date(h.getFullYear(), h.getMonth() + 1, 1)), ate: iso(new Date(h.getFullYear(), h.getMonth() + 2, 0)) };
     return { tipo: 'range', de: iso(new Date(h.getFullYear(), h.getMonth(), 1)), ate: iso(new Date(h.getFullYear(), h.getMonth() + 1, 0)) };
   }
 
-  // ── abre o painel ────────────────────────────────────────
   window.abrirCobrancas = function () {
     if (!document.getElementById('modalCobrancas')) {
       const ov = document.createElement('div');
@@ -62,7 +58,6 @@
     const lista = document.getElementById('cobLista');
     const resumo = document.getElementById('cobResumo');
     if (!lista) return;
-    // marca o filtro ativo
     document.querySelectorAll('.cob-fbtn').forEach(b => {
       b.style.cssText = b.dataset.f === COB.filtro
         ? 'background:var(--gold-pale);border-color:var(--gold-border);color:var(--gold);font-weight:600;' : '';
@@ -74,14 +69,13 @@
 
     try {
       let q = db.from('mensalidade_parcelas').select('*')
-        .eq('clinic_id', clinic.id).eq('status', 'pendente');
+        .eq('clinic_id', clinic.id).in('status', ['pendente', 'parcial']);
       const per = periodo(COB.filtro);
       if (per.tipo === 'atrasadas') q = q.lt('vencimento', hojeISO());
       else q = q.gte('vencimento', per.de).lte('vencimento', per.ate);
       const { data: parcelas } = await q.order('vencimento');
       COB.parcelas = parcelas || [];
 
-      // nomes dos pacientes
       COB.nomes = {};
       const ids = [...new Set(COB.parcelas.map(p => p.lead_id).filter(Boolean))];
       if (ids.length) {
@@ -100,11 +94,11 @@
     if (!lista) return;
     const hoje = hojeISO();
 
-    const total = COB.parcelas.reduce((s, p) => s + Number(p.valor || 0), 0);
-    const atrasado = COB.parcelas.filter(p => p.vencimento < hoje).reduce((s, p) => s + Number(p.valor || 0), 0);
+    const total = COB.parcelas.reduce((s, p) => s + restante(p), 0);
+    const atrasado = COB.parcelas.filter(p => p.vencimento < hoje).reduce((s, p) => s + restante(p), 0);
     if (resumo) {
       resumo.innerHTML = `
-        <span style="margin-right:16px;">Total: <strong style="font-family:var(--mono);">${fmt(total)}</strong></span>
+        <span style="margin-right:16px;">A receber: <strong style="font-family:var(--mono);">${fmt(total)}</strong></span>
         ${atrasado > 0 ? `<span style="color:#C0624A;">Atrasado: <strong style="font-family:var(--mono);">${fmt(atrasado)}</strong></span>` : ''}
         <span style="color:var(--text-muted);margin-left:8px;">(${COB.parcelas.length} parcela${COB.parcelas.length === 1 ? '' : 's'})</span>`;
     }
@@ -115,13 +109,16 @@
     }
 
     lista.innerHTML = COB.parcelas.map(p => {
-      const venc = p.vencimento;
-      const atrasada = venc < hoje;
-      const cor = atrasada ? '#C0624A' : '#5B8DB8';
+      const venc = p.vencimento, atrasada = venc < hoje;
+      const vp = Number(p.valor_pago || 0), rest = restante(p);
+      const parcial = vp > 0;
+      const cor = parcial ? '#C9A84C' : atrasada ? '#C0624A' : '#5B8DB8';
+      const label = parcial ? (atrasada ? 'Parcial · atrasada' : 'Parcial') : (atrasada ? 'Atrasada' : 'A vencer');
       const nome = COB.nomes[p.lead_id] || 'Paciente';
       let acao;
       if (COB.marcando === p.id) {
         acao = `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:8px;">
+          <input class="form-input" id="cbValor_${p.id}" type="number" step="0.01" value="${rest}" title="Valor a pagar" style="font-size:12px;padding:4px 6px;width:96px;"/>
           <select class="form-input" id="cbForma_${p.id}" style="font-size:12px;padding:4px 6px;width:auto;">
             ${Object.entries(FORMA).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}
           </select>
@@ -130,15 +127,16 @@
           <button class="btn btn-sm btn-ghost" onclick="cobCancelar()">Cancelar</button>
         </div>`;
       } else {
-        acao = `<button class="btn btn-sm" style="border:1px solid var(--gold,#C9A84C);color:var(--gold,#C9A84C);" onclick="cobMarcar('${p.id}')"><i class="ti ti-check"></i> Marcar paga</button>`;
+        acao = `<button class="btn btn-sm" style="border:1px solid var(--gold,#C9A84C);color:var(--gold,#C9A84C);" onclick="cobMarcar('${p.id}')"><i class="ti ti-check"></i> ${parcial ? 'Pagar restante' : 'Marcar paga'}</button>`;
       }
+      const detPago = parcial ? `<span style="color:var(--text-muted);"> · pago ${fmt(vp)} · falta ${fmt(rest)}</span>` : '';
       return `<div class="ficha-linha" style="padding:12px 0;border-bottom:1px solid var(--border-subtle,#2a2a2a);">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
           <div>
             <a onclick="cobAbrirPaciente('${p.lead_id}')" style="font-weight:600;cursor:pointer;color:var(--text-primary);text-decoration:underline;text-decoration-color:var(--border-subtle,#444);">${nome}</a>
-            <div style="font-size:12px;color:var(--text-secondary);">parcela #${p.numero} · venc. ${brData(venc)} · <strong style="font-family:var(--mono);">${fmt(p.valor)}</strong></div>
+            <div style="font-size:12px;color:var(--text-secondary);">parcela #${p.numero} · venc. ${brData(venc)} · <strong style="font-family:var(--mono);">${fmt(p.valor)}</strong>${detPago}</div>
           </div>
-          <span class="badge" style="background:${cor}22;color:${cor};border:1px solid ${cor}44;">${atrasada ? 'Atrasada' : 'A vencer'}</span>
+          <span class="badge" style="background:${cor}22;color:${cor};border:1px solid ${cor}44;">${label}</span>
         </div>
         ${acao}
       </div>`;
@@ -152,19 +150,26 @@
     const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
     if (!clinic) return;
     const p = COB.parcelas.find(x => x.id === id); if (!p) return;
+    const rest = restante(p);
+    const inp = parseFloat(document.getElementById('cbValor_' + id)?.value);
+    let amount = isNaN(inp) ? rest : inp;
+    if (amount <= 0) { if (typeof toast === 'function') toast('Valor inválido', 'error'); return; }
+    if (amount > rest) amount = rest;
     const forma = document.getElementById('cbForma_' + id)?.value || 'pix';
     const data = document.getElementById('cbData_' + id)?.value || hojeISO();
     try {
       const { data: pag, error } = await db.from('pagamentos').insert({
-        clinic_id: clinic.id, lead_id: p.lead_id, valor: p.valor, forma, data,
+        clinic_id: clinic.id, lead_id: p.lead_id, valor: amount, forma, data, parcela_id: id,
         observacao: `Mensalidade (parcela ${p.numero})`,
       }).select().single();
       if (error) throw error;
+      const novoPago = Number(p.valor_pago || 0) + amount;
+      const quitado = novoPago >= Number(p.valor || 0) - 0.005;
       const { error: e2 } = await db.from('mensalidade_parcelas')
-        .update({ status: 'pago', pago_em: data, pagamento_id: pag.id }).eq('id', id);
+        .update({ valor_pago: novoPago, status: quitado ? 'pago' : 'parcial', pago_em: quitado ? data : null }).eq('id', id);
       if (e2) throw e2;
       COB.marcando = null;
-      if (typeof toast === 'function') toast('Parcela paga! ✅');
+      if (typeof toast === 'function') toast(quitado ? 'Parcela quitada! ✅' : 'Pagamento parcial registrado 💵');
       cobCarregar();
     } catch (e) {
       if (typeof toast === 'function') toast('Erro: ' + (e.message || ''), 'error');
@@ -178,7 +183,6 @@
     if (typeof openEditLead === 'function') openEditLead(leadId);
   };
 
-  // ── injeta o item "Cobranças" no menu lateral ────────────
   function injetarMenu() {
     if (document.getElementById('navCobrancas')) return;
     const anchor = document.querySelector('.nav-item[data-page="financeiro"]')
@@ -196,5 +200,5 @@
   setTimeout(injetarMenu, 1500);
   setTimeout(injetarMenu, 4000);
 
-  console.log('✅ cobrancas-fix.js carregado — painel de Cobranças');
+  console.log('✅ cobrancas-fix.js carregado — painel de Cobranças (com pagamento parcial)');
 })();
