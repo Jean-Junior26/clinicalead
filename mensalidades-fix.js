@@ -1,11 +1,9 @@
 // ============================================================
 // CLINICALEAD — MENSALIDADES (cobrança recorrente do paciente) — Fase 1
 // Aba "Mensalidades" na ficha do paciente (#modalEditLead).
-//   - Cria/edita o plano (valor, dia, início, nº parcelas ou contínuo)
-//   - Gera parcelas mês a mês
-//   - PAGAMENTO PARCIAL: paga um pedaço -> status "Parcial", resto em aberto
-//   - Cada pagamento liga na parcela (parcela_id) -> dá pra desfazer
-//   - "Atrasado" é calculado na hora (em aberto + vencimento já passou)
+//   - Cria/edita plano, gera parcelas, pagamento parcial
+//   - RENEGOCIAÇÃO: seleciona parcelas em aberto e gera um acordo novo
+//   - "Atrasado" calculado na hora (em aberto + vencimento já passou)
 // ============================================================
 
 (function () {
@@ -32,7 +30,6 @@
   }
   function comp(ano, mes) { return `${ano}-${String(mes + 1).padStart(2, '0')}-01`; }
 
-  // status visual (label + cor)
   function statusVis(p) {
     if (p.status === 'pago') return { label: 'Pago', cor: '#7FB069' };
     if (p.status === 'cancelado') return { label: 'Cancelado', cor: '#8A8570' };
@@ -162,11 +159,13 @@
       aberto += rest;
       if (x.vencimento < hoje) atrasado += rest;
     });
+    const temAberta = parc.some(aberta);
 
     const linhas = parc.map(x => {
       const sv = statusVis(x);
       const rest = restante(x);
       const vp = Number(x.valor_pago || 0);
+      const acordo = x.renegociacao_id && x.status !== 'renegociado';
       let acao = '';
       if (MENS.marcando === x.id && aberta(x)) {
         acao = `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:8px;">
@@ -184,9 +183,10 @@
         acao = `<button class="btn btn-sm btn-ghost" onclick="mensDesmarcar('${x.id}')" title="Desfazer"><i class="ti ti-arrow-back-up"></i> Desmarcar</button>`;
       }
       const detPago = vp > 0 ? `<span style="color:var(--text-muted);"> · pago ${fmt(vp)}${rest > 0 ? ` · falta ${fmt(rest)}` : ''}</span>` : '';
+      const tagAcordo = acordo ? `<span style="font-size:10px;color:var(--gold);border:1px solid var(--gold,#C9A84C);border-radius:6px;padding:0 5px;margin-left:6px;">acordo</span>` : '';
       return `<div class="ficha-linha">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
-          <div><strong>#${x.numero}</strong> · venc. ${brData(x.vencimento)} · <strong style="font-family:var(--mono);">${fmt(x.valor)}</strong>${detPago}</div>
+          <div><strong>#${x.numero}</strong>${tagAcordo} · venc. ${brData(x.vencimento)} · <strong style="font-family:var(--mono);">${fmt(x.valor)}</strong>${detPago}</div>
           <span class="badge" style="background:${sv.cor}22;color:${sv.cor};border:1px solid ${sv.cor}44;">${sv.label}</span>
         </div>
         ${acao}
@@ -210,6 +210,7 @@
           <div>Em aberto: <strong style="color:#5B8DB8;font-family:var(--mono);">${fmt(aberto)}</strong></div>
           <div>Atrasado: <strong style="color:#C0624A;font-family:var(--mono);">${fmt(atrasado)}</strong></div>
         </div>
+        ${temAberta ? `<button class="btn btn-sm" style="margin-top:12px;border:1px solid var(--gold,#C9A84C);color:var(--gold,#C9A84C);" onclick="mensRenegociar()"><i class="ti ti-refresh"></i> Renegociar parcelas em aberto</button>` : ''}
       </div>
       ${linhas || '<div class="ficha-vazio">Sem parcelas.</div>'}
       ${!p.total_parcelas ? `<button class="btn btn-sm btn-ghost" style="margin-top:10px;" onclick="mensGerarMais()"><i class="ti ti-plus"></i> Gerar mais 12 meses</button>` : ''}
@@ -227,7 +228,7 @@
     const inp = parseFloat(document.getElementById('mfValor_' + id)?.value);
     let amount = isNaN(inp) ? rest : inp;
     if (amount <= 0) { const m = document.getElementById('mensMsg'); if (m) m.textContent = 'Valor inválido.'; return; }
-    if (amount > rest) amount = rest; // não paga mais que o restante
+    if (amount > rest) amount = rest;
     const forma = document.getElementById('mfForma_' + id)?.value || 'pix';
     const data = document.getElementById('mfData_' + id)?.value || hojeISO();
     try {
@@ -262,6 +263,113 @@
     } catch (e) { console.error('[mensalidade desmarcar]', e); if (typeof toast === 'function') toast('Erro ao desfazer', 'error'); }
   };
 
+  // ── RENEGOCIAÇÃO ─────────────────────────────────────────
+  window.mensRenegociar = function () {
+    const box = document.getElementById('fichaTabMensalidades');
+    if (!box || !MENS.plano) return;
+    const abertas = MENS.parcelas.filter(aberta);
+    if (!abertas.length) { if (typeof toast === 'function') toast('Não há parcelas em aberto'); return; }
+    const hoje = hojeISO();
+    const h = new Date();
+    const venc1 = venc(h.getFullYear(), h.getMonth() + 1, MENS.plano.dia_vencimento);
+
+    box.innerHTML = `
+      <button class="btn btn-sm btn-ghost" onclick="mensCarregar()"><i class="ti ti-arrow-left"></i> Voltar</button>
+      <div style="font-size:13px;color:var(--text-secondary);margin:12px 0;">
+        Selecione as parcelas que entram no acordo. Elas serão marcadas como <b>renegociadas</b> e um novo conjunto de parcelas será gerado pelo valor acordado.
+      </div>
+      <div style="border:1px solid var(--border-subtle,#2a2a2a);border-radius:10px;padding:10px;margin-bottom:14px;max-height:30vh;overflow-y:auto;">
+        ${abertas.map(x => {
+          const atrasada = x.vencimento < hoje;
+          return `<label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px;cursor:pointer;">
+            <input type="checkbox" class="reneg-chk" data-id="${x.id}" data-rest="${restante(x)}" ${atrasada ? 'checked' : ''} onchange="mensRenegCalc()"/>
+            <span style="flex:1;">#${x.numero} · venc. ${brData(x.vencimento)} · <strong style="font-family:var(--mono);">${fmt(restante(x))}</strong>${atrasada ? ' <span style="color:#C0624A;">(atrasada)</span>' : ''}</span>
+          </label>`;
+        }).join('')}
+      </div>
+      <div style="font-size:13px;margin-bottom:12px;">Selecionado: <strong id="renegSel" style="font-family:var(--mono);">R$ 0,00</strong></div>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div><label class="form-label" style="font-size:12px;">Valor total do acordo (R$)</label>
+            <input class="form-input" id="renegValor" type="number" step="0.01"/></div>
+          <div><label class="form-label" style="font-size:12px;">Em quantas parcelas</label>
+            <input class="form-input" id="renegQtd" type="number" min="1" value="1"/></div>
+        </div>
+        <div><label class="form-label" style="font-size:12px;">1º vencimento</label>
+          <input class="form-input" id="renegVenc" type="date" value="${venc1}"/></div>
+        <div><label class="form-label" style="font-size:12px;">Observação (opcional)</label>
+          <input class="form-input" id="renegObs" placeholder="Ex: acordo verbal, desconto de juros"/></div>
+        <button class="btn btn-primary" onclick="mensConfirmarRenegociacao()"><i class="ti ti-check"></i> Gerar acordo</button>
+        <div id="mensMsg" style="font-size:12px;color:var(--coral);min-height:14px;"></div>
+      </div>`;
+    mensRenegCalc();
+  };
+
+  window.mensRenegCalc = function () {
+    let total = 0;
+    document.querySelectorAll('.reneg-chk:checked').forEach(c => { total += Number(c.dataset.rest || 0); });
+    const sel = document.getElementById('renegSel'); if (sel) sel.textContent = fmt(total);
+    const v = document.getElementById('renegValor'); if (v && !v.dataset.touched) v.value = total.toFixed(2);
+    const q = document.getElementById('renegQtd');
+    const n = document.querySelectorAll('.reneg-chk:checked').length;
+    if (q && !q.dataset.touched && n > 0) q.value = n;
+  };
+
+  window.mensConfirmarRenegociacao = async function () {
+    const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
+    const msg = document.getElementById('mensMsg'); const set = (t) => { if (msg) msg.textContent = t || ''; };
+    if (!clinic || !MENS.plano) return;
+    const sel = [...document.querySelectorAll('.reneg-chk:checked')].map(c => c.dataset.id);
+    if (!sel.length) { set('Selecione ao menos uma parcela.'); return; }
+    const valorOriginal = [...document.querySelectorAll('.reneg-chk:checked')].reduce((s, c) => s + Number(c.dataset.rest || 0), 0);
+    const valorNovo = parseFloat(document.getElementById('renegValor')?.value) || 0;
+    const qtd = parseInt(document.getElementById('renegQtd')?.value) || 1;
+    const venc1 = document.getElementById('renegVenc')?.value;
+    const obs = (document.getElementById('renegObs')?.value || '').trim();
+    if (valorNovo <= 0) { set('Informe o valor do acordo.'); return; }
+    if (qtd < 1) { set('Número de parcelas inválido.'); return; }
+    if (!venc1) { set('Informe o 1º vencimento.'); return; }
+    set('Gerando acordo…');
+    try {
+      const { data: acordo, error } = await db.from('renegociacoes').insert({
+        clinic_id: clinic.id, lead_id: MENS.leadId, mensalidade_id: MENS.plano.id,
+        qtd_origem: sel.length, valor_original: valorOriginal, valor_novo: valorNovo,
+        qtd_parcelas: qtd, observacao: obs || null,
+      }).select().single();
+      if (error) throw error;
+
+      // marca as parcelas escolhidas como renegociadas
+      await db.from('mensalidade_parcelas')
+        .update({ status: 'renegociado', renegociacao_id: acordo.id }).in('id', sel);
+
+      // gera as novas parcelas do acordo
+      const d = new Date(venc1 + 'T12:00');
+      const dia = d.getDate();
+      const maxNum = MENS.parcelas.reduce((a, b) => Math.max(a, b.numero || 0), 0);
+      const base = Math.floor((valorNovo / qtd) * 100) / 100;
+      let resto = valorNovo;
+      const novas = [];
+      for (let i = 0; i < qtd; i++) {
+        const tot = d.getMonth() + i;
+        const a = d.getFullYear() + Math.floor(tot / 12);
+        const m = ((tot % 12) + 12) % 12;
+        const valor = (i === qtd - 1) ? Math.round(resto * 100) / 100 : base;
+        resto -= base;
+        novas.push({
+          mensalidade_id: MENS.plano.id, clinic_id: clinic.id, lead_id: MENS.leadId,
+          numero: maxNum + 1 + i, competencia: comp(a, m), vencimento: venc(a, m, dia),
+          valor, status: 'pendente', renegociacao_id: acordo.id,
+        });
+      }
+      const { error: e3 } = await db.from('mensalidade_parcelas').insert(novas);
+      if (e3) throw e3;
+
+      if (typeof toast === 'function') toast('Acordo criado! 🤝');
+      window.mensCarregar();
+    } catch (e) { set('Erro: ' + (e.message || '')); console.error('[renegociacao]', e); }
+  };
+
+  // ── editar / encerrar / gerar mais ───────────────────────
   window.mensEditarPlano = function () {
     const box = document.getElementById('fichaTabMensalidades');
     if (!box || !MENS.plano) return;
@@ -298,7 +406,7 @@
     try {
       await db.from('mensalidades').update({ descricao: desc || null, valor, dia_vencimento: dia }).eq('id', p.id);
       if (aplicar) {
-        const pend = MENS.parcelas.filter(x => x.status === 'pendente'); // só as totalmente em aberto
+        const pend = MENS.parcelas.filter(x => x.status === 'pendente' && !x.renegociacao_id);
         for (const x of pend) {
           const c = new Date(x.competencia + 'T12:00');
           await db.from('mensalidade_parcelas').update({ valor, vencimento: venc(c.getFullYear(), c.getMonth(), dia) }).eq('id', x.id);
@@ -393,5 +501,10 @@
     setTimeout(() => clearInterval(iv), 15000);
   }
 
-  console.log('✅ mensalidades-fix.js carregado — aba Mensalidades (com pagamento parcial)');
+  // marca campos de renegociação como "tocados" pra não sobrescrever
+  document.addEventListener('input', (e) => {
+    if (e.target && (e.target.id === 'renegValor' || e.target.id === 'renegQtd')) e.target.dataset.touched = '1';
+  });
+
+  console.log('✅ mensalidades-fix.js carregado — Mensalidades (parcial + renegociação)');
 })();
