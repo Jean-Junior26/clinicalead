@@ -5,6 +5,7 @@
 // ============================================================
 
 let RESP = { lista: [] };
+let TAXAS = { faixas: [] };
 
 // Carrega a lista de responsáveis da clínica ativa
 async function carregarResponsaveis() {
@@ -47,11 +48,25 @@ async function abrirGerenciarResponsaveis() {
             <button class="btn btn-primary" onclick="adicionarResponsavel()"><i class="ti ti-plus"></i> Adicionar</button>
           </div>
           <div id="listaResponsaveis"></div>
+
+          <div id="taxasCartaoBox" style="margin-top:18px;border-top:1px solid var(--border-subtle,#2a2a2a);padding-top:16px;">
+            <div style="font-weight:600;font-size:14px;margin-bottom:4px;"><i class="ti ti-credit-card" style="color:var(--gold);margin-right:6px;"></i>Taxas de cartão</div>
+            <div style="font-size:12px;color:var(--text-secondary);margin-bottom:12px;">Opcional. Se preenchido, a comissão <b>percentual</b> é calculada sobre o valor <b>líquido</b> (venda − taxa do cartão). Vazio = calcula sobre o valor cheio (como antes).</div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+              <div><label class="form-label" style="font-size:12px;">Débito (%)</label><input type="number" step="0.01" class="form-input" id="taxaDebito" placeholder="0" style="width:110px;"/></div>
+              <div><label class="form-label" style="font-size:12px;">Crédito à vista (%)</label><input type="number" step="0.01" class="form-input" id="taxaCreditoVista" placeholder="0" style="width:150px;"/></div>
+            </div>
+            <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">Crédito parcelado (faixas de parcelas):</div>
+            <div id="taxasFaixas"></div>
+            <button class="btn btn-sm btn-ghost" onclick="taxaAddFaixa()" style="margin-top:6px;"><i class="ti ti-plus"></i> Adicionar faixa</button>
+            <button class="btn btn-sm btn-primary" style="width:100%;margin-top:12px;" onclick="salvarTaxasCartao()"><i class="ti ti-device-floppy"></i> Salvar taxas de cartão</button>
+          </div>
         </div>
       </div>`;
     document.body.appendChild(ov);
   }
   await renderListaResponsaveis();
+  await renderTaxasCartao();
   openModal('modalResponsaveis');
 }
 
@@ -130,6 +145,62 @@ async function salvarComissaoResp(id) {
   if (r) Object.assign(r, dados);
   toast('Comissão salva! 💰');
 }
+
+// ── Taxas de cartão da clínica (desconto na comissão) ────────
+async function renderTaxasCartao() {
+  const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
+  if (!clinic) return;
+  let cfg = null;
+  try {
+    const { data } = await db.from('clinicas').select('taxas_cartao').eq('id', clinic.id).maybeSingle();
+    cfg = (data && data.taxas_cartao) ? data.taxas_cartao : null;
+  } catch (e) { cfg = null; }
+  TAXAS.faixas = (cfg && Array.isArray(cfg.parcelado)) ? cfg.parcelado.slice() : [];
+  const d = document.getElementById('taxaDebito'); if (d) d.value = (cfg && cfg.debito != null) ? cfg.debito : '';
+  const cv = document.getElementById('taxaCreditoVista'); if (cv) cv.value = (cfg && cfg.credito_vista != null) ? cfg.credito_vista : '';
+  renderFaixasTaxa();
+}
+
+function renderFaixasTaxa() {
+  const cont = document.getElementById('taxasFaixas');
+  if (!cont) return;
+  if (!TAXAS.faixas.length) {
+    cont.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:4px 0;">Nenhuma faixa. Ex.: de 1 a 6 = 3,5% · de 7 a 12 = 5%.</div>';
+    return;
+  }
+  cont.innerHTML = TAXAS.faixas.map((f, i) => `
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;font-size:12px;flex-wrap:wrap;">
+      <span>de</span><input type="number" min="1" class="form-input" style="width:60px;padding:4px 6px;" value="${f.de ?? ''}" onchange="taxaSetFaixa(${i},'de',this.value)"/>
+      <span>a</span><input type="number" min="1" class="form-input" style="width:60px;padding:4px 6px;" value="${f.ate ?? ''}" onchange="taxaSetFaixa(${i},'ate',this.value)"/>
+      <span>parcelas →</span><input type="number" step="0.01" class="form-input" style="width:80px;padding:4px 6px;" value="${f.taxa ?? ''}" onchange="taxaSetFaixa(${i},'taxa',this.value)"/><span>%</span>
+      <button class="btn btn-sm btn-ghost btn-icon" onclick="taxaRemoveFaixa(${i})"><i class="ti ti-trash" style="color:var(--coral);"></i></button>
+    </div>`).join('');
+}
+
+window.taxaSetFaixa = function (i, campo, val) { if (TAXAS.faixas[i]) TAXAS.faixas[i][campo] = (val === '' ? null : Number(val)); };
+window.taxaAddFaixa = function () { TAXAS.faixas.push({ de: null, ate: null, taxa: null }); renderFaixasTaxa(); };
+window.taxaRemoveFaixa = function (i) { TAXAS.faixas.splice(i, 1); renderFaixasTaxa(); };
+
+window.salvarTaxasCartao = async function () {
+  const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
+  if (!clinic) return;
+  const debito = parseFloat(document.getElementById('taxaDebito').value);
+  const creditoVista = parseFloat(document.getElementById('taxaCreditoVista').value);
+  const parcelado = TAXAS.faixas
+    .filter(f => f.de != null && f.ate != null && f.taxa != null)
+    .map(f => ({ de: Number(f.de), ate: Number(f.ate), taxa: Number(f.taxa) }));
+  const cfg = {
+    debito: isNaN(debito) ? 0 : debito,
+    credito_vista: isNaN(creditoVista) ? 0 : creditoVista,
+    parcelado,
+  };
+  const vazio = !cfg.debito && !cfg.credito_vista && !parcelado.length;
+  const { error } = await db.from('clinicas').update({ taxas_cartao: vazio ? null : cfg }).eq('id', clinic.id);
+  if (error) { toast('Erro: ' + error.message, 'error'); return; }
+  // atualiza o estado local da clínica, se existir
+  if (typeof currentClinic === 'function') { const c = currentClinic(); if (c) c.taxas_cartao = vazio ? null : cfg; }
+  toast('Taxas de cartão salvas! 💳');
+};
 
 async function adicionarResponsavel() {
   const nome = (document.getElementById('novoRespNome')?.value || '').trim();
