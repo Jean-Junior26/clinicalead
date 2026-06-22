@@ -7,6 +7,20 @@
 
 let DESEMP = { inicio: null, fim: null, periodo: 'mes' };
 
+// Taxa (%) do cartão para um pagamento, conforme forma + nº de parcelas.
+// Sem config (taxas null) ou forma não-cartão => 0 (comissão sobre o valor cheio).
+function taxaDoPagamento(taxas, forma, parcelas) {
+  if (!taxas) return 0;
+  const p = Number(parcelas) || 1;
+  if (forma === 'cartao_debito') return Number(taxas.debito) || 0;
+  if (forma === 'cartao_credito') {
+    if (p <= 1) return Number(taxas.credito_vista) || 0;
+    const faixa = (taxas.parcelado || []).find(f => p >= Number(f.de) && p <= Number(f.ate));
+    return faixa ? (Number(faixa.taxa) || 0) : 0;
+  }
+  return 0; // pix, dinheiro, boleto, transferencia: sem taxa
+}
+
 // Define o período (atalhos)
 function desempSetPeriodo(p) {
   const hoje = new Date();
@@ -53,6 +67,13 @@ async function renderDesempenhoEquipe() {
   });
 
   try {
+    // taxas de cartão da clínica (opcional; vazio => comissão sobre valor cheio)
+    let taxasCartao = null;
+    try {
+      const { data: cRow } = await db.from('clinicas').select('taxas_cartao').eq('id', clinic.id).maybeSingle();
+      taxasCartao = (cRow && cRow.taxas_cartao) ? cRow.taxas_cartao : null;
+    } catch (e) { taxasCartao = null; }
+
     // 1) AGENDAMENTOS por responsável (consultas.agendado_por)
     let qCons = db.from('consultas').select('agendado_por, data').eq('clinic_id', clinic.id).not('agendado_por', 'is', null);
     if (DESEMP.inicio) qCons = qCons.gte('data', DESEMP.inicio).lte('data', DESEMP.fim);
@@ -97,7 +118,7 @@ async function renderDesempenhoEquipe() {
     }
 
     // Busca os PAGAMENTOS do período (a comissão sai sobre o que foi pago)
-    let qPag = db.from('pagamentos').select('orcamento_id, valor, data').eq('clinic_id', clinic.id);
+    let qPag = db.from('pagamentos').select('orcamento_id, valor, data, forma, parcelas').eq('clinic_id', clinic.id);
     if (DESEMP.inicio) qPag = qPag.gte('data', DESEMP.inicio).lte('data', DESEMP.fim);
     const { data: pagamentos } = await qPag;
 
@@ -116,6 +137,10 @@ async function renderDesempenhoEquipe() {
       const valorPago = Number(pag.valor || 0);
       if (valorPago <= 0) return;
 
+      // base da comissão percentual = valor líquido (desconta taxa do cartão, se houver)
+      const taxaPct = taxaDoPagamento(taxasCartao, pag.forma, pag.parcelas);
+      const baseComissao = valorPago * (1 - taxaPct / 100);
+
       // ── quem FECHOU ──
       const fechador = orc.fechado_por;
       if (fechador) {
@@ -123,7 +148,7 @@ async function renderDesempenhoEquipe() {
         const rF = regras[fechador];
         if (rF) {
           if (rF.com_fechar_tipo === 'percentual') {
-            comissaoResp[fechador] = (comissaoResp[fechador] || 0) + valorPago * Number(rF.com_fechar_valor || 0) / 100;
+            comissaoResp[fechador] = (comissaoResp[fechador] || 0) + baseComissao * Number(rF.com_fechar_valor || 0) / 100;
           } else if (rF.com_fechar_tipo === 'fixo') {
             // fixo: conta 1x por orçamento (no primeiro pagamento dele)
             const chave = 'F_' + pag.orcamento_id + '_' + fechador;
@@ -141,7 +166,7 @@ async function renderDesempenhoEquipe() {
         const rA = regras[ag.nome];
         if (rA) {
           if (rA.com_agendar_tipo === 'percentual') {
-            comissaoResp[ag.nome] = (comissaoResp[ag.nome] || 0) + valorPago * Number(rA.com_agendar_valor || 0) / 100;
+            comissaoResp[ag.nome] = (comissaoResp[ag.nome] || 0) + baseComissao * Number(rA.com_agendar_valor || 0) / 100;
           } else if (rA.com_agendar_tipo === 'fixo') {
             const chave = 'A_' + pag.orcamento_id + '_' + ag.nome;
             if (!fixoJaContado[chave]) {
