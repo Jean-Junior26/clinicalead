@@ -174,42 +174,55 @@
     const lead = REC.lead || {};
     const clinic = currentClinic() || {};
     const hoje = new Date(rec.created_at).toLocaleDateString('pt-BR');
-    const itens = (rec.itens || []).map((i, idx) => `
-      <div style="margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid #eee;">
-        <div style="font-size:15px;font-weight:600;">${idx + 1}. ${i.medicamento}${i.quantidade ? ` <span style="font-weight:400;color:#666;">— ${i.quantidade}</span>` : ''}</div>
-        ${i.posologia ? `<div style="font-size:14px;color:#444;margin-top:4px;">${i.posologia}</div>` : ''}
-      </div>`).join('');
+
+    const itensHtml = (rec.itens || []).map((i, idx) => `
+      <div style="margin-bottom:9px;padding-bottom:7px;border-bottom:1px solid #eee;">
+        <div style="font-size:13px;font-weight:600;">${idx + 1}. ${i.medicamento}${i.quantidade ? ` <span style="font-weight:400;color:#666;">— ${i.quantidade}</span>` : ''}</div>
+        ${i.posologia ? `<div style="font-size:12px;color:#444;margin-top:2px;">${i.posologia}</div>` : ''}
+      </div>`).join('') || '<div style="color:#999;font-size:12px;">Nenhum medicamento.</div>';
+
+    // Uma via (idêntica) — duas saem lado a lado em paisagem
+    const via = (rotulo, corte) => `
+      <div class="via" style="${corte ? 'border-left:2px dashed #bbb;' : ''}">
+        <div class="via-rotulo">${rotulo}</div>
+        <div class="cab">
+          ${clinic.logo_url ? `<img src="${clinic.logo_url}" style="max-width:54px;max-height:54px;object-fit:contain;">` : ''}
+          <div>
+            <div class="clinica-nome">${clinic.nome || 'Clínica'}</div>
+            <div class="clinica-info">${clinic.endereco ? clinic.endereco + '<br>' : ''}${clinic.telefone ? 'Tel: ' + clinic.telefone : ''}</div>
+          </div>
+        </div>
+        <div class="titulo-doc">Receituário</div>
+        <div class="paciente"><strong>Paciente:</strong> ${lead.nome || '—'} &nbsp;&nbsp; <strong>Data:</strong> ${hoje}</div>
+        <div class="itens">${itensHtml}</div>
+        ${rec.observacoes ? `<div class="obs"><strong>Orientações:</strong> ${rec.observacoes}</div>` : ''}
+        <div class="assinatura"><div class="assinatura-linha">${clinic.responsavel || clinic.nome || 'Responsável'}</div></div>
+      </div>`;
+
     const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Receita - ${lead.nome || ''}</title>
 <style>
+  @page { size: A4 landscape; margin: 8mm; }
   * { box-sizing:border-box;margin:0;padding:0; }
-  body { font-family:'Segoe UI',Arial,sans-serif;color:#222;padding:40px;max-width:720px;margin:0 auto; }
-  .cab { display:flex;align-items:center;gap:14px;border-bottom:2px solid #C9A84C;padding-bottom:16px;margin-bottom:24px; }
-  .clinica-nome { font-size:22px;font-weight:700;color:#C9A84C; }
-  .clinica-info { font-size:12px;color:#666;margin-top:4px;line-height:1.5; }
-  .titulo-doc { text-align:center;font-size:18px;font-weight:700;letter-spacing:2px;color:#444;margin-bottom:24px;text-transform:uppercase; }
-  .paciente { font-size:14px;margin-bottom:24px;padding-bottom:12px;border-bottom:1px dashed #ccc; }
-  .obs { margin-top:20px;padding:14px;background:#faf6ec;border-radius:8px;font-size:13px;color:#555; }
-  .assinatura { margin-top:64px;text-align:center; }
-  .assinatura-linha { border-top:1px solid #333;width:280px;margin:0 auto;padding-top:6px;font-size:13px;color:#666; }
-  .rodape { margin-top:32px;text-align:center;font-size:11px;color:#999; }
-  @media print { body { padding:16px; } .no-print { display:none; } }
+  body { font-family:'Segoe UI',Arial,sans-serif;color:#222;padding:16px; }
+  .folha { display:flex;align-items:stretch; }
+  .via { width:50%;padding:0 18px; }
+  .via-rotulo { text-align:center;font-size:10px;letter-spacing:1.5px;color:#999;text-transform:uppercase;margin-bottom:10px; }
+  .cab { display:flex;align-items:center;gap:10px;border-bottom:2px solid #C9A84C;padding-bottom:10px;margin-bottom:12px; }
+  .clinica-nome { font-size:17px;font-weight:700;color:#C9A84C;line-height:1.1; }
+  .clinica-info { font-size:10px;color:#666;margin-top:3px;line-height:1.4; }
+  .titulo-doc { text-align:center;font-size:14px;font-weight:700;letter-spacing:2px;color:#444;margin-bottom:12px;text-transform:uppercase; }
+  .paciente { font-size:12px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px dashed #ccc; }
+  .itens { min-height:120px; }
+  .obs { margin-top:10px;padding:10px;background:#faf6ec;border-radius:6px;font-size:11px;color:#555; }
+  .assinatura { margin-top:42px;text-align:center; }
+  .assinatura-linha { border-top:1px solid #333;width:220px;margin:0 auto;padding-top:5px;font-size:11px;color:#666; }
+  @media print { body { padding:0; } .no-print { display:none; } }
 </style></head><body>
-  <div class="cab">
-    ${clinic.logo_url ? `<img src="${clinic.logo_url}" style="max-width:72px;max-height:72px;object-fit:contain;">` : ''}
-    <div>
-      <div class="clinica-nome">${clinic.nome || 'Clínica'}</div>
-      <div class="clinica-info">${clinic.endereco ? clinic.endereco + '<br>' : ''}${clinic.telefone ? 'Tel: ' + clinic.telefone : ''}</div>
-    </div>
+  <div class="folha">
+    ${via('Via do Paciente', false)}
+    ${via('Via da Clínica', true)}
   </div>
-  <div class="titulo-doc">Receituário</div>
-  <div class="paciente"><strong>Paciente:</strong> ${lead.nome || '—'}　　<strong>Data:</strong> ${hoje}</div>
-  <div>${itens || '<div style="color:#999;">Nenhum medicamento.</div>'}</div>
-  ${rec.observacoes ? `<div class="obs"><strong>Orientações:</strong> ${rec.observacoes}</div>` : ''}
-  <div class="assinatura">
-    <div class="assinatura-linha">${clinic.responsavel || clinic.nome || 'Responsável'}</div>
-  </div>
-  <div class="rodape">${clinic.nome || ''} · ${clinic.endereco || ''}</div>
-  <div class="no-print" style="text-align:center;margin-top:28px;">
+  <div class="no-print" style="text-align:center;margin-top:20px;">
     <button onclick="window.print()" style="padding:12px 24px;background:#C9A84C;color:#fff;border:none;border-radius:8px;font-size:14px;cursor:pointer;font-weight:600;">🖨️ Imprimir / Salvar PDF</button>
   </div>
 </body></html>`;
