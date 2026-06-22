@@ -161,7 +161,20 @@
     });
     const temAberta = parc.some(aberta);
 
-    const linhas = parc.map(x => {
+    // ordem: acordo em aberto no TOPO, demais em aberto depois (por vencimento),
+    // e o histórico (pago/renegociada/cancelada) por último
+    const grupo = (p) => {
+      if (!aberta(p)) return 2;
+      if (p.renegociacao_id && p.status !== 'renegociado') return 0; // parcela de acordo: topo
+      return 1;
+    };
+    const ordenadas = [...parc].sort((a, b) => {
+      const ga = grupo(a), gb = grupo(b);
+      if (ga !== gb) return ga - gb;
+      return String(a.vencimento).localeCompare(String(b.vencimento));
+    });
+
+    const linhas = ordenadas.map(x => {
       const sv = statusVis(x);
       const rest = restante(x);
       const vp = Number(x.valor_pago || 0);
@@ -331,10 +344,12 @@
     if (!venc1) { set('Informe o 1º vencimento.'); return; }
     set('Gerando acordo…');
     try {
+      let criadoPor = null;
+      try { const { data: u } = await db.auth.getUser(); criadoPor = u?.user?.id || null; } catch (_) {}
       const { data: acordo, error } = await db.from('renegociacoes').insert({
         clinic_id: clinic.id, lead_id: MENS.leadId, mensalidade_id: MENS.plano.id,
         qtd_origem: sel.length, valor_original: valorOriginal, valor_novo: valorNovo,
-        qtd_parcelas: qtd, observacao: obs || null,
+        qtd_parcelas: qtd, observacao: obs || null, criado_por: criadoPor,
       }).select().single();
       if (error) throw error;
 
