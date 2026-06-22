@@ -23,6 +23,7 @@
     { v: 'dias_sem_resposta',  l: 'o lead fica sem responder' },
     { v: 'aniversario',        l: 'é o aniversário do paciente' },
     { v: 'apos_consulta',      l: 'passa um tempo após a consulta' },
+    { v: 'mensalidade_vence',  l: 'vence uma mensalidade do paciente' },
   ];
   const ACOES = [
     { v: 'mensagem',      l: 'enviar uma mensagem no WhatsApp' },
@@ -68,6 +69,14 @@
 
   // monta a "frase" legível de uma regra
   function fraseDaRegra(r) {
+    if (r.evento === 'mensalidade_vence') {
+      const o = Number(r.espera_valor || 0);
+      const quando = o < 0 ? `faltando ${-o} dia${-o === 1 ? '' : 's'} para o vencimento`
+        : (o > 0 ? `${o} dia${o === 1 ? '' : 's'} após o vencimento` : 'no dia do vencimento');
+      let fm = `<b>Quando</b> uma mensalidade está ${quando}, <b>então</b> ${rotuloAcao(r.acao)}`;
+      if (r.acao === 'mudar_status' && r.nova_status) fm += ` para "${r.nova_status}"`;
+      return fm;
+    }
     let f = `<b>Quando</b> ${rotuloEvento(r.evento)}`;
     if (usaEspera(r.evento) && r.espera_valor > 0) {
       f += `, <b>após</b> ${r.espera_valor} ${r.espera_unidade}`;
@@ -201,6 +210,11 @@
     const r = regraExistente || {};
     const ehEdicao = !!regraExistente;
     const admin = ehAdminMaster();
+    // pré-preenche o controle de mensalidade a partir do offset (espera_valor sinalizado)
+    const _mo = Number(r.espera_valor || 0);
+    const mensQuando = (r.evento === 'mensalidade_vence')
+      ? (_mo < 0 ? 'antes' : (_mo > 0 ? 'depois' : 'dia')) : 'antes';
+    const mensDias = Math.abs(_mo) || 3;
 
     if (document.getElementById('apModal')) document.getElementById('apModal').remove();
     const ov = document.createElement('div');
@@ -244,7 +258,7 @@
           <div id="apBlocoMensagem">
             <label class="form-label" style="font-size:12px;color:var(--text-muted);">Mensagem</label>
             <textarea class="form-input" id="apMensagem" rows="4" placeholder="Oi {nome}! ..." style="width:100%;resize:vertical;">${r.mensagem || ''}</textarea>
-            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Variáveis: {nome}, {clinica}, {procedimento}, {data}, {hora}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Variáveis: {nome}, {clinica}, {valor}, {vencimento}, {procedimento}, {data}, {hora}</div>
           </div>
 
           <div id="apBlocoStatus" style="display:none;">
@@ -252,6 +266,19 @@
             <select class="form-input" id="apNovoStatus" style="width:100%;">
               ${STATUS_LEAD.map(s => `<option value="${s}" ${r.nova_status === s ? 'selected' : ''}>${s}</option>`).join('')}
             </select>
+          </div>
+
+          <div id="apBlocoMensalidade" style="display:none;">
+            <label class="form-label" style="font-size:12px;color:var(--text-muted);">Quando avisar</label>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <select class="form-input" id="apMensQuando" onchange="apMensQuandoMudou()" style="display:inline-block;width:auto;font-size:13px;padding:4px 8px;">
+                <option value="antes" ${mensQuando === 'antes' ? 'selected' : ''}>dias ANTES do vencimento</option>
+                <option value="dia" ${mensQuando === 'dia' ? 'selected' : ''}>no DIA do vencimento</option>
+                <option value="depois" ${mensQuando === 'depois' ? 'selected' : ''}>dias DEPOIS do vencimento</option>
+              </select>
+              <input type="number" id="apMensDias" min="1" value="${mensDias}" class="form-input" style="width:70px;font-size:13px;padding:4px 8px;"/>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Ex.: "3 dias antes", "no dia", "2 dias depois". Aplica a todas as mensalidades dos pacientes.</div>
           </div>
 
           ${admin ? `
@@ -274,14 +301,26 @@
   window.apAtualizarCampos = function () {
     const evento = document.getElementById('apEvento')?.value;
     const acao = document.getElementById('apAcao')?.value;
-    // bloco de espera só pra eventos temporais
+    const ehMens = (evento === 'mensalidade_vence');
+    // bloco de espera só pra eventos temporais (mensalidade usa o próprio controle)
     const esperaBloco = document.getElementById('apEsperaBloco');
-    if (esperaBloco) esperaBloco.style.display = usaEspera(evento) ? 'inline' : 'none';
+    if (esperaBloco) esperaBloco.style.display = (usaEspera(evento) && !ehMens) ? 'inline' : 'none';
+    // controle específico de mensalidade (antes/no dia/depois)
+    const blocoMens = document.getElementById('apBlocoMensalidade');
+    if (blocoMens) blocoMens.style.display = ehMens ? 'block' : 'none';
+    if (ehMens) apMensQuandoMudou();
     // mensagem vs status conforme ação
     const blocoMsg = document.getElementById('apBlocoMensagem');
     const blocoStatus = document.getElementById('apBlocoStatus');
     if (blocoMsg) blocoMsg.style.display = (acao === 'mensagem' || acao === 'tarefa') ? 'block' : 'none';
     if (blocoStatus) blocoStatus.style.display = (acao === 'mudar_status') ? 'block' : 'none';
+  };
+
+  // mostra/esconde o nº de dias conforme "antes/no dia/depois"
+  window.apMensQuandoMudou = function () {
+    const q = document.getElementById('apMensQuando')?.value;
+    const dias = document.getElementById('apMensDias');
+    if (dias) dias.style.display = (q === 'dia') ? 'none' : '';
   };
 
   // ── salva (cria ou edita) ────────────────────────────────
@@ -294,8 +333,16 @@
     if (!nome) { setErro('Dê um nome à automação.'); return; }
     const evento = document.getElementById('apEvento').value;
     const acao = document.getElementById('apAcao').value;
-    const espera_valor = usaEspera(evento) ? (parseInt(document.getElementById('apEsperaValor').value) || 0) : 0;
-    const espera_unidade = document.getElementById('apEsperaUnidade')?.value || 'horas';
+    let espera_valor, espera_unidade;
+    if (evento === 'mensalidade_vence') {
+      const q = document.getElementById('apMensQuando').value;
+      const d = parseInt(document.getElementById('apMensDias').value) || 0;
+      espera_valor = (q === 'antes') ? -Math.abs(d) : (q === 'depois' ? Math.abs(d) : 0);
+      espera_unidade = 'dias';
+    } else {
+      espera_valor = usaEspera(evento) ? (parseInt(document.getElementById('apEsperaValor').value) || 0) : 0;
+      espera_unidade = document.getElementById('apEsperaUnidade')?.value || 'horas';
+    }
     const mensagem = (acao === 'mensagem' || acao === 'tarefa') ? (document.getElementById('apMensagem').value || '').trim() : null;
     const nova_status = (acao === 'mudar_status') ? document.getElementById('apNovoStatus').value : null;
     const ehGlobalCheck = document.getElementById('apGlobal');
