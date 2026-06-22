@@ -15,6 +15,19 @@ function rfHoje() { return rfIso(new Date()); }
 function rfDiasAtras(n) { const d = new Date(); d.setDate(d.getDate() - n); return rfIso(d); }
 function rfFmt(v) { return 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 }); }
 
+// Taxa (%) do cartão p/ um pagamento (mesma lógica da comissão).
+function rfTaxaPagamento(taxas, forma, parcelas) {
+  if (!taxas) return 0;
+  const p = Number(parcelas) || 1;
+  if (forma === 'cartao_debito') return Number(taxas.debito) || 0;
+  if (forma === 'cartao_credito') {
+    if (p <= 1) return Number(taxas.credito_vista) || 0;
+    const f = (taxas.parcelado || []).find(x => p >= Number(x.de) && p <= Number(x.ate));
+    return f ? (Number(f.taxa) || 0) : 0;
+  }
+  return 0;
+}
+
 RELFIN.inicio = rfDiasAtras(30);
 RELFIN.fim = rfHoje();
 
@@ -68,7 +81,7 @@ async function relfinRender() {
 
   try {
     // ── Pagamentos do período ──
-    let qPag = db.from('pagamentos').select('valor,forma,lead_id,data').eq('clinic_id', clinic.id);
+    let qPag = db.from('pagamentos').select('valor,forma,lead_id,data,parcelas').eq('clinic_id', clinic.id);
     if (RELFIN.inicio) qPag = qPag.gte('data', RELFIN.inicio).lte('data', RELFIN.fim);
     const { data: pags } = await qPag;
     const pagamentos = pags || [];
@@ -76,6 +89,17 @@ async function relfinRender() {
     const recebido = pagamentos.reduce((s, p) => s + Number(p.valor || 0), 0);
     const pacientesPagantes = new Set(pagamentos.map(p => p.lead_id).filter(Boolean)).size;
     const ticketMedio = pacientesPagantes ? recebido / pacientesPagantes : 0;
+
+    // ── Bruto x Líquido (só se a clínica tiver taxas de cartão cadastradas) ──
+    let taxasCartao = null;
+    try {
+      const { data: cRow } = await db.from('clinicas').select('taxas_cartao').eq('id', clinic.id).maybeSingle();
+      taxasCartao = (cRow && cRow.taxas_cartao) ? cRow.taxas_cartao : null;
+    } catch (e) { taxasCartao = null; }
+    const totalTaxas = taxasCartao
+      ? pagamentos.reduce((s, p) => s + Number(p.valor || 0) * rfTaxaPagamento(taxasCartao, p.forma, p.parcelas) / 100, 0)
+      : 0;
+    const liquido = recebido - totalTaxas;
 
     // ── Listas de detalhamento (drill-down dos cards) ──
     const leadMap = {};
@@ -202,6 +226,18 @@ async function relfinRender() {
         ${cardKpi('orcados', 'Orçado no período', rfFmt(valorOrcado), 'soma dos orçamentos criados', 'var(--text-primary, #F0EAD6)')}
         ${cardKpi('orcados', 'Taxa de aprovação', taxaAprov + '%', `${rfFmt(valorAprovado)} aprovados`, taxaAprov >= 50 ? 'var(--gold)' : 'var(--coral)')}
       </div>
+
+      ${taxasCartao ? `
+      <div class="card" style="margin-bottom:14px;">
+        <div class="card-header"><h3 style="font-size:13px;"><i class="ti ti-credit-card" style="color:var(--gold);margin-right:6px;"></i>Líquido de taxas de cartão</h3></div>
+        <div class="card-body" style="padding-top:6px;">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;">
+            ${cardKpi('', 'Bruto recebido', rfFmt(recebido), 'antes das taxas', 'var(--text-primary, #F0EAD6)')}
+            ${cardKpi('', 'Taxas de cartão', '− ' + rfFmt(totalTaxas), 'descontado das maquininhas', 'var(--coral)')}
+            ${cardKpi('', 'Líquido', rfFmt(liquido), 'o que sobra de fato', 'var(--gold)')}
+          </div>
+        </div>
+      </div>` : ''}
 
       <div class="card" style="margin-bottom:14px;">
         <div class="card-header"><h3 style="font-size:13px;"><i class="ti ti-wallet" style="color:var(--gold);margin-right:6px;"></i>Recebido por forma de pagamento</h3></div>
