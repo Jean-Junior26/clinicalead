@@ -1414,9 +1414,15 @@ await loadClinics();
     document.getElementById('loginError').classList.add('show');
     return;
   }
-
-  if (STATE.clinics.length === 0 && !isAdmin) {
-    setTimeout(() => openAddClinicWizard(), 500);
+if (STATE.clinics.length === 0 && !isAdmin) {
+    // dá uma última conferida no banco antes de abrir o wizard (trigger pode ter acabado de criar)
+    const conf = await db.from('clinicas').select('id').eq('user_id', STATE.user.id).limit(1);
+    if (!conf.error && conf.data && conf.data.length) {
+      await loadClinics();
+      renderClinicSwitcher();
+    } else {
+      setTimeout(() => openAddClinicWizard(), 500);
+    }
   }
 }
 // ── CHECK SUBSCRIPTION ────────────────────────
