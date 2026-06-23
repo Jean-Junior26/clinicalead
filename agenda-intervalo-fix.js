@@ -1,9 +1,11 @@
 // ============================================================
-// CLINICALEAD — AGENDAMENTO COM INTERVALO (início → fim)
-// Permite marcar "das 10:00 às 12:00": cria UM agendamento (com
-// hora_fim) e a agenda mostra o bloco esticado, travando os
-// horários do meio. Relatórios/lembretes/comissão contam 1 só.
-// Vazio no "até" = comportamento de hoje (1 horário).
+// CLINICALEAD — AGENDAMENTO COM INTERVALO + ENCAIXE
+// • "Até (opcional)": cria UM agendamento com hora_fim; a agenda
+//   mostra o bloco e trava os horários do meio (relatório/lembrete
+//   /comissão contam 1 só). Vazio = 1 horário (como hoje).
+// • "Encaixe": agenda num horário digitado (ex: 11:01), pontual
+//   naquele dia. A agenda detecta horários fora da grade e os
+//   mostra com o card completo. Sem coluna nova (persiste pela consulta).
 // Requer: coluna consultas.hora_fim. Carregar APÓS agenda-fix.js.
 // ============================================================
 
@@ -12,16 +14,16 @@
 
   function horarios() { return (typeof CAL !== 'undefined' && CAL.horariosDisponiveis) ? CAL.horariosDisponiveis : []; }
   function proximoSlot(h) { const a = horarios(); const i = a.indexOf(h); return (i >= 0 && i < a.length - 1) ? a[i + 1] : h; }
-  // slots no intervalo [inicio, fim) — fim exclusivo
   function slotsIntervalo(inicio, fim) {
     const a = horarios();
     if (!fim) return inicio ? [inicio] : [];
     return a.filter(h => h >= inicio && h < fim);
   }
 
-  // ── injeta o campo "Até (opcional)" ao lado da hora ──────────
+  // ── campo "Até (opcional)" ───────────────────────────────────
   function injetarAte() {
-    if (document.getElementById('naHoraFimGroup')) { popularAte(); return; }
+    const existing = document.getElementById('naHoraFimGroup');
+    if (existing) { existing.style.display = ''; popularAte(); return; } // reexibe (caso encaixe tenha escondido)
     const naHora = document.getElementById('naHora');
     if (!naHora) return;
     const grupo = naHora.closest('.form-group') || naHora.parentElement;
@@ -49,7 +51,6 @@
     if (opts.includes(atual)) sel.value = atual;
   }
 
-  // engata a injeção quando o modal de agendamento abre
   ['openNovoAgendamento', 'openNovoAgendamentoHora'].forEach(fn => {
     if (typeof window[fn] === 'function') {
       const _orig = window[fn];
@@ -61,7 +62,30 @@
     }
   });
 
-  // ── salvar com intervalo (reproduz a versão atual + hora_fim) ─
+  // ── ENCAIXE: agenda em horário digitado (pontual no dia) ─────
+  window.abrirEncaixe = function () {
+    const hora = prompt('Encaixe — horário no formato HH:MM (ex: 11:01):', '');
+    if (!hora) return;
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(hora)) { if (typeof toast === 'function') toast('Use o formato HH:MM (ex: 11:01)', 'error'); return; }
+    const dateStr = (typeof CAL !== 'undefined' && CAL.selectedDate) ? CAL.selectedDate : new Date().toISOString().split('T')[0];
+    if (typeof openNovoAgendamento === 'function') openNovoAgendamento();
+    setTimeout(() => {
+      const naData = document.getElementById('naData'); if (naData) naData.value = dateStr;
+      const sel = document.getElementById('naHora');
+      if (sel) {
+        if (!Array.from(sel.options).some(o => o.value === hora)) {
+          const opt = document.createElement('option');
+          opt.value = hora; opt.textContent = hora + ' (encaixe)';
+          sel.appendChild(opt);
+        }
+        sel.value = hora;
+      }
+      const fimSel = document.getElementById('naHoraFim'); if (fimSel) fimSel.value = '';
+      const fimGroup = document.getElementById('naHoraFimGroup'); if (fimGroup) fimGroup.style.display = 'none';
+    }, 170);
+  };
+
+  // ── salvar (intervalo + encaixe) ─────────────────────────────
   salvarNovoAgendamento = async function () {
     const leadId = document.getElementById('naLead').value;
     const data = document.getElementById('naData').value;
@@ -73,7 +97,7 @@
     if (horaFim && horaFim <= hora) { toast('A hora final precisa ser depois da inicial', 'error'); return; }
     const clinic = currentClinic();
 
-    // conflito: checa TODOS os horários do intervalo (contra consultas e bloqueios)
+    // conflito: checa o intervalo inteiro (consultas + bloqueios)
     const slots = slotsIntervalo(hora, horaFim);
     const ocup = new Set();
     CAL.consultas.filter(c => c.data === data).forEach(c => {
@@ -84,6 +108,13 @@
     ((CAL.horasBloqueadas && CAL.horasBloqueadas[data]) || []).forEach(s => ocup.add(s));
     const conflito = slots.find(s => ocup.has(s));
     if (conflito) { toast(`O horário ${conflito} já está ocupado nesse intervalo`, 'error'); return; }
+
+    // encaixe (horário fora da grade) dentro de um procedimento → confirma
+    const foraDaGrade = !horarios().includes(hora);
+    if (foraDaGrade) {
+      const dentro = CAL.consultas.find(c => c.data === data && c.hora_fim && hora > c.hora && hora < c.hora_fim);
+      if (dentro && !confirm(`Atenção: ${hora} está dentro de um procedimento (${dentro.hora}–${dentro.hora_fim}). Confirmar o encaixe mesmo assim?`)) return;
+    }
 
     const nova = { clinic_id: clinic.id, lead_id: leadId, data, hora, hora_fim: horaFim || null, status: 'agendado', observacoes: obs, procedimento };
     const { data: saved, error } = await db.from('consultas').insert(nova).select().single();
@@ -125,7 +156,7 @@
     }
   };
 
-  // ── desenho: marca o bloco (esticado) por cima do render ─────
+  // ── desenho por cima do render ───────────────────────────────
   function linhaDireta(el, lista) { let n = el; while (n && n.parentElement !== lista) n = n.parentElement; return n; }
   function acharLinha(lista, h) {
     const times = lista.querySelectorAll('.sched-time');
@@ -133,13 +164,12 @@
     return null;
   }
 
+  // marca os blocos (intervalo) de forma discreta
   function marcarBlocos(dateStr) {
     const lista = document.getElementById('agendaList');
     if (!lista) return;
-    const blocos = CAL.consultas.filter(c => c.data === dateStr && c.hora_fim);
-    blocos.forEach(c => {
+    CAL.consultas.filter(c => c.data === dateStr && c.hora_fim).forEach(c => {
       const slots = slotsIntervalo(c.hora, c.hora_fim);
-      // anota o início com "até X"
       const ini = acharLinha(lista, c.hora);
       if (ini && !ini.dataset.blocoIni) {
         ini.dataset.blocoIni = '1';
@@ -149,7 +179,6 @@
         tag.textContent = 'até ' + c.hora_fim;
         if (t && t.parentElement) t.parentElement.insertBefore(tag, t.nextSibling); else ini.appendChild(tag);
       }
-      // marca os horários do meio (corpo do bloco) — discreto, sem repetir texto
       const meio = slots.slice(1);
       meio.forEach((h, i) => {
         const row = acharLinha(lista, h);
@@ -166,14 +195,59 @@
     });
   }
 
+  // marca os encaixes (horários fora da grade) com um selo
+  function marcarEncaixes(dateStr) {
+    const lista = document.getElementById('agendaList');
+    if (!lista) return;
+    const grade = horarios();
+    CAL.consultas.filter(c => c.data === dateStr && c.hora && !grade.includes(c.hora)).forEach(c => {
+      const row = acharLinha(lista, c.hora);
+      if (row && !row.dataset.encaixeTag) {
+        row.dataset.encaixeTag = '1';
+        const t = row.querySelector('.sched-time');
+        const tag = document.createElement('span');
+        tag.textContent = 'encaixe';
+        tag.style.cssText = 'margin-left:6px;font-size:10px;color:var(--blue,#5B8DB8);border:1px solid var(--blue,#5B8DB8);border-radius:5px;padding:0 5px;white-space:nowrap;';
+        if (t && t.parentElement) t.parentElement.insertBefore(tag, t.nextSibling); else row.appendChild(tag);
+      }
+    });
+  }
+
+  // botão "Encaixe" na barra de ações do dia (reaplicado a cada render)
+  function injetarBotaoEncaixe() {
+    const actions = document.getElementById('agendaDayActions');
+    if (!actions || document.getElementById('btnEncaixe')) return;
+    const b = document.createElement('button');
+    b.id = 'btnEncaixe';
+    b.className = 'btn btn-sm';
+    b.style.cssText = 'border:1px solid var(--blue,#5B8DB8);color:var(--blue,#5B8DB8);';
+    b.innerHTML = '<i class="ti ti-calendar-plus"></i> Encaixe';
+    b.onclick = window.abrirEncaixe;
+    actions.appendChild(b);
+  }
+
   if (typeof renderDaySchedule === 'function') {
     const _rds = renderDaySchedule;
     renderDaySchedule = function (dateStr) {
+      // inclui horários de encaixe (fora da grade) na renderização do dia
+      const base = (typeof CAL !== 'undefined') ? CAL.horariosDisponiveis : null;
+      let restore = null;
+      try {
+        if (base) {
+          const extras = CAL.consultas.filter(c => c.data === dateStr).map(c => c.hora)
+            .filter(h => h && !base.includes(h));
+          if (extras.length) {
+            restore = base;
+            CAL.horariosDisponiveis = Array.from(new Set(base.concat(extras))).sort();
+          }
+        }
+      } catch (e) {}
       const r = _rds(dateStr);
-      try { marcarBlocos(dateStr); } catch (e) { console.error('[bloco agenda]', e); }
+      if (restore) CAL.horariosDisponiveis = restore;
+      try { marcarBlocos(dateStr); marcarEncaixes(dateStr); injetarBotaoEncaixe(); } catch (e) { console.error('[agenda extra]', e); }
       return r;
     };
   }
 
-  console.log('✅ agenda-intervalo-fix.js carregado — agendamento com início e fim');
+  console.log('✅ agenda-intervalo-fix.js carregado — intervalo + encaixe');
 })();
