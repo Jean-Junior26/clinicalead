@@ -1456,10 +1456,21 @@ async function loadClinics() {
     query = query.eq('user_id', STATE.user.id);
   }
   
-  const { data, error } = await query;
+const { data, error } = await query;
   if (error) { console.error('clinicas:', error); return; }
   STATE.clinics = data || [];
-{ const b = document.getElementById('navClinicasBadge'); if (b) b.textContent = STATE.clinics.length; }
+
+  // Cadastro novo: o trigger cria a clínica em milissegundos. Se vier vazia
+  // para um não-admin, re-tenta algumas vezes antes de desistir (evita o wizard à toa).
+  if (!isAdmin && STATE.clinics.length === 0) {
+    for (let i = 0; i < 3 && STATE.clinics.length === 0; i++) {
+      await new Promise(r => setTimeout(r, 800));
+      const re = await db.from('clinicas').select('*').eq('user_id', STATE.user.id).order('created_at', { ascending: true });
+      if (!re.error && re.data && re.data.length) STATE.clinics = re.data;
+    }
+  }
+
+  { const b = document.getElementById('navClinicasBadge'); if (b) b.textContent = STATE.clinics.length; }
   renderClinicSwitcher();
 }
 
