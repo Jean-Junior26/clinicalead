@@ -1,120 +1,112 @@
 // ============================================================
-// CLINICALEAD — Edge Function "brian" (Atendente IA — Fase 1: sugerir)
-// Lê o histórico da conversa + contexto da clínica, chama a API da
-// Claude (Anthropic) e devolve uma SUGESTÃO de resposta. O humano
-// revisa e envia. Trava de segurança: nunca inventa preço/data/saúde.
-// Requer secret ANTHROPIC_API_KEY no projeto Supabase.
+// CLINICALEAD — BRIAN IA (Fase 1) — Menu + Configuração
+// Item "🤖 Brian IA" no menu lateral → tela onde a clínica define
+// o NOME do atendente (que o paciente vê) e o CONTEXTO (serviços,
+// horários, o que ele pode dizer). Salva em brian_config.
+// O botão de "sugerir" no inbox vem no próximo passo.
 // ============================================================
 
-import { createClient } from "jsr:@supabase/supabase-js@2";
+(function () {
+  'use strict';
 
-const URL_SB = Deno.env.get("SUPABASE_URL")!;
-const ANON = Deno.env.get("SUPABASE_ANON_KEY")!;
-const SERVICE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const ANTHROPIC_KEY = Deno.env.get("ANTHROPIC_API_KEY") || "";
+  const BRIAN = { cfg: null };
 
-// Modelo: Sonnet = ótima qualidade. Pra baratear, troque por "claude-haiku-4-5-20251001".
-const MODEL = "claude-sonnet-4-6";
-
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-function json(b: unknown, s = 200) {
-  return new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "Content-Type": "application/json" } });
-}
-
-function textoDe(m: any): string {
-  if (m.type === "text" || !m.type) return (m.content || "").trim();
-  const map: Record<string, string> = { image: "[imagem]", audio: "[áudio]", sticker: "[figurinha]", video: "[vídeo]", document: "[documento]" };
-  return map[m.type] || (m.content || "").trim();
-}
-
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
-  try {
-    if (!ANTHROPIC_KEY) return json({ ok: false, erro: "Configure a chave da IA (ANTHROPIC_API_KEY) nas secrets do Supabase." }, 400);
-
-    const authHeader = req.headers.get("Authorization") || "";
-    if (!authHeader) return json({ ok: false, erro: "Sem autenticação." }, 401);
-    const auth = createClient(URL_SB, ANON, { global: { headers: { Authorization: authHeader } } });
-    const svc = createClient(URL_SB, SERVICE);
-
-    const { data: u } = await auth.auth.getUser();
-    if (!u?.user) return json({ ok: false, erro: "Usuário inválido." }, 401);
-
-    const body = await req.json();
-    if (body.action !== "sugerir") return json({ ok: false, erro: "Ação desconhecida." }, 400);
-    const clinicId = body.clinic_id;
-    const phone = String(body.phone || "").replace(/\D/g, "");
-    if (!clinicId || !phone) return json({ ok: false, erro: "Faltou clinic_id ou phone." }, 400);
-
-    // valida acesso do usuário à clínica (RLS) e pega dados básicos
-    const { data: clinica } = await auth.from("clinicas").select("id, nome, endereco, telefone").eq("id", clinicId).maybeSingle();
-    if (!clinica) return json({ ok: false, erro: "Sem acesso a esta clínica." }, 403);
-
-    // contexto + nome do atendente configurados do Brian
-    const { data: cfg } = await svc.from("brian_config").select("contexto, nome_atendente").eq("clinic_id", clinicId).maybeSingle();
-    const contextoExtra = (cfg && cfg.contexto) ? cfg.contexto : "";
-    const nomeAtendente = (cfg && cfg.nome_atendente && cfg.nome_atendente.trim()) ? cfg.nome_atendente.trim() : "Brian";
-
-    // últimas mensagens da conversa
-    const { data: msgsDesc } = await svc.from("mensagens")
-      .select("content, from_me, type, created_at")
-      .eq("clinic_id", clinicId).eq("phone", phone)
-      .order("created_at", { ascending: false }).limit(30);
-    const msgs = (msgsDesc || []).slice().reverse();
-
-    // monta os turnos (lead = user, clínica = assistant), mesclando consecutivos
-    const raw = msgs.map((m: any) => ({ role: m.from_me ? "assistant" : "user", content: textoDe(m) })).filter((x: any) => x.content);
-    const merged: any[] = [];
-    for (const m of raw) {
-      if (merged.length && merged[merged.length - 1].role === m.role) merged[merged.length - 1].content += "\n" + m.content;
-      else merged.push({ ...m });
-    }
-    while (merged.length && merged[0].role === "assistant") merged.shift();
-    if (!merged.length) merged.push({ role: "user", content: "(O cliente iniciou a conversa.)" });
-
-    const system = `Você é o ${nomeAtendente}, atendente virtual da clínica odontológica "${clinica.nome || "a clínica"}". Você atende leads e pacientes pelo WhatsApp de forma calorosa, educada e profissional, em português do Brasil, com mensagens curtas e naturais (estilo WhatsApp, pode usar 1 emoji quando fizer sentido).
-
-REGRAS INVIOLÁVEIS:
-- NUNCA invente preços, valores, descontos, datas ou horários disponíveis. Se isso não estiver no CONTEXTO abaixo, diga que vai confirmar com a equipe.
-- NUNCA dê diagnóstico, prescrição ou qualquer orientação clínica/de saúde. Oriente a agendar uma avaliação.
-- Só afirme informações que estejam no CONTEXTO DA CLÍNICA. Se não souber algo, seja honesto e ofereça encaminhar para um atendente humano.
-- Não invente endereço, telefone, nomes de profissionais ou procedimentos não listados.
-- Seu objetivo é acolher, tirar dúvidas e incentivar o agendamento de uma avaliação — sem prometer nada não autorizado.
-
-CONTEXTO DA CLÍNICA:
-Nome: ${clinica.nome || "—"}
-Endereço: ${clinica.endereco || "não informado"}
-Telefone: ${clinica.telefone || "não informado"}
-${contextoExtra ? "Informações adicionais fornecidas pela clínica:\n" + contextoExtra : "(A clínica ainda não cadastrou informações adicionais — seja mais cauteloso e encaminhe ao humano quando faltar informação.)"}
-
-Gere APENAS a próxima mensagem do atendente (${nomeAtendente}) respondendo ao paciente. Não inclua rótulos, aspas, nem explicações — só o texto da mensagem, pronto pra enviar.`;
-
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model: MODEL, max_tokens: 500, temperature: 0.7, system, messages: merged }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) {
-      return json({ ok: false, erro: data?.error?.message || "Falha na IA.", status: resp.status }, 400);
-    }
-    const sugestao = (data.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n").trim();
-
-    // registra uso (base pra cobrança)
+  async function carregar() {
+    const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
+    if (!clinic) return null;
     try {
-      await svc.from("brian_uso").insert({
-        clinic_id: clinicId,
-        tokens_in: data.usage?.input_tokens || 0,
-        tokens_out: data.usage?.output_tokens || 0,
-      });
-    } catch (e) { /* não bloqueia a resposta */ }
-
-    return json({ ok: true, sugestao });
-  } catch (e) {
-    return json({ ok: false, erro: String(e) }, 500);
+      const { data } = await db.from('brian_config').select('*').eq('clinic_id', clinic.id).maybeSingle();
+      BRIAN.cfg = data || null;
+    } catch (e) { BRIAN.cfg = null; }
+    return BRIAN.cfg;
   }
-});
+
+  window.abrirBrian = async function () {
+    if (!document.getElementById('modalBrian')) {
+      const ov = document.createElement('div');
+      ov.className = 'modal-overlay';
+      ov.id = 'modalBrian';
+      ov.innerHTML = `
+        <div class="modal" style="max-width:560px;width:96vw;">
+          <div class="modal-header">
+            <h3><i class="ti ti-robot" style="margin-right:8px;color:var(--gold);"></i>Brian IA — Atendente</h3>
+            <button class="btn btn-ghost btn-icon" onclick="closeModal('modalBrian')"><i class="ti ti-x"></i></button>
+          </div>
+          <div class="modal-body" id="brianBody" style="max-height:74vh;overflow-y:auto;"></div>
+        </div>`;
+      document.body.appendChild(ov);
+    }
+    openModal('modalBrian');
+    document.getElementById('brianBody').innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);">Carregando…</div>';
+    await carregar();
+    renderBrian();
+  };
+
+  function renderBrian() {
+    const body = document.getElementById('brianBody');
+    if (!body) return;
+    const c = BRIAN.cfg || {};
+    const exemplo = `Ex.:
+- Atendemos de seg a sex, 8h às 18h, e sábado 8h às 12h.
+- Serviços: avaliação gratuita, limpeza, clareamento, implante, ortodontia.
+- Sempre incentivamos agendar uma AVALIAÇÃO gratuita.
+- Não passamos preço por mensagem; convidamos para a avaliação.
+- Formas de pagamento: cartão, pix, boleto e carnê próprio.`;
+    body.innerHTML = `
+      <div style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;line-height:1.5;">
+        O Brian é seu atendente de IA. Nesta fase ele <b>sugere respostas</b> no inbox — você revisa e envia. Configure como ele se apresenta e o que pode falar.
+      </div>
+
+      <label class="form-label" style="font-size:12px;">Nome do atendente <span style="color:var(--text-muted);">(o que o paciente vê)</span></label>
+      <input class="form-input" id="brianNome" placeholder="Brian" value="${(c.nome_atendente || '').replace(/"/g, '&quot;')}" style="width:100%;margin-bottom:14px;"/>
+
+      <label class="form-label" style="font-size:12px;">O que o Brian pode dizer <span style="color:var(--text-muted);">(serviços, horários, regras, pagamento…)</span></label>
+      <textarea class="form-input" id="brianContexto" rows="9" placeholder="${exemplo.replace(/"/g, '&quot;')}" style="width:100%;resize:vertical;line-height:1.5;">${c.contexto || ''}</textarea>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.5;">Quanto mais detalhado, melhores as sugestões. O Brian nunca inventa preço, data ou orientação de saúde — quando faltar informação, ele encaminha pra você.</div>
+
+      <button class="btn btn-primary" style="width:100%;margin-top:16px;" onclick="salvarBrian()"><i class="ti ti-device-floppy"></i> Salvar</button>
+      <div id="brianMsg" style="font-size:12px;color:var(--coral);min-height:14px;margin-top:8px;"></div>`;
+  }
+
+  window.salvarBrian = async function () {
+    const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
+    if (!clinic) return;
+    const msg = document.getElementById('brianMsg');
+    const set = (t) => { if (msg) msg.textContent = t || ''; };
+    const nome = (document.getElementById('brianNome').value || '').trim();
+    const contexto = (document.getElementById('brianContexto').value || '').trim();
+    set('Salvando…');
+    try {
+      const { error } = await db.from('brian_config').upsert({
+        clinic_id: clinic.id,
+        nome_atendente: nome || null,
+        contexto: contexto || null,
+        atualizado_em: new Date().toISOString(),
+      }, { onConflict: 'clinic_id' });
+      if (error) throw error;
+      BRIAN.cfg = { ...(BRIAN.cfg || {}), nome_atendente: nome || null, contexto: contexto || null };
+      if (typeof toast === 'function') toast('Brian configurado! 🤖');
+      set('');
+    } catch (e) { set('Erro: ' + (e.message || '')); console.error('[brian salvar]', e); }
+  };
+
+  // injeta o item no menu lateral (logo após Automações, ou após Responsáveis)
+  function injetarMenu() {
+    if (document.getElementById('navBrian')) return;
+    const ancora = document.getElementById('navResponsaveis')
+      || document.querySelector('.nav-item[data-page="automacoes"]')
+      || document.querySelector('.nav-item');
+    if (!ancora || !ancora.parentNode) return;
+    const btn = document.createElement('button');
+    btn.className = 'nav-item';
+    btn.id = 'navBrian';
+    btn.innerHTML = '<i class="ti ti-robot"></i> Brian IA';
+    btn.onclick = function () { abrirBrian(); };
+    ancora.parentNode.insertBefore(btn, ancora.nextSibling);
+  }
+  injetarMenu();
+  setTimeout(injetarMenu, 1500);
+  setTimeout(injetarMenu, 4000);
+
+  console.log('✅ brian-fix.js carregado — menu Brian IA + configuração');
+})();
