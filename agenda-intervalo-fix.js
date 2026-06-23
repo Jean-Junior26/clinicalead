@@ -149,17 +149,18 @@
         tag.textContent = 'até ' + c.hora_fim;
         if (t && t.parentElement) t.parentElement.insertBefore(tag, t.nextSibling); else ini.appendChild(tag);
       }
-      // marca os horários do meio como "continuação" (trava o agendamento por cima)
-      slots.slice(1).forEach(h => {
+      // marca os horários do meio (corpo do bloco) — discreto, sem repetir texto
+      const meio = slots.slice(1);
+      meio.forEach((h, i) => {
         const row = acharLinha(lista, h);
         if (row && !row.dataset.blocoCont) {
           row.dataset.blocoCont = '1';
-          row.innerHTML = `
-            <div class="sched-time" style="opacity:.5;">${h}</div>
-            <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);opacity:.75;">
-              <i class="ti ti-arrow-bar-to-down" style="font-size:13px;"></i>Continuação — ${c.hora} às ${c.hora_fim}
-            </div>`;
-          row.style.background = 'var(--gold-pale, rgba(201,168,76,0.06))';
+          const rotulo = (i === 0)
+            ? `<div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted);"><i class="ti ti-lock" style="font-size:12px;"></i>Ocupado · ${c.hora}–${c.hora_fim}</div>`
+            : '';
+          row.innerHTML = `<div class="sched-time" style="opacity:.38;">${h}</div>${rotulo}`;
+          row.style.borderLeft = '3px solid var(--gold, #C9A84C)';
+          row.style.background = 'var(--gold-pale, rgba(201,168,76,0.05))';
         }
       });
     });
