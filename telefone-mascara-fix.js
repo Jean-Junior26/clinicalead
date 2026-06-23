@@ -31,7 +31,12 @@
     if (tipo === 'tel') return true;
     if (tipo && tipo !== 'text' && tipo !== 'search') return false; // ignora number/email/date/etc.
     const alvo = ((el.id || '') + ' ' + (el.name || '') + ' ' + (el.placeholder || '') + ' ' + (el.className || '')).toLowerCase();
-    return /telefone|whatsapp|whats|celular|\bfone\b|\bphone\b|\bddd\b|contato/.test(alvo);
+    // palavras-chave (sem exigir borda de palavra: pega nlPhone, editPhone, telCliente, etc.)
+    if (/telefone|whatsapp|whats|celular|fone|phone|contato|tel\b|ddd/.test(alvo)) return true;
+    // placeholder com cara de telefone: (XX), (00), (34) 9...
+    const ph = (el.placeholder || '');
+    if (/\(\s*\d{2}\s*\)/.test(ph) || /\(\s*x{2}\s*\)/i.test(ph)) return true;
+    return false;
   }
 
   function aplicar(el) {
