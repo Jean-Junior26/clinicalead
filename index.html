@@ -1384,6 +1384,13 @@ async function loadApp(user) {
   document.getElementById('userRole').textContent = STATE.profile.role === 'admin' ? 'Administrador' : STATE.profile.role === 'dentist' ? 'Dentista' : 'Recepcionista';
 
 await loadClinics();
+  {
+    const ehAdminTmp = STATE.profile?.role === 'admin' || STATE.profile?.role === 'administrador';
+    for (let i = 0; i < 4 && STATE.clinics.length === 0 && !ehAdminTmp; i++) {
+      await new Promise(r => setTimeout(r, 800));
+      await loadClinics();
+    }
+  }
   await loadLeads();
   loadAutomations();
 
