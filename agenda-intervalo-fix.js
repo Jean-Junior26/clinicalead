@@ -162,6 +162,8 @@
   function marcarBlocos(dateStr) {
     const lista = document.getElementById('agendaList');
     if (!lista) return;
+    // horários que TÊM consulta própria (encaixe) não podem virar "continuação"
+    const horasComConsulta = new Set(CAL.consultas.filter(c => c.data === dateStr).map(c => c.hora));
     CAL.consultas.filter(c => c.data === dateStr && c.hora_fim).forEach(c => {
       const slots = slotsIntervalo(c.hora, c.hora_fim); // usa grade pura
       const ini = acharLinha(lista, c.hora);
@@ -174,6 +176,7 @@
         if (t && t.parentElement) t.parentElement.insertBefore(tag, t.nextSibling); else ini.appendChild(tag);
       }
       slots.slice(1).forEach((h, i) => {
+        if (horasComConsulta.has(h)) return; // tem encaixe nesse horário → NÃO marca como continuação
         const row = acharLinha(lista, h);
         if (row && !row.dataset.blocoCont) {
           row.dataset.blocoCont = '1';
