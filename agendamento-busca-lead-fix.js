@@ -36,9 +36,22 @@
 
     function fecha() { box.style.display = 'none'; }
     function leadsDoSelect() {
-      // usa STATE.leads (tem telefone); cai no select se precisar
-      const arr = (typeof STATE !== 'undefined' && STATE.leads) ? STATE.leads : [];
-      return arr;
+      // fonte = opções do próprio select (já vêm certas), enriquecidas com telefone
+      // E filtradas pela CLÍNICA ATIVA (admin enxerga várias; aqui só a atual)
+      const cClinic = (typeof currentClinic === 'function' && currentClinic()) ? currentClinic().id : null;
+      const stateLeads = (typeof STATE !== 'undefined' && STATE.leads) ? STATE.leads : [];
+      const byId = {};
+      stateLeads.forEach(l => { byId[l.id] = l; });
+      return Array.from(sel.options).filter(o => o.value).map(o => {
+        const l = byId[o.value] || {};
+        return {
+          id: o.value,
+          nome: (o.textContent.split(' — ')[0] || o.textContent || '').trim(),
+          telefone: l.telefone || '',
+          procedimento: l.procedimento || (o.textContent.includes(' — ') ? o.textContent.split(' — ')[1] : ''),
+          clinic_id: l.clinic_id
+        };
+      }).filter(l => !cClinic || l.clinic_id === cClinic);
     }
 
     function render(termo) {
