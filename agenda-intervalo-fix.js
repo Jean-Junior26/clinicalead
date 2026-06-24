@@ -1,18 +1,22 @@
 // ============================================================
 // CLINICALEAD — AGENDAMENTO COM INTERVALO + ENCAIXE
-// • "Até (opcional)": cria UM agendamento com hora_fim; a agenda
-//   mostra o bloco e trava os horários do meio (relatório/lembrete
-//   /comissão contam 1 só). Vazio = 1 horário (como hoje).
-// • "Encaixe": agenda num horário digitado (ex: 11:01), pontual
-//   naquele dia. A agenda detecta horários fora da grade e os
-//   mostra com o card completo. Sem coluna nova (persiste pela consulta).
+// • "Até (opcional)": cria UM agendamento com hora_fim; agenda mostra
+//   o bloco e trava os horários do meio (relatório/lembrete/comissão
+//   contam 1 só). Vazio = 1 horário (como hoje).
+// • "Encaixe": agenda em horário digitado (ex: 11:01), pontual no dia.
+//   O horário entra na lista do dia (sem desfazer) → o card sai COMPLETO
+//   (nome, botões, badges), igual a um agendamento normal.
+// A lógica de bloco/conflito usa a GRADE PURA (sem encaixes).
 // Requer: coluna consultas.hora_fim. Carregar APÓS agenda-fix.js.
 // ============================================================
 
 (function () {
   'use strict';
 
-  function horarios() { return (typeof CAL !== 'undefined' && CAL.horariosDisponiveis) ? CAL.horariosDisponiveis : []; }
+  let gradeBase = [];      // grade fixa da clínica (sem encaixes)
+  let ultimoExtras = [];   // horários de encaixe que adicionamos por último
+
+  function horarios() { return gradeBase.length ? gradeBase : ((typeof CAL !== 'undefined' && CAL.horariosDisponiveis) ? CAL.horariosDisponiveis : []); }
   function proximoSlot(h) { const a = horarios(); const i = a.indexOf(h); return (i >= 0 && i < a.length - 1) ? a[i + 1] : h; }
   function slotsIntervalo(inicio, fim) {
     const a = horarios();
@@ -23,7 +27,7 @@
   // ── campo "Até (opcional)" ───────────────────────────────────
   function injetarAte() {
     const existing = document.getElementById('naHoraFimGroup');
-    if (existing) { existing.style.display = ''; popularAte(); return; } // reexibe (caso encaixe tenha escondido)
+    if (existing) { existing.style.display = ''; popularAte(); return; }
     const naHora = document.getElementById('naHora');
     if (!naHora) return;
     const grupo = naHora.closest('.form-group') || naHora.parentElement;
@@ -37,7 +41,6 @@
     naHora.addEventListener('change', popularAte);
     popularAte();
   }
-
   function popularAte() {
     const naHora = document.getElementById('naHora');
     const sel = document.getElementById('naHoraFim');
@@ -54,11 +57,7 @@
   ['openNovoAgendamento', 'openNovoAgendamentoHora'].forEach(fn => {
     if (typeof window[fn] === 'function') {
       const _orig = window[fn];
-      window[fn] = function (...args) {
-        const r = _orig.apply(this, args);
-        setTimeout(injetarAte, 130);
-        return r;
-      };
+      window[fn] = function (...args) { const r = _orig.apply(this, args); setTimeout(injetarAte, 130); return r; };
     }
   });
 
@@ -97,7 +96,6 @@
     if (horaFim && horaFim <= hora) { toast('A hora final precisa ser depois da inicial', 'error'); return; }
     const clinic = currentClinic();
 
-    // conflito: checa o intervalo inteiro (consultas + bloqueios)
     const slots = slotsIntervalo(hora, horaFim);
     const ocup = new Set();
     CAL.consultas.filter(c => c.data === data).forEach(c => {
@@ -109,7 +107,6 @@
     const conflito = slots.find(s => ocup.has(s));
     if (conflito) { toast(`O horário ${conflito} já está ocupado nesse intervalo`, 'error'); return; }
 
-    // encaixe (horário fora da grade) dentro de um procedimento → confirma
     const foraDaGrade = !horarios().includes(hora);
     if (foraDaGrade) {
       const dentro = CAL.consultas.find(c => c.data === data && c.hora_fim && hora > c.hora && hora < c.hora_fim);
@@ -144,10 +141,8 @@
           const dataFormatada = new Date(data + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
           const horaTexto = horaFim ? `${hora} às ${horaFim}` : hora;
           const msg = template
-            .replaceAll('{nome}', lead.nome || '')
-            .replaceAll('{clinica}', clinic.nome || clinic.name || '')
-            .replaceAll('{data}', dataFormatada)
-            .replaceAll('{hora}', horaTexto)
+            .replaceAll('{nome}', lead.nome || '').replaceAll('{clinica}', clinic.nome || clinic.name || '')
+            .replaceAll('{data}', dataFormatada).replaceAll('{hora}', horaTexto)
             .replaceAll('{procedimento}', procedimento || lead.procedimento || 'sua avaliação');
           await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg);
           toast('Confirmação enviada por WhatsApp! ✓');
@@ -164,12 +159,11 @@
     return null;
   }
 
-  // marca os blocos (intervalo) de forma discreta
   function marcarBlocos(dateStr) {
     const lista = document.getElementById('agendaList');
     if (!lista) return;
     CAL.consultas.filter(c => c.data === dateStr && c.hora_fim).forEach(c => {
-      const slots = slotsIntervalo(c.hora, c.hora_fim);
+      const slots = slotsIntervalo(c.hora, c.hora_fim); // usa grade pura
       const ini = acharLinha(lista, c.hora);
       if (ini && !ini.dataset.blocoIni) {
         ini.dataset.blocoIni = '1';
@@ -179,8 +173,7 @@
         tag.textContent = 'até ' + c.hora_fim;
         if (t && t.parentElement) t.parentElement.insertBefore(tag, t.nextSibling); else ini.appendChild(tag);
       }
-      const meio = slots.slice(1);
-      meio.forEach((h, i) => {
+      slots.slice(1).forEach((h, i) => {
         const row = acharLinha(lista, h);
         if (row && !row.dataset.blocoCont) {
           row.dataset.blocoCont = '1';
@@ -195,11 +188,10 @@
     });
   }
 
-  // marca os encaixes (horários fora da grade) com um selo
   function marcarEncaixes(dateStr) {
     const lista = document.getElementById('agendaList');
     if (!lista) return;
-    const grade = horarios();
+    const grade = horarios(); // grade pura
     CAL.consultas.filter(c => c.data === dateStr && c.hora && !grade.includes(c.hora)).forEach(c => {
       const row = acharLinha(lista, c.hora);
       if (row && !row.dataset.encaixeTag) {
@@ -213,13 +205,11 @@
     });
   }
 
-  // botão "Encaixe" na barra de ações do dia (reaplicado a cada render)
   function injetarBotaoEncaixe() {
     const actions = document.getElementById('agendaDayActions');
     if (!actions || document.getElementById('btnEncaixe')) return;
     const b = document.createElement('button');
-    b.id = 'btnEncaixe';
-    b.className = 'btn btn-sm';
+    b.id = 'btnEncaixe'; b.className = 'btn btn-sm';
     b.style.cssText = 'border:1px solid var(--blue,#5B8DB8);color:var(--blue,#5B8DB8);';
     b.innerHTML = '<i class="ti ti-calendar-plus"></i> Encaixe';
     b.onclick = window.abrirEncaixe;
@@ -229,25 +219,22 @@
   if (typeof renderDaySchedule === 'function') {
     const _rds = renderDaySchedule;
     renderDaySchedule = function (dateStr) {
-      // inclui horários de encaixe (fora da grade) na renderização do dia
-      const base = (typeof CAL !== 'undefined') ? CAL.horariosDisponiveis : null;
-      let restore = null;
       try {
-        if (base) {
-          const extras = CAL.consultas.filter(c => c.data === dateStr).map(c => c.hora)
-            .filter(h => h && !base.includes(h));
-          if (extras.length) {
-            restore = base;
-            CAL.horariosDisponiveis = Array.from(new Set(base.concat(extras))).sort();
-          }
-        }
-      } catch (e) {}
+        const atual = (typeof CAL !== 'undefined' && CAL.horariosDisponiveis) ? CAL.horariosDisponiveis : [];
+        // grade pura = lista atual menos os encaixes que adicionamos antes
+        gradeBase = atual.filter(h => !ultimoExtras.includes(h));
+        // encaixes deste dia (horários de consultas fora da grade)
+        const extras = (CAL.consultas || []).filter(c => c.data === dateStr).map(c => c.hora).filter(h => h && !gradeBase.includes(h));
+        const unicos = Array.from(new Set(extras));
+        // injeta na lista (SEM desfazer) → card sai completo p/ todos os fixes
+        CAL.horariosDisponiveis = unicos.length ? Array.from(new Set(gradeBase.concat(unicos))).sort() : gradeBase.slice();
+        ultimoExtras = unicos;
+      } catch (e) { console.error('[agenda extras]', e); }
       const r = _rds(dateStr);
-      if (restore) CAL.horariosDisponiveis = restore;
       try { marcarBlocos(dateStr); marcarEncaixes(dateStr); injetarBotaoEncaixe(); } catch (e) { console.error('[agenda extra]', e); }
       return r;
     };
   }
 
-  console.log('✅ agenda-intervalo-fix.js carregado — intervalo + encaixe');
+  console.log('✅ agenda-intervalo-fix.js carregado — intervalo + encaixe (v2)');
 })();
