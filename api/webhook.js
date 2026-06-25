@@ -14,6 +14,128 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
     'Content-Type': 'application/json',
   };
 
+  // ════════════════════════════════════════════════════════════
+  // BRIAN 2.3.a — CÉREBRO DA DECISÃO (NÃO ENVIA NADA AINDA)
+  // Checa as 7 travas e retorna se o Brian DEVERIA responder.
+  // Nesta etapa só LOGAMOS a decisão (pra você validar sem risco).
+  // ════════════════════════════════════════════════════════════
+  async function brianDecide(clinic_id, phone, content, instanceName, fromMe, isGroup) {
+    const motivo = (ok, razao) => ({ responder: ok, razao });
+    try {
+      // ── Anti-loop: nunca responde a própria mensagem ──
+      if (fromMe) return motivo(false, 'mensagem da própria clínica (from_me)');
+
+      // ── Trava 3a: não responde grupos ──
+      if (isGroup) return motivo(false, 'é grupo de WhatsApp');
+
+      // só texto faz sentido pro Brian responder
+      if (!content || !String(content).trim()) return motivo(false, 'sem conteúdo de texto');
+
+      const digitos = String(phone).replace(/\D/g, '');
+      const sufixo = digitos.slice(-8);
+      if (sufixo.length < 8) return motivo(false, 'telefone inválido');
+
+      // ── Carrega config do Brian da clínica ──
+      const cfgResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/brian_config?clinic_id=eq.${clinic_id}&select=auto_ativo,auto_so_fora_horario,horario_funcionamento,palavras_anuncio,brian_liberado&limit=1`,
+        { headers: sbHeaders }
+      );
+      const cfgArr = cfgResp.ok ? await cfgResp.json() : [];
+      const cfg = cfgArr[0];
+
+      // ── Trava 7: liberado pelo admin? ──
+      if (!cfg || cfg.brian_liberado !== true) return motivo(false, 'clínica não liberada pelo admin');
+
+      // ── Trava 1: chave geral do automático ligada? ──
+      if (cfg.auto_ativo !== true) return motivo(false, 'atendimento automático desligado (chave geral)');
+
+      // ── Trava 4: conversa com Brian desligado? (vence a geral) ──
+      const convResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/brian_conversa?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixo}&select=auto_desligado,humano_respondeu_em&limit=1`,
+        { headers: sbHeaders }
+      );
+      const convArr = convResp.ok ? await convResp.json() : [];
+      const conv = convArr[0];
+      if (conv && conv.auto_desligado === true) return motivo(false, 'Brian desligado nesta conversa (chave por conversa)');
+
+      // ── Trava 2 (horário): só responde FORA do horário de funcionamento ──
+      if (cfg.auto_so_fora_horario !== false) { // padrão: true
+        const dentro = dentroDoHorario(cfg.horario_funcionamento);
+        if (dentro) return motivo(false, 'dentro do horário de atendimento (humano assume)');
+      }
+
+      // ── Trava 5: humano respondeu recentemente? (recua) ──
+      // olha as últimas mensagens from_me=true nas últimas 2h
+      const duasHorasAtras = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
+      const humResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixo}&from_me=eq.true&created_at=gte.${duasHorasAtras}&select=content,created_at&order=created_at.desc&limit=5`,
+        { headers: sbHeaders }
+      );
+      const humArr = humResp.ok ? await humResp.json() : [];
+      // se houver mensagem da clínica que NÃO seja automática (lembrete/confirmação), considera humano ativo
+      const marcadoresAuto = ['confirma sua presença', 'lembrar que', 'sua consulta', 'parabéns', 'follow', 'avaliação gratuita'];
+      const humanoAtivo = humArr.some(m => {
+        const c = String(m.content || '').toLowerCase();
+        return !marcadoresAuto.some(mk => c.includes(mk));
+      });
+      if (humanoAtivo) return motivo(false, 'humano respondeu recentemente (Brian recua)');
+
+      // ── Trava 6: saldo disponível? ──
+      const saldoResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/brian_saldo?clinic_id=eq.${clinic_id}&select=incluso_mes,usado_mes,extra_comprado,extra_usado&limit=1`,
+        { headers: sbHeaders }
+      );
+      const saldoArr = saldoResp.ok ? await saldoResp.json() : [];
+      const s = saldoArr[0];
+      const disp = s ? ((s.incluso_mes || 0) - (s.usado_mes || 0)) + ((s.extra_comprado || 0) - (s.extra_usado || 0)) : 0;
+      if (disp <= 0) return motivo(false, 'sem saldo de mensagens');
+
+      // ── Trava 3b: número novo só responde se mencionar palavra-chave ──
+      // "novo" = sem consulta e sem histórico longo. Checa se já é lead conhecido.
+      const leadResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinic_id}&telefone=ilike.*${sufixo}&select=id,status&limit=1`,
+        { headers: sbHeaders }
+      );
+      const leadArr = leadResp.ok ? await leadResp.json() : [];
+      const jaEhLead = leadArr.length > 0;
+
+      if (!jaEhLead) {
+        // número novo: precisa mencionar palavra-chave (da clínica OU padrão de intenção)
+        const norm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const txt = norm(content);
+        const padrao = ['preco', 'preço', 'valor', 'valores', 'quanto custa', 'quanto fica', 'agendar', 'marcar',
+          'consulta', 'avaliacao', 'avaliação', 'implante', 'faceta', 'lente', 'clareamento', 'aparelho',
+          'ortodontia', 'protese', 'prótese', 'canal', 'dente', 'sorriso', 'orcamento', 'orçamento',
+          'harmonizacao', 'harmonização', 'informacao', 'informação', 'informacoes', 'gostaria', 'interesse'];
+        const daClinica = cfg.palavras_anuncio
+          ? String(cfg.palavras_anuncio).split(',').map(p => norm(p.trim())).filter(Boolean)
+          : [];
+        const todasPalavras = [...padrao, ...daClinica];
+        const bateu = todasPalavras.some(p => p && txt.includes(p));
+        if (!bateu) return motivo(false, 'número novo sem palavra-chave de interesse (camada 1+2)');
+      }
+
+      // ── Passou em todas as travas! ──
+      return motivo(true, jaEhLead ? 'lead conhecido, fora do horário, com saldo' : 'número novo com palavra-chave de interesse');
+    } catch (e) {
+      return motivo(false, 'erro na decisão: ' + (e.message || ''));
+    }
+  }
+
+  // helper: está dentro do horário de funcionamento agora? (BRT)
+  function dentroDoHorario(horario) {
+    try {
+      if (!horario || typeof horario !== 'object') return false; // sem horário cadastrado = sempre "fora" (Brian pode assumir)
+      const agora = new Date(Date.now() - 3 * 3600 * 1000); // BRT
+      const dias = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'];
+      const diaKey = dias[agora.getUTCDay()];
+      const faixa = horario[diaKey];
+      if (!faixa || !faixa.abre || !faixa.fecha) return false; // dia fechado = fora do horário
+      const hhmm = `${String(agora.getUTCHours()).padStart(2, '0')}:${String(agora.getUTCMinutes()).padStart(2, '0')}`;
+      return hhmm >= faixa.abre && hhmm <= faixa.fecha;
+    } catch (e) { return false; }
+  }
+
   // ── Baixa mídia descriptografada do Evolution e salva no Storage
   async function baixarEsalvarMidia(msgCompleta, instanceName, phone, tipo, nomeOriginal) {
     try {
@@ -362,6 +484,14 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
           insertados.push(phone);
         }
         if (!fromMe && type === 'text') await processarConfirmacao(clinic_id, phone, content, instanceName);
+
+        // ── BRIAN 2.3.a — decide e LOGA (não envia nada ainda) ──
+        if (!fromMe && type === 'text') {
+          try {
+            const decisao = await brianDecide(clinic_id, phone, content, instanceName, fromMe, false);
+            console.log(`[BRIAN-DECISAO] ${decisao.responder ? '✅ RESPONDERIA' : '⛔ não responde'} | ${phone} | motivo: ${decisao.razao} | msg: "${String(content).slice(0, 40)}"`);
+          } catch (e) { console.log('[BRIAN-DECISAO] erro:', e.message); }
+        }
       } catch (msgErr) {
         erros.push({ erro: msgErr.message });
       }
