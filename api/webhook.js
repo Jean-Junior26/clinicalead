@@ -82,7 +82,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       // olha as últimas mensagens from_me=true nas últimas 2h
       const duasHorasAtras = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
       const humResp = await fetch(
-        `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixo}&from_me=eq.true&created_at=gte.${duasHorasAtras}&select=content,created_at&order=created_at.desc&limit=5`,
+        `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixo}&from_me=eq.true&created_at=gte.${duasHorasAtras}&select=content,contact_name,created_at&order=created_at.desc&limit=5`,
         { headers: sbHeaders }
       );
       const humArr = humResp.ok ? await humResp.json() : [];
@@ -91,11 +91,13 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       const normMsg = (x) => String(x || '').trim().toLowerCase();
       const conteudoAtual = normMsg(content);
       const humanoAtivo = humArr.some(m => {
+        // IMPORTANTE: ignora as RESPOSTAS DO PRÓPRIO BRIAN (marcadas como BRIAN_AUTO),
+        // senão o Brian acha que "o humano respondeu" sendo que foi ele mesmo.
+        if (m.contact_name === 'BRIAN_AUTO') return false;
         const c = normMsg(m.content);
-        // IMPORTANTE: ignora a PRÓPRIA mensagem recém-chegada (alguns sistemas/testes a salvam como from_me),
-        // senão o Brian acha que "o humano respondeu" sendo que é a mensagem do lead.
+        // ignora a PRÓPRIA mensagem recém-chegada (alguns sistemas/testes a salvam como from_me)
         if (c === conteudoAtual) return false;
-        // ignora mensagens automáticas
+        // ignora mensagens automáticas (lembrete, follow-up, etc.)
         if (marcadoresAuto.some(mk => c.includes(mk))) return false;
         return true; // sobrou uma mensagem real da clínica = humano ativo
       });
@@ -214,7 +216,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
     }
   }
 
-  async function responderPaciente(instanceName, clinicId, phone, message) {
+  async function responderPaciente(instanceName, clinicId, phone, message, marcador) {
     try {
       const cleanPhone = String(phone).replace(/\D/g, '');
       const number = cleanPhone.startsWith('55') ? cleanPhone : '55' + cleanPhone;
@@ -229,7 +231,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
         method: 'POST',
         headers: { ...sbHeaders, Prefer: 'return=minimal' },
         body: JSON.stringify({
-          clinic_id: clinicId, phone: number, contact_name: null,
+          clinic_id: clinicId, phone: number, contact_name: marcador || null,
           content: message, type: 'text', from_me: true, media_url: null,
           message_id: sentId, created_at: new Date().toISOString(),
         }),
@@ -537,7 +539,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
                 const textoResposta = dataBrian && dataBrian.ok ? dataBrian.sugestao : null;
 
                 if (textoResposta && instanceName) {
-                  await responderPaciente(instanceName, clinic_id, phone, textoResposta);
+                  await responderPaciente(instanceName, clinic_id, phone, textoResposta, 'BRIAN_AUTO');
                   console.log(`[BRIAN-ENVIO] ✅ respondeu ${phone}: "${String(textoResposta).slice(0, 60)}"`);
                 } else {
                   console.log(`[BRIAN-ENVIO] ⚠️ não gerou resposta (${dataBrian ? (dataBrian.erro || 'sem texto') : 'sem retorno'})`);
