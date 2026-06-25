@@ -100,11 +100,18 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
     try {
       if (!clinic_id || !phone || !content) return;
       const resp = String(content).trim().toLowerCase();
-      const ehConfirmar = ['1', '1️⃣', 'sim', 'confirmar', 'confirmo', 'confirmado', 'confirmada', 'ok', 'pode ser', 'vou', 'estarei', 'estarei la', 'estarei lá'].includes(resp);
+      // Normaliza: tira acentos pra "não"/"nao" e variações caírem na mesma regra
+      const semAcento = resp.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      // versão sem pontuação no fim (pra "claro!", "sim.", "ok!" também baterem)
+      const semPont = semAcento.replace(/[!.,;:)\s]+$/g, '').replace(/^[\s(]+/g, '');
+
+      // ── CONFIRMAÇÃO: detecção robusta a erros de português (sim, siim, sin, simm, ss, claro...) ──
+      const listaConfirmar = ['1', '1️⃣', 'sim', 'confirmar', 'confirmo', 'confirmado', 'confirmada', 'ok', 'okay', 'okk', 'pode ser', 'vou', 'vou sim', 'estarei', 'estarei la', 'isso', 'isso mesmo', 'claro', 'com certeza', 'certo', 'positivo', 'beleza', 'blz', 'show', 'ss', 'sss'].includes(semPont);
+      // variações digitadas/erradas: "sim", "siim", "siiim", "simm", "sin", "ssim", "s" sozinho
+      const confirmaRegex = /^(s+i+m+|si+n|s+i+|ss+i+m+|s)$/.test(semPont.replace(/\s+/g, ''));
+      const ehConfirmar = listaConfirmar || confirmaRegex;
 
       // ── CANCELAMENTO: detecção por PALAVRA-CHAVE (robusto a erros de português) ──
-      // Normaliza: tira acentos pra "não" e "nao" caírem na mesma regra
-      const semAcento = resp.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
       // 1) Raízes que indicam cancelamento direto (contém em qualquer lugar da frase)
       const raizesCancelar = ['cancel', 'desmarc', 'desist'];
       let ehCancelar = raizesCancelar.some(r => semAcento.includes(r));
@@ -116,6 +123,8 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
         // só marca cancelamento por negação se a frase for curta (resposta ao lembrete), evitando falso positivo em conversa longa
         if (temNegacao && temIntencaoIr && semAcento.length <= 40) ehCancelar = true;
       }
+      // confirmação NÃO vale se a frase também bate cancelamento (cancelamento vence, é mais seguro)
+      const ehConfirmarFinal = ehConfirmar && !ehCancelar;
 
       const ehRemarcar = ['2', '2️⃣', 'nao', 'não', 'remarcar', 'reagendar', 'nao posso', 'não posso', 'nao vou', 'não vou'].includes(resp)
         || /remarc|reagend|outro dia|outro horario|outra data|mudar.*dia|mudar.*horario/.test(semAcento);
@@ -167,7 +176,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       if (!respCurta) return; // mensagem longa = conversa, não resposta
 
       // (2) houve lembrete/confirmação recente pra esse número?
-      const dezoitoHorasAtras = new Date(Date.now() - 18 * 3600 * 1000).toISOString();
+      const dezoitoHorasAtras = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
       const numeroDigitos = String(phone).replace(/\D/g, '');
       const sufixoNum = numeroDigitos.slice(-8);
       let houveLembreteRecente = false;
@@ -181,7 +190,11 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
           // frases que marcam um lembrete/confirmação enviado pela clínica
           const marcadores = ['confirma sua presença', 'confirma sua presenca', 'sua consulta',
             'lembrar que', 'consulta está', 'consulta esta', 'confirmar', 'remarcar',
-            'te esperamos', 'sua presença', 'sua presenca'];
+            'te esperamos', 'sua presença', 'sua presenca', 'sua avaliação', 'sua avaliacao',
+            'tem consulta', 'tem horário', 'tem horario', 'seu horário', 'seu horario',
+            'agendamento', 'agendada', 'agendado', 'responda', 'amanhã', 'amanha',
+            'hoje às', 'hoje as', 'confirme', 'confirma pra', 'confirma para', 'presença está',
+            'presenca esta', 'lembrete', 'sua sessão', 'sua sessao', 'compareça', 'comparecer'];
           houveLembreteRecente = msgs.some(m => {
             const c = String(m.content || '').toLowerCase();
             return marcadores.some(mk => c.includes(mk));
@@ -195,7 +208,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       const dataFmt = `${dia}/${mes}`;
       const horaFmt = (consulta.hora || '').slice(0, 5);
       const primeiroNome = (lead.nome || '').split(' ')[0];
-      if (ehConfirmar) {
+      if (ehConfirmarFinal) {
         await fetch(`${SUPABASE_URL}/rest/v1/consultas?id=eq.${consulta.id}`, {
           method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
           body: JSON.stringify({ status: 'confirmado' }),
