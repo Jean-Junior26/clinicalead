@@ -176,7 +176,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       if (!respCurta) return; // mensagem longa = conversa, não resposta
 
       // (2) houve lembrete/confirmação recente pra esse número?
-      const dezoitoHorasAtras = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
+      const dezoitoHorasAtras = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
       const numeroDigitos = String(phone).replace(/\D/g, '');
       const sufixoNum = numeroDigitos.slice(-8);
       let houveLembreteRecente = false;
