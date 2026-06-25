@@ -194,7 +194,7 @@
               </div>
               <span style="font-size:11px;color:${statusCor};white-space:nowrap;">${statusTxt}</span>
               <div style="display:flex;gap:6px;">
-                <button title="Abrir conversa" onclick="fuAbrirConversa('${l.sufixo}','${(l.nome||'').replace(/'/g,"\\'")}')" style="background:var(--gold-pale,rgba(201,168,76,0.12));border:1px solid var(--gold-border,rgba(201,168,76,0.3));color:var(--gold,#C9A84C);border-radius:7px;padding:6px 9px;cursor:pointer;font-size:12px;"><i class="ti ti-brand-whatsapp"></i></button>
+                <button title="Abrir conversa" onclick="fuAbrirConversa('${l.sufixo}','${(l.nome||'').replace(/'/g,"\\'")}','${(l.telefone||'').replace(/'/g,"")}')" style="background:var(--gold-pale,rgba(201,168,76,0.12));border:1px solid var(--gold-border,rgba(201,168,76,0.3));color:var(--gold,#C9A84C);border-radius:7px;padding:6px 9px;cursor:pointer;font-size:12px;"><i class="ti ti-brand-whatsapp"></i></button>
                 <button title="${l.bloqueado?'Reativar follow-up':'Parar follow-up deste lead'}" onclick="fuToggleLead('${clinic.id}','${(l.telefone||'').replace(/'/g,"")}',${l.bloqueado},this)" style="background:transparent;border:1px solid ${l.bloqueado?'var(--blue,#5B8DB8)':'var(--coral,#C0624A)'};color:${l.bloqueado?'var(--blue,#5B8DB8)':'var(--coral,#C0624A)'};border-radius:7px;padding:6px 9px;cursor:pointer;font-size:12px;"><i class="ti ti-${l.bloqueado?'bell-ringing':'bell-off'}"></i></button>
               </div>
             </div>`;
@@ -212,18 +212,37 @@
   }
 
   // ── AÇÕES ──
-  window.fuAbrirConversa = function (sufixo, nome) {
-    // tenta abrir a conversa pelo inbox. openChat costuma receber um phone/objeto.
+  window.fuAbrirConversa = async function (sufixo, nome, telefoneCompleto) {
+    const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
+
+    // openChat espera a chave no formato "telefone|instance_name".
+    // 1) tenta achar a conversa já carregada no INBOX (jeito mais confiável)
+    let chave = null;
+    try {
+      if (typeof INBOX !== 'undefined' && Array.isArray(INBOX.chats)) {
+        const achou = INBOX.chats.find(c => String(c.phone || '').replace(/\D/g, '').slice(-8) === sufixo);
+        if (achou && achou.id) chave = achou.id;
+        else if (achou && achou.phone && achou.instance_name) chave = `${achou.phone}|${achou.instance_name}`;
+      }
+    } catch (e) {}
+
+    // 2) se não achou no INBOX, monta com o telefone do lead + instância da clínica
+    if (!chave) {
+      const inst = clinic && (clinic.whatsapp_instance || clinic.instance_name);
+      const tel = String(telefoneCompleto || '').replace(/\D/g, '');
+      if (inst && tel) chave = `${tel}|${inst}`;
+    }
+
+    if (!chave) {
+      if (typeof toast === 'function') toast('Não encontrei a conversa deste lead no WhatsApp ainda', 'error');
+      return;
+    }
+
+    // navega pro inbox e abre a conversa
     if (typeof showPage === 'function') showPage('inbox');
     setTimeout(() => {
-      try {
-        if (typeof openChat === 'function') {
-          // tenta várias assinaturas comuns
-          try { openChat(sufixo); } catch (e) { try { openChat({ phone: sufixo, contact_name: nome }); } catch (e2) {} }
-        }
-      } catch (e) {}
-      if (typeof toast === 'function') toast('Abrindo conversa de ' + (nome || '') + '…');
-    }, 300);
+      try { if (typeof openChat === 'function') openChat(chave); } catch (e) { console.error('[fu openChat]', e); }
+    }, 350);
   };
 
   window.fuToggleLead = async function (clinicId, phoneCompleto, estaBloqueado, btn) {
