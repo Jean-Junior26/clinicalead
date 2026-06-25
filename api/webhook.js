@@ -35,7 +35,21 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       const sufixo = digitos.slice(-8);
       if (sufixo.length < 8) return motivo(false, 'telefone inválido');
 
-      // ── Carrega config do Brian da clínica ──
+      // ── Anti-loop EXTRA: não responde números que são instâncias conectadas ──
+      // (se o número que mandou for outra instância da própria clínica/sistema, ignora —
+      //  senão dois números conectados ficariam se respondendo em loop infinito).
+      try {
+        // checa se o sufixo bate com alguma instância registrada (nome costuma conter o número)
+        const instAllResp = await fetch(
+          `${SUPABASE_URL}/rest/v1/instancias?select=instance_name`,
+          { headers: sbHeaders }
+        );
+        if (instAllResp.ok) {
+          const instAll = await instAllResp.json();
+          const ehInstancia = (instAll || []).some(i => String(i.instance_name || '').replace(/\D/g, '').includes(sufixo));
+          if (ehInstancia) return motivo(false, 'número é uma instância conectada (anti-loop)');
+        }
+      } catch (e) { /* se falhar, segue (outras travas protegem) */ }
       const cfgResp = await fetch(
         `${SUPABASE_URL}/rest/v1/brian_config?clinic_id=eq.${clinic_id}&select=auto_ativo,auto_so_fora_horario,horario_funcionamento,palavras_anuncio,brian_liberado&limit=1`,
         { headers: sbHeaders }
@@ -72,11 +86,18 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
         { headers: sbHeaders }
       );
       const humArr = humResp.ok ? await humResp.json() : [];
-      // se houver mensagem da clínica que NÃO seja automática (lembrete/confirmação), considera humano ativo
+      // mensagens automáticas conhecidas (não contam como "humano")
       const marcadoresAuto = ['confirma sua presença', 'lembrar que', 'sua consulta', 'parabéns', 'follow', 'avaliação gratuita'];
+      const normMsg = (x) => String(x || '').trim().toLowerCase();
+      const conteudoAtual = normMsg(content);
       const humanoAtivo = humArr.some(m => {
-        const c = String(m.content || '').toLowerCase();
-        return !marcadoresAuto.some(mk => c.includes(mk));
+        const c = normMsg(m.content);
+        // IMPORTANTE: ignora a PRÓPRIA mensagem recém-chegada (alguns sistemas/testes a salvam como from_me),
+        // senão o Brian acha que "o humano respondeu" sendo que é a mensagem do lead.
+        if (c === conteudoAtual) return false;
+        // ignora mensagens automáticas
+        if (marcadoresAuto.some(mk => c.includes(mk))) return false;
+        return true; // sobrou uma mensagem real da clínica = humano ativo
       });
       if (humanoAtivo) return motivo(false, 'humano respondeu recentemente (Brian recua)');
 
