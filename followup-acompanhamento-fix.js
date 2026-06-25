@@ -25,7 +25,12 @@
     btn.className = 'nav-item';
     btn.id = 'navFollowup';
     btn.innerHTML = '<i class="ti ti-flame"></i> Follow-up';
-    btn.onclick = function () { if (typeof showPage === 'function') showPage('followup', btn); abrirFollowup(); };
+    btn.onclick = function () {
+      garantirPagina();
+      // usa o sistema NATIVO de navegação (não mexe em display na marra)
+      if (typeof showPage === 'function') showPage('followup', btn);
+      fuAcompRefresh();
+    };
     ancora.parentNode.insertBefore(btn, ancora.nextSibling);
   }
 
@@ -36,9 +41,8 @@
     const ref = document.getElementById('page-automacoes-pro');
     if (!ref || !ref.parentNode) return null;
     page = document.createElement('div');
-    page.className = 'page';
+    page.className = 'page'; // SEM display inline — o sistema nativo (classe) controla a visibilidade
     page.id = 'page-followup';
-    page.style.display = 'none';
     page.innerHTML = `
       <div class="page-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:18px;">
         <div>
@@ -55,18 +59,7 @@
 
   window.abrirFollowup = async function () {
     garantirPagina();
-    // garante que a página fica visível mesmo se showPage não reconhecer o id
-    setTimeout(() => {
-      const p = document.getElementById('page-followup');
-      if (p) {
-        document.querySelectorAll('.page').forEach(pg => { if (pg.id !== 'page-followup') pg.style.display = 'none'; });
-        p.style.display = 'block';
-      }
-      // marca o item de menu ativo
-      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-      const nav = document.getElementById('navFollowup');
-      if (nav) nav.classList.add('active');
-    }, 80);
+    if (typeof showPage === 'function') showPage('followup', document.getElementById('navFollowup'));
     await fuAcompRefresh();
   };
 
@@ -212,37 +205,37 @@
   }
 
   // ── AÇÕES ──
+  // Abre o inbox e tenta posicionar na conversa do lead. Simples e à prova de travamento.
   window.fuAbrirConversa = async function (sufixo, nome, telefoneCompleto) {
-    const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
-
-    // openChat espera a chave no formato "telefone|instance_name".
-    // 1) tenta achar a conversa já carregada no INBOX (jeito mais confiável)
-    let chave = null;
     try {
-      if (typeof INBOX !== 'undefined' && Array.isArray(INBOX.chats)) {
-        const achou = INBOX.chats.find(c => String(c.phone || '').replace(/\D/g, '').slice(-8) === sufixo);
-        if (achou && achou.id) chave = achou.id;
-        else if (achou && achou.phone && achou.instance_name) chave = `${achou.phone}|${achou.instance_name}`;
+      // monta a chave "telefone|instance_name" se der; senão só navega pro inbox
+      let chave = null;
+      try {
+        if (typeof INBOX !== 'undefined' && INBOX && Array.isArray(INBOX.chats)) {
+          const achou = INBOX.chats.find(c => c && String(c.phone || '').replace(/\D/g, '').slice(-8) === String(sufixo));
+          if (achou && achou.id) chave = achou.id;
+        }
+      } catch (e) {}
+
+      // navega pro inbox
+      try {
+        const navInbox = document.querySelector('.nav-item[onclick*="inbox"], #navInbox') ||
+          [...document.querySelectorAll('.nav-item')].find(n => /inbox|whatsapp/i.test(n.textContent));
+        if (navInbox) navInbox.click();
+        else if (typeof showPage === 'function') showPage('inbox');
+      } catch (e) { console.warn('[fu] nav inbox', e); }
+
+      // tenta abrir a conversa específica (se achou a chave), sem travar se falhar
+      if (chave) {
+        setTimeout(() => {
+          try { if (typeof openChat === 'function') openChat(chave); } catch (e) { console.warn('[fu] openChat', e); }
+        }, 500);
+      } else {
+        if (typeof toast === 'function') toast('Abri o WhatsApp — procure por ' + (nome || 'o lead') + ' na lista', 'info');
       }
-    } catch (e) {}
-
-    // 2) se não achou no INBOX, monta com o telefone do lead + instância da clínica
-    if (!chave) {
-      const inst = clinic && (clinic.whatsapp_instance || clinic.instance_name);
-      const tel = String(telefoneCompleto || '').replace(/\D/g, '');
-      if (inst && tel) chave = `${tel}|${inst}`;
+    } catch (e) {
+      console.error('[fu] fuAbrirConversa', e);
     }
-
-    if (!chave) {
-      if (typeof toast === 'function') toast('Não encontrei a conversa deste lead no WhatsApp ainda', 'error');
-      return;
-    }
-
-    // navega pro inbox e abre a conversa
-    if (typeof showPage === 'function') showPage('inbox');
-    setTimeout(() => {
-      try { if (typeof openChat === 'function') openChat(chave); } catch (e) { console.error('[fu openChat]', e); }
-    }, 350);
   };
 
   window.fuToggleLead = async function (clinicId, phoneCompleto, estaBloqueado, btn) {
