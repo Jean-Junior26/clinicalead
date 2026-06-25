@@ -506,12 +506,45 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
         }
         if (!fromMe && type === 'text') await processarConfirmacao(clinic_id, phone, content, instanceName);
 
-        // ── BRIAN 2.3.a — decide e LOGA (não envia nada ainda) ──
+        // ── BRIAN 2.3.b — decide e, se aprovado + número de teste, RESPONDE ──
         if (!fromMe && type === 'text') {
           try {
             const decisao = await brianDecide(clinic_id, phone, content, instanceName, fromMe, false);
             console.log(`[BRIAN-DECISAO] ${decisao.responder ? '✅ RESPONDERIA' : '⛔ não responde'} | ${phone} | motivo: ${decisao.razao} | msg: "${String(content).slice(0, 40)}"`);
-          } catch (e) { console.log('[BRIAN-DECISAO] erro:', e.message); }
+
+            if (decisao.responder) {
+              // ── TRAVA DE TESTE: só envia pra números autorizados (modo rollout controlado) ──
+              // Coloque aqui os ÚLTIMOS 8 DÍGITOS dos números liberados pra teste.
+              // Enquanto essa lista existir, o Brian SÓ responde esses números.
+              // Deixe a lista VAZIA ([]) para liberar geral (produção).
+              const NUMEROS_TESTE = ['99418861']; // <- número de teste do Jean (34 99941-8861). Deixe [] para liberar geral.
+              const sufixoMsg = String(phone).replace(/\D/g, '').slice(-8);
+              const modoTeste = NUMEROS_TESTE.length > 0;
+              const liberadoTeste = !modoTeste || NUMEROS_TESTE.includes(sufixoMsg);
+
+              if (!liberadoTeste) {
+                console.log(`[BRIAN-ENVIO] ⏸️ modo teste: ${phone} não está na lista de teste — não envia`);
+              } else {
+                // anti-loop final: já respondeu essa exata mensagem recentemente?
+                // (evita responder 2x se o webhook for chamado em duplicidade)
+                console.log(`[BRIAN-ENVIO] 🤖 gerando resposta para ${phone}...`);
+                const respBrian = await fetch(`${SUPABASE_URL}/functions/v1/brian`, {
+                  method: 'POST',
+                  headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'responder_auto', clinic_id, phone }),
+                });
+                const dataBrian = respBrian.ok ? await respBrian.json() : null;
+                const textoResposta = dataBrian && dataBrian.ok ? dataBrian.sugestao : null;
+
+                if (textoResposta && instanceName) {
+                  await responderPaciente(instanceName, clinic_id, phone, textoResposta);
+                  console.log(`[BRIAN-ENVIO] ✅ respondeu ${phone}: "${String(textoResposta).slice(0, 60)}"`);
+                } else {
+                  console.log(`[BRIAN-ENVIO] ⚠️ não gerou resposta (${dataBrian ? (dataBrian.erro || 'sem texto') : 'sem retorno'})`);
+                }
+              }
+            }
+          } catch (e) { console.log('[BRIAN-ENVIO] erro:', e.message); }
         }
       } catch (msgErr) {
         erros.push({ erro: msgErr.message });
