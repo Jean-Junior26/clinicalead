@@ -56,10 +56,20 @@
     if (!body) return;
     const linhas = body.querySelectorAll('.brian-lib-btn');
     for (const btn of linhas) {
-      const card = btn.closest('div[style*="border-radius:10px"]') || btn.parentElement;
+      // o card é o elemento-pai direto do bloco (nome + botão). Sobe no máximo
+      // até achar o container flex do card, sem usar seletor frágil de estilo.
+      let card = btn.parentElement;
+      // o botão fica dentro do card flex; o pai do botão JÁ é o card (div flex com nome+botão)
+      if (card && !card.style.cssText.includes('display:flex')) {
+        // fallback: tenta o ancestral imediato que seja o card
+        card = btn.closest('div[style*="background"]') || btn.parentElement;
+      }
       if (!card || card.dataset.saldoInj) continue;
       card.dataset.saldoInj = '1';
       const clinicId = btn.dataset.id;
+
+      // garante que o card quebre linha (pra linha de saldo ir embaixo sem comer o nome)
+      if (!card.style.flexWrap) card.style.flexWrap = 'wrap';
 
       // busca saldo atual
       let saldo = null;
