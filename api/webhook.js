@@ -536,11 +536,44 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
                   body: JSON.stringify({ action: 'responder_auto', clinic_id, phone }),
                 });
                 const dataBrian = respBrian.ok ? await respBrian.json() : null;
-                const textoResposta = dataBrian && dataBrian.ok ? dataBrian.sugestao : null;
+                let textoResposta = dataBrian && dataBrian.ok ? dataBrian.sugestao : null;
 
                 if (textoResposta && instanceName) {
-                  await responderPaciente(instanceName, clinic_id, phone, textoResposta, 'BRIAN_AUTO');
-                  console.log(`[BRIAN-ENVIO] ✅ respondeu ${phone}: "${String(textoResposta).slice(0, 60)}"`);
+                  // ── FASE 3 — detecta marcadores [[LEAD|...]] e [[AGENDAR|...]] ──
+                  // Nesta etapa só EXTRAI, LOGA e REMOVE (não cria lead/consulta ainda).
+
+                  // marcador LEAD (captura do nome → criar lead se novo)
+                  const mLead = String(textoResposta).match(/\[\[LEAD\|([^\]]+)\]\]/i);
+                  if (mLead) {
+                    try {
+                      const campos = {};
+                      mLead[1].split('|').forEach(par => {
+                        const idx = par.indexOf('=');
+                        if (idx > 0) campos[par.slice(0, idx).trim().toLowerCase()] = par.slice(idx + 1).trim();
+                      });
+                      console.log(`[BRIAN-LEAD] 👤 SINAL DETECTADO | phone: ${phone} | nome: ${campos.nome}`);
+                    } catch (e) { console.log('[BRIAN-LEAD] erro ao ler marcador:', e.message); }
+                    textoResposta = String(textoResposta).replace(/\s*\[\[LEAD\|[^\]]+\]\]\s*/i, ' ').trim();
+                  }
+
+                  // marcador AGENDAR (fechar horário → criar consulta)
+                  const mAgendar = String(textoResposta).match(/\[\[AGENDAR\|([^\]]+)\]\]/i);
+                  if (mAgendar) {
+                    try {
+                      const campos = {};
+                      mAgendar[1].split('|').forEach(par => {
+                        const idx = par.indexOf('=');
+                        if (idx > 0) campos[par.slice(0, idx).trim().toLowerCase()] = par.slice(idx + 1).trim();
+                      });
+                      console.log(`[BRIAN-AGENDAR] 📅 SINAL DETECTADO | phone: ${phone} | data: ${campos.data} | hora: ${campos.hora} | nome: ${campos.nome}`);
+                    } catch (e) { console.log('[BRIAN-AGENDAR] erro ao ler marcador:', e.message); }
+                    textoResposta = String(textoResposta).replace(/\s*\[\[AGENDAR\|[^\]]+\]\]\s*/i, ' ').trim();
+                  }
+
+                  if (textoResposta) {
+                    await responderPaciente(instanceName, clinic_id, phone, textoResposta, 'BRIAN_AUTO');
+                    console.log(`[BRIAN-ENVIO] ✅ respondeu ${phone}: "${String(textoResposta).slice(0, 60)}"`);
+                  }
                 } else {
                   console.log(`[BRIAN-ENVIO] ⚠️ não gerou resposta (${dataBrian ? (dataBrian.erro || 'sem texto') : 'sem retorno'})`);
                 }
