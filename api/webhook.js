@@ -661,7 +661,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
               // Coloque aqui os ÚLTIMOS 8 DÍGITOS dos números liberados pra teste.
               // Enquanto essa lista existir, o Brian SÓ responde esses números.
               // Deixe a lista VAZIA ([]) para liberar geral (produção).
-              const NUMEROS_TESTE = ['99418861']; // <- número de teste do Jean (34 99941-8861). Deixe [] para liberar geral.
+              const NUMEROS_TESTE = []; // VAZIO = produção (responde todos os leads das clínicas LIBERADAS). A liberação é controlada por clínica (brian_liberado) no painel admin.
               const sufixoMsg = String(phone).replace(/\D/g, '').slice(-8);
               const modoTeste = NUMEROS_TESTE.length > 0;
               const liberadoTeste = !modoTeste || NUMEROS_TESTE.includes(sufixoMsg);
