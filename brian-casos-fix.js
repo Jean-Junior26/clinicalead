@@ -27,7 +27,7 @@
     const btn = document.createElement('button');
     btn.className = 'nav-item';
     btn.id = 'navBrianCasos';
-    btn.innerHTML = '<i class="ti ti-photo"></i> Casos do Brian';
+    btn.innerHTML = '<i class="ti ti-photo"></i> Casos Brian IA';
     btn.onclick = abrirCasos;
     if (ancora && ancora.nextSibling) menu.insertBefore(btn, ancora.nextSibling);
     else menu.appendChild(btn);
@@ -49,7 +49,7 @@
     modal.innerHTML = `
       <div style="background:var(--bg-surface,#141414);border:1px solid var(--gold-border,rgba(201,168,76,0.25));border-radius:14px;max-width:760px;width:100%;max-height:88vh;overflow-y:auto;padding:24px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-          <h2 style="margin:0;color:var(--gold,#C9A84C);font-size:20px;">📸 Casos do Brian</h2>
+          <h2 style="margin:0;color:var(--gold,#C9A84C);font-size:20px;">📸 Casos Brian IA</h2>
           <button onclick="document.getElementById('brianCasosModal').style.display='none'" style="background:none;border:none;color:var(--text-secondary);font-size:22px;cursor:pointer;">×</button>
         </div>
         <p style="color:var(--text-muted);font-size:13px;margin:0 0 18px;">Suba fotos de casos (antes/depois) por procedimento. No momento certo da conversa, o Brian envia 1–2 casos pra mostrar o resultado. 🦷✨</p>
