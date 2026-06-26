@@ -275,6 +275,52 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
     } catch (e) { return { ok: false, motivo: e.message }; }
   }
 
+  // Envia 1-2 imagens de casos do procedimento via Evolution (sendMedia)
+  async function brianEnviarCasos(instanceName, clinic_id, phone, procedimento) {
+    try {
+      if (!instanceName || !procedimento) return;
+      const proc = String(procedimento).trim();
+      // busca casos ativos desse procedimento (limita a 2)
+      const r = await fetch(
+        `${SUPABASE_URL}/rest/v1/brian_casos?clinic_id=eq.${clinic_id}&ativo=eq.true&procedimento=ilike.*${encodeURIComponent(proc)}*&select=imagem_url,legenda&order=ordem.asc&limit=2`,
+        { headers: sbHeaders }
+      );
+      const casos = r.ok ? await r.json() : [];
+      if (!casos.length) { console.log(`[BRIAN-CASOS] nenhum caso de "${proc}" pra enviar`); return; }
+
+      const cleanPhone = String(phone).replace(/\D/g, '');
+      const number = cleanPhone.startsWith('55') ? cleanPhone : '55' + cleanPhone;
+
+      for (const caso of casos) {
+        try {
+          await fetch(`${EVO_URL}/message/sendMedia/${instanceName}`, {
+            method: 'POST',
+            headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              number,
+              mediatype: 'image',
+              mimetype: 'image/jpeg',
+              media: caso.imagem_url,
+              caption: caso.legenda || '',
+              fileName: 'caso.jpg',
+            }),
+          });
+          // registra no inbox (como mensagem do Brian)
+          await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
+            method: 'POST',
+            headers: { ...sbHeaders, Prefer: 'return=minimal' },
+            body: JSON.stringify({
+              clinic_id, phone: number, contact_name: 'BRIAN_AUTO',
+              content: caso.legenda || '📷 Caso', type: 'image', from_me: true,
+              media_url: caso.imagem_url, created_at: new Date().toISOString(),
+            }),
+          });
+          console.log(`[BRIAN-CASOS] ✅ enviou caso de "${proc}"`);
+        } catch (e) { console.log('[BRIAN-CASOS] erro ao enviar 1 caso:', e.message); }
+      }
+    } catch (e) { console.log('[BRIAN-CASOS] erro:', e.message); }
+  }
+
   // Monta e envia a confirmação de agendamento (com endereço/mapa da clínica)
   async function brianEnviarConfirmacao(instanceName, clinic_id, phone, nome, data, hora) {
     try {
@@ -715,10 +761,31 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
                     textoResposta = String(textoResposta).replace(/\s*\[\[AGENDAR\|[^\]]+\]\]\s*/i, ' ').trim();
                   }
 
+                  // marcador CASOS (enviar fotos de antes/depois de um procedimento)
+                  let procCasos = null;
+                  const mCasos = String(textoResposta).match(/\[\[CASOS\|([^\]]+)\]\]/i);
+                  if (mCasos) {
+                    try {
+                      const campos = {};
+                      mCasos[1].split('|').forEach(par => {
+                        const idx = par.indexOf('=');
+                        if (idx > 0) campos[par.slice(0, idx).trim().toLowerCase()] = par.slice(idx + 1).trim();
+                      });
+                      procCasos = campos.procedimento || null;
+                      console.log(`[BRIAN-CASOS] 📸 detectado | phone: ${phone} | procedimento: ${procCasos}`);
+                    } catch (e) { console.log('[BRIAN-CASOS] erro ao ler marcador:', e.message); }
+                    textoResposta = String(textoResposta).replace(/\s*\[\[CASOS\|[^\]]+\]\]\s*/i, ' ').trim();
+                  }
+
                   // 1) envia a resposta limpa do Brian (sem marcadores)
                   if (textoResposta) {
                     await responderPaciente(instanceName, clinic_id, phone, textoResposta, 'BRIAN_AUTO');
                     console.log(`[BRIAN-ENVIO] ✅ respondeu ${phone}: "${String(textoResposta).slice(0, 60)}"`);
+                  }
+
+                  // 1.5) envia os casos (antes/depois) se o Brian sinalizou
+                  if (procCasos) {
+                    await brianEnviarCasos(instanceName, clinic_id, phone, procCasos);
                   }
 
                   // 2) executa o agendamento (se houver) — cria lead + consulta + confirma
