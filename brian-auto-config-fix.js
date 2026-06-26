@@ -26,7 +26,7 @@
     carregando = true;
     let cfg = {};
     try {
-      const { data } = await db.from('brian_config').select('auto_ativo, horario_funcionamento, palavras_anuncio').eq('clinic_id', clinic.id).maybeSingle();
+      const { data } = await db.from('brian_config').select('auto_ativo, auto_modo, horario_funcionamento, palavras_anuncio').eq('clinic_id', clinic.id).maybeSingle();
       cfg = data || {};
     } catch (e) { cfg = {}; }
 
@@ -49,8 +49,20 @@
 
       <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:16px;font-size:13px;color:var(--text-primary);">
         <input type="checkbox" id="brianAutoAtivo" ${cfg.auto_ativo ? 'checked' : ''} style="width:18px;height:18px;cursor:pointer;">
-        <span><b>Ligar atendimento automático</b> (responde sozinho fora do horário)</span>
+        <span><b>Ligar atendimento automático</b> (responde sozinho)</span>
       </label>
+
+      <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">Como o Brian atende</div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px;">
+        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;padding:10px 12px;border:1px solid var(--border,rgba(201,168,76,0.2));border-radius:8px;background:var(--bg-input,#16161A);">
+          <input type="radio" name="brianModo" value="fora" ${(cfg.auto_modo || 'fora') !== 'sempre' ? 'checked' : ''} style="margin-top:2px;cursor:pointer;">
+          <span style="font-size:12px;color:var(--text-primary);"><b>🌙 Cauteloso</b> — só responde <b>fora do horário</b> de funcionamento. Durante o expediente, a recepção atende.</span>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;padding:10px 12px;border:1px solid var(--border,rgba(201,168,76,0.2));border-radius:8px;background:var(--bg-input,#16161A);">
+          <input type="radio" name="brianModo" value="sempre" ${(cfg.auto_modo || 'fora') === 'sempre' ? 'checked' : ''} style="margin-top:2px;cursor:pointer;">
+          <span style="font-size:12px;color:var(--text-primary);"><b>⚡ Ágil</b> — responde <b>na hora, a qualquer momento</b> (captura o lead quente). Se alguém da equipe entrar na conversa, o Brian <b>recua</b> automaticamente.</span>
+        </label>
+      </div>
 
       <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">Horário de funcionamento</div>
       <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">Marque os dias e horários de atendimento. Fora disso, o Brian assume (se ligado acima).</div>
@@ -101,6 +113,8 @@
 
     const auto_ativo = document.getElementById('brianAutoAtivo').checked;
     const palavras = (document.getElementById('brianPalavrasAnuncio').value || '').trim();
+    const modoEl = document.querySelector('input[name="brianModo"]:checked');
+    const auto_modo = modoEl ? modoEl.value : 'fora';
 
     const horario = {};
     DIAS.forEach(d => {
@@ -119,13 +133,14 @@
       const { error } = await db.from('brian_config').upsert({
         clinic_id: clinic.id,
         auto_ativo,
-        auto_so_fora_horario: true,
+        auto_modo,
+        auto_so_fora_horario: auto_modo !== 'sempre',
         horario_funcionamento: horario,
         palavras_anuncio: palavras || null,
         atualizado_em: new Date().toISOString(),
       }, { onConflict: 'clinic_id' });
       if (error) throw error;
-      if (typeof toast === 'function') toast(auto_ativo ? 'Atendimento automático configurado! 🤖' : 'Configuração salva (automático desligado)');
+      if (typeof toast === 'function') toast(auto_ativo ? (auto_modo === 'sempre' ? 'Modo Ágil ativado! ⚡' : 'Atendimento automático configurado! 🤖') : 'Configuração salva (automático desligado)');
       set('');
     } catch (e) { set('Erro: ' + (e.message || '')); console.error('[brian auto salvar]', e); }
   };
