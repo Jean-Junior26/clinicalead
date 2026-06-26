@@ -7,7 +7,8 @@
 (function () {
   'use strict';
 
-  const db = () => (typeof supabaseClient !== 'undefined' ? supabaseClient : (typeof supabase !== 'undefined' ? supabase : null));
+  // usa o cliente Supabase global do sistema (mesmo que brian-admin-fix usa)
+  const getDb = () => (typeof db !== 'undefined' ? db : (typeof supabaseClient !== 'undefined' ? supabaseClient : (typeof supabase !== 'undefined' ? supabase : null)));
   const getClinic = () => (typeof currentClinic === 'function' ? currentClinic() : (typeof clinic !== 'undefined' ? clinic : null));
 
   // procedimentos sugeridos (a clínica pode digitar outros)
@@ -90,7 +91,7 @@
 
   async function salvarCaso() {
     const clinic = getClinic();
-    const sb = db();
+    const sb = getDb();
     if (!clinic || !sb) return;
     const sel = document.getElementById('brianCasoProc').value;
     const proc = sel === 'Outro' ? (document.getElementById('brianCasoProcOutro').value || '').trim() : sel;
@@ -131,7 +132,7 @@
 
   async function carregarCasos() {
     const clinic = getClinic();
-    const sb = db();
+    const sb = getDb();
     const lista = document.getElementById('brianCasosLista');
     if (!clinic || !sb || !lista) return;
     try {
@@ -157,7 +158,7 @@
   }
 
   window.brianCasoExcluir = async function (id) {
-    const sb = db();
+    const sb = getDb();
     if (!sb) return;
     if (!confirm('Excluir este caso?')) return;
     try {
