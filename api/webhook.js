@@ -51,7 +51,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
         }
       } catch (e) { /* se falhar, segue (outras travas protegem) */ }
       const cfgResp = await fetch(
-        `${SUPABASE_URL}/rest/v1/brian_config?clinic_id=eq.${clinic_id}&select=auto_ativo,auto_so_fora_horario,horario_funcionamento,palavras_anuncio,brian_liberado&limit=1`,
+        `${SUPABASE_URL}/rest/v1/brian_config?clinic_id=eq.${clinic_id}&select=auto_ativo,auto_so_fora_horario,auto_modo,horario_funcionamento,palavras_anuncio,brian_liberado&limit=1`,
         { headers: sbHeaders }
       );
       const cfgArr = cfgResp.ok ? await cfgResp.json() : [];
@@ -72,10 +72,14 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       const conv = convArr[0];
       if (conv && conv.auto_desligado === true) return motivo(false, 'Brian desligado nesta conversa (chave por conversa)');
 
-      // ── Trava 2 (horário): só responde FORA do horário de funcionamento ──
-      if (cfg.auto_so_fora_horario !== false) { // padrão: true
+      // ── Trava 2 (horário): depende do MODO de atendimento ──
+      //   'sempre' (Ágil)   = responde a qualquer hora (recuo do humano cuida do resto)
+      //   'fora'  (Cauteloso) = só responde fora do horário de funcionamento
+      // Compatibilidade: se auto_modo não existir, cai no comportamento antigo (auto_so_fora_horario).
+      const modo = cfg.auto_modo || (cfg.auto_so_fora_horario === false ? 'sempre' : 'fora');
+      if (modo !== 'sempre') {
         const dentro = dentroDoHorario(cfg.horario_funcionamento);
-        if (dentro) return motivo(false, 'dentro do horário de atendimento (humano assume)');
+        if (dentro) return motivo(false, 'dentro do horário de atendimento (modo Cauteloso: humano assume)');
       }
 
       // ── Trava 5: humano respondeu recentemente? (recua) ──
@@ -283,6 +287,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       if (!leadResp.ok) return;
       const leadsEnc = await leadResp.json();
       const lead = leadsEnc[0];
+      if (!lead || !lead.id) return; // número não é lead conhecido: não há consulta pra confirmar
       const hojeBRT = new Date(Date.now() - 3 * 3600 * 1000).toISOString().split('T')[0];
       const amanhaBRT = new Date(Date.now() - 3 * 3600 * 1000 + 24 * 3600 * 1000).toISOString().split('T')[0];
       // Busca as consultas próximas (hoje/amanhã) do lead. Traz várias
@@ -349,10 +354,11 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
 
       if (!houveLembreteRecente) return; // sem lembrete recente = conversa aleatória, ignora
 
-      const [ano, mes, dia] = consulta.data.split('-');
+      if (!consulta || !consulta.data) return; // sem data válida, não processa (evita crash)
+      const [ano, mes, dia] = String(consulta.data).split('-');
       const dataFmt = `${dia}/${mes}`;
       const horaFmt = (consulta.hora || '').slice(0, 5);
-      const primeiroNome = (lead.nome || '').split(' ')[0];
+      const primeiroNome = ((lead && lead.nome) || '').split(' ')[0] || '';
       if (ehConfirmarFinal) {
         await fetch(`${SUPABASE_URL}/rest/v1/consultas?id=eq.${consulta.id}`, {
           method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
