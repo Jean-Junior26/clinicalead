@@ -163,6 +163,123 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
     } catch (e) { return false; }
   }
 
+  // ════════════════════════════════════════════════════════════
+  // BRIAN FASE 3 PARTE 3 — CRIAR LEAD E AGENDAR DE VERDADE
+  // ════════════════════════════════════════════════════════════
+
+  // Acha o lead pelo telefone; se não existe, cria. Retorna o lead {id, nome} ou null.
+  async function brianAcharOuCriarLead(clinic_id, phone, nome) {
+    try {
+      const digitos = String(phone).replace(/\D/g, '');
+      const sufixo = digitos.slice(-8);
+      // 1) já existe?
+      const r = await fetch(
+        `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinic_id}&telefone=ilike.*${sufixo}&select=id,nome&limit=1`,
+        { headers: sbHeaders }
+      );
+      const arr = r.ok ? await r.json() : [];
+      if (arr[0] && arr[0].id) return arr[0];
+
+      // 2) não existe → cria
+      const novo = {
+        clinic_id,
+        nome: (nome || 'Lead WhatsApp').trim(),
+        telefone: digitos,
+        origem: 'Brian IA',
+        status: 'novo',
+        procedimento: 'Avaliação',
+        created_at: new Date().toISOString(),
+      };
+      const ins = await fetch(`${SUPABASE_URL}/rest/v1/leads`, {
+        method: 'POST',
+        headers: { ...sbHeaders, Prefer: 'return=representation' },
+        body: JSON.stringify(novo),
+      });
+      if (!ins.ok) { console.log('[BRIAN-LEAD] falha ao criar lead:', await ins.text()); return null; }
+      const criado = await ins.json();
+      console.log(`[BRIAN-LEAD] ✅ lead criado: ${novo.nome} (${digitos})`);
+      return Array.isArray(criado) ? criado[0] : criado;
+    } catch (e) { console.log('[BRIAN-LEAD] erro:', e.message); return null; }
+  }
+
+  // Cria a consulta ocupando o horário. Travas: data/hora válidas, não no passado,
+  // horário existe na grade e está LIVRE (anti-duplo-agendamento). Retorna true se criou.
+  async function brianCriarConsulta(clinic_id, lead_id, data, hora) {
+    try {
+      if (!lead_id || !data || !hora) return { ok: false, motivo: 'dados incompletos' };
+      // formato data AAAA-MM-DD e hora HH:MM
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(data) || !/^\d{2}:\d{2}$/.test(hora)) {
+        return { ok: false, motivo: 'formato inválido' };
+      }
+      // trava: não agendar no passado (BRT)
+      const agoraBRT = new Date(Date.now() - 3 * 3600 * 1000);
+      const hojeISO = agoraBRT.toISOString().split('T')[0];
+      const horaAgora = `${String(agoraBRT.getUTCHours()).padStart(2, '0')}:${String(agoraBRT.getUTCMinutes()).padStart(2, '0')}`;
+      if (data < hojeISO || (data === hojeISO && hora <= horaAgora)) {
+        return { ok: false, motivo: 'horário no passado' };
+      }
+      // trava: o horário está na grade da clínica?
+      const cfgR = await fetch(`${SUPABASE_URL}/rest/v1/agenda_config?clinic_id=eq.${clinic_id}&select=horarios&limit=1`, { headers: sbHeaders });
+      const cfgA = cfgR.ok ? await cfgR.json() : [];
+      const grade = (cfgA[0] && Array.isArray(cfgA[0].horarios)) ? cfgA[0].horarios : [];
+      if (grade.length && !grade.includes(hora)) {
+        return { ok: false, motivo: 'horário fora da grade' };
+      }
+      // trava ANTI-DUPLO-AGENDAMENTO: já tem consulta nesse dia+hora (não cancelada)?
+      const ocupR = await fetch(
+        `${SUPABASE_URL}/rest/v1/consultas?clinic_id=eq.${clinic_id}&data=eq.${data}&hora=eq.${hora}&status=neq.cancelado&select=id&limit=1`,
+        { headers: sbHeaders }
+      );
+      const ocupA = ocupR.ok ? await ocupR.json() : [];
+      if (ocupA.length) return { ok: false, motivo: 'horário já ocupado' };
+
+      // cria a consulta (ocupa o slot na hora)
+      const nova = {
+        clinic_id, lead_id, data, hora,
+        status: 'agendado',
+        procedimento: 'Avaliação',
+        observacoes: 'Agendado automaticamente pelo Brian IA',
+        created_at: new Date().toISOString(),
+      };
+      const ins = await fetch(`${SUPABASE_URL}/rest/v1/consultas`, {
+        method: 'POST',
+        headers: { ...sbHeaders, Prefer: 'return=minimal' },
+        body: JSON.stringify(nova),
+      });
+      if (!ins.ok) return { ok: false, motivo: 'falha ao inserir: ' + (await ins.text()) };
+      // atualiza o lead pra 'agendado'
+      await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${lead_id}`, {
+        method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
+        body: JSON.stringify({ status: 'agendado' }),
+      });
+      return { ok: true };
+    } catch (e) { return { ok: false, motivo: e.message }; }
+  }
+
+  // Monta e envia a confirmação de agendamento (com endereço/mapa da clínica)
+  async function brianEnviarConfirmacao(instanceName, clinic_id, phone, nome, data, hora) {
+    try {
+      let endereco = '', linkMapa = '', nomeClinica = '';
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/clinicas?id=eq.${clinic_id}&select=nome,endereco,link_mapa&limit=1`, { headers: sbHeaders });
+      if (r.ok) {
+        const cls = await r.json();
+        if (cls[0]) {
+          nomeClinica = cls[0].nome || '';
+          endereco = cls[0].endereco || '';
+          linkMapa = cls[0].link_mapa || (endereco ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(endereco)}` : '');
+        }
+      }
+      const [ano, mes, dia] = String(data).split('-');
+      const dataFmt = `${dia}/${mes}`;
+      const primeiroNome = (nome || '').split(' ')[0] || '';
+      let msg = `Prontinho, ${primeiroNome}! 🎉\n\nSua avaliação está *agendada* para o dia *${dataFmt}* às *${hora}*.`;
+      if (endereco) msg += `\n\n📍 *Endereço:* ${endereco}`;
+      if (linkMapa) msg += `\n🗺️ *Como chegar:* ${linkMapa}`;
+      msg += `\n\nQualquer coisa que precisar, é só me chamar por aqui. Até breve! 🦷💛`;
+      if (instanceName) await responderPaciente(instanceName, clinic_id, phone, msg, 'BRIAN_AUTO');
+    } catch (e) { console.log('[BRIAN-CONFIRMA] erro:', e.message); }
+  }
+
   // ── Baixa mídia descriptografada do Evolution e salva no Storage
   async function baixarEsalvarMidia(msgCompleta, instanceName, phone, tipo, nomeOriginal) {
     try {
@@ -546,7 +663,8 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
 
                 if (textoResposta && instanceName) {
                   // ── FASE 3 — detecta marcadores [[LEAD|...]] e [[AGENDAR|...]] ──
-                  // Nesta etapa só EXTRAI, LOGA e REMOVE (não cria lead/consulta ainda).
+                  let campoLead = null;   // {nome}
+                  let campoAgendar = null; // {data, hora, nome}
 
                   // marcador LEAD (captura do nome → criar lead se novo)
                   const mLead = String(textoResposta).match(/\[\[LEAD\|([^\]]+)\]\]/i);
@@ -557,7 +675,8 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
                         const idx = par.indexOf('=');
                         if (idx > 0) campos[par.slice(0, idx).trim().toLowerCase()] = par.slice(idx + 1).trim();
                       });
-                      console.log(`[BRIAN-LEAD] 👤 SINAL DETECTADO | phone: ${phone} | nome: ${campos.nome}`);
+                      campoLead = campos;
+                      console.log(`[BRIAN-LEAD] 👤 detectado | phone: ${phone} | nome: ${campos.nome}`);
                     } catch (e) { console.log('[BRIAN-LEAD] erro ao ler marcador:', e.message); }
                     textoResposta = String(textoResposta).replace(/\s*\[\[LEAD\|[^\]]+\]\]\s*/i, ' ').trim();
                   }
@@ -571,14 +690,37 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
                         const idx = par.indexOf('=');
                         if (idx > 0) campos[par.slice(0, idx).trim().toLowerCase()] = par.slice(idx + 1).trim();
                       });
-                      console.log(`[BRIAN-AGENDAR] 📅 SINAL DETECTADO | phone: ${phone} | data: ${campos.data} | hora: ${campos.hora} | nome: ${campos.nome}`);
+                      campoAgendar = campos;
+                      console.log(`[BRIAN-AGENDAR] 📅 detectado | phone: ${phone} | data: ${campos.data} | hora: ${campos.hora} | nome: ${campos.nome}`);
                     } catch (e) { console.log('[BRIAN-AGENDAR] erro ao ler marcador:', e.message); }
                     textoResposta = String(textoResposta).replace(/\s*\[\[AGENDAR\|[^\]]+\]\]\s*/i, ' ').trim();
                   }
 
+                  // 1) envia a resposta limpa do Brian (sem marcadores)
                   if (textoResposta) {
                     await responderPaciente(instanceName, clinic_id, phone, textoResposta, 'BRIAN_AUTO');
                     console.log(`[BRIAN-ENVIO] ✅ respondeu ${phone}: "${String(textoResposta).slice(0, 60)}"`);
+                  }
+
+                  // 2) executa o agendamento (se houver) — cria lead + consulta + confirma
+                  if (campoAgendar && campoAgendar.data && campoAgendar.hora) {
+                    const lead = await brianAcharOuCriarLead(clinic_id, phone, campoAgendar.nome || (campoLead && campoLead.nome));
+                    if (lead && lead.id) {
+                      const r = await brianCriarConsulta(clinic_id, lead.id, campoAgendar.data, campoAgendar.hora);
+                      if (r.ok) {
+                        console.log(`[BRIAN-AGENDAR] ✅ CONSULTA CRIADA | ${campoAgendar.data} ${campoAgendar.hora} | lead ${lead.id}`);
+                        await brianEnviarConfirmacao(instanceName, clinic_id, phone, lead.nome || campoAgendar.nome, campoAgendar.data, campoAgendar.hora);
+                      } else {
+                        console.log(`[BRIAN-AGENDAR] ⚠️ NÃO agendou (${r.motivo}) — avisa o paciente`);
+                        // se o horário deu problema (ocupado/passado), avisa gentilmente
+                        if (r.motivo === 'horário já ocupado' || r.motivo === 'horário no passado') {
+                          await responderPaciente(instanceName, clinic_id, phone, 'Ihh, esse horário acabou de ser preenchido 😅 Me dá um instante que já te passo as próximas opções, tá?', 'BRIAN_AUTO');
+                        }
+                      }
+                    }
+                  } else if (campoLead && campoLead.nome) {
+                    // 3) só captura de nome (sem agendar) → cria/garante o lead
+                    await brianAcharOuCriarLead(clinic_id, phone, campoLead.nome);
                   }
                 } else {
                   console.log(`[BRIAN-ENVIO] ⚠️ não gerou resposta (${dataBrian ? (dataBrian.erro || 'sem texto') : 'sem retorno'})`);
