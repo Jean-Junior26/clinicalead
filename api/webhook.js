@@ -87,7 +87,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       // o Brian recua (não atropela o atendimento humano). Ajuste MIN_RECUO_HUMANO
       // conforme necessário: menor = Brian volta mais rápido (lead não fica no vácuo),
       // maior = mais respeito ao atendimento humano em andamento.
-      const MIN_RECUO_HUMANO = 30; // minutos
+      const MIN_RECUO_HUMANO = 20; // minutos
       const janelaRecuo = new Date(Date.now() - MIN_RECUO_HUMANO * 60 * 1000).toISOString();
       const humResp = await fetch(
         `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixo}&from_me=eq.true&created_at=gte.${janelaRecuo}&select=content,contact_name,created_at&order=created_at.desc&limit=5`,
