@@ -87,7 +87,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       // o Brian recua (não atropela o atendimento humano). Ajuste MIN_RECUO_HUMANO
       // conforme necessário: menor = Brian volta mais rápido (lead não fica no vácuo),
       // maior = mais respeito ao atendimento humano em andamento.
-      const MIN_RECUO_HUMANO = 20; // minutos
+      const MIN_RECUO_HUMANO = 30; // minutos
       const janelaRecuo = new Date(Date.now() - MIN_RECUO_HUMANO * 60 * 1000).toISOString();
       const humResp = await fetch(
         `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixo}&from_me=eq.true&created_at=gte.${janelaRecuo}&select=content,contact_name,created_at&order=created_at.desc&limit=5`,
@@ -134,15 +134,30 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
         // número novo: precisa mencionar palavra-chave (da clínica OU padrão de intenção)
         const norm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
         const txt = norm(content);
-        const padrao = ['preco', 'preço', 'valor', 'valores', 'quanto custa', 'quanto fica', 'agendar', 'marcar',
-          'consulta', 'avaliacao', 'avaliação', 'implante', 'faceta', 'lente', 'clareamento', 'aparelho',
-          'ortodontia', 'protese', 'prótese', 'canal', 'dente', 'sorriso', 'orcamento', 'orçamento',
-          'harmonizacao', 'harmonização', 'informacao', 'informação', 'informacoes', 'gostaria', 'interesse'];
+        const padrao = ['preco', 'preço', 'valor', 'valores', 'quanto custa', 'quanto fica', 'quanto', 'custa',
+          'agendar', 'agenda', 'marcar', 'marca', 'horario', 'horário', 'horarios', 'horários', 'vaga', 'disponivel', 'disponível',
+          'consulta', 'consultar', 'avaliacao', 'avaliação', 'atendimento', 'atende', 'atendem', 'atender',
+          'implante', 'faceta', 'facetas', 'lente', 'lentes', 'clareamento', 'clarear', 'aparelho', 'alinhador', 'invisalign',
+          'ortodontia', 'protese', 'prótese', 'dentadura', 'canal', 'dente', 'dentes', 'sorriso', 'orcamento', 'orçamento',
+          'harmonizacao', 'harmonização', 'botox', 'preenchimento', 'limpeza', 'extracao', 'extração', 'siso',
+          'informacao', 'informação', 'informacoes', 'informações', 'gostaria', 'interesse', 'interessei', 'queria', 'quero',
+          'gostaria de', 'poderia', 'pode me', 'fazem', 'faz', 'trabalham', 'tratamento', 'procedimento', 'dor', 'doendo',
+          'segunda', 'terca', 'terça', 'quarta', 'quinta', 'sexta', 'sabado', 'sábado', 'amanha', 'amanhã', 'hoje', 'manha', 'manhã', 'tarde'];
         const daClinica = cfg.palavras_anuncio
           ? String(cfg.palavras_anuncio).split(',').map(p => norm(p.trim())).filter(Boolean)
           : [];
         const todasPalavras = [...padrao, ...daClinica];
-        const bateu = todasPalavras.some(p => p && txt.includes(p));
+        let bateu = todasPalavras.some(p => p && txt.includes(p));
+
+        // Lógica extra: se a mensagem é minimamente substancial (mais que uma saudação solta),
+        // trata como interesse. Evita bloquear leads reais que escrevem de forma natural.
+        if (!bateu) {
+          const soSaudacao = /^(oi+|ola+|olá+|opa+|e ai+|eai+|bom dia+|boa tarde+|boa noite+|hey+|alo+|alô+)[\s!.,]*$/i.test(txt.trim());
+          const palavras = txt.trim().split(/\s+/).filter(Boolean);
+          // se NÃO é só saudação E tem ao menos 4 palavras, provavelmente é um lead real falando algo
+          if (!soSaudacao && palavras.length >= 4) bateu = true;
+        }
+
         if (!bateu) return motivo(false, 'número novo sem palavra-chave de interesse (camada 1+2)');
       }
 
