@@ -102,35 +102,44 @@
 
     const dateStr = CAL.selectedDate || new Date().toISOString().split('T')[0];
 
-    // gera os horários da faixa (de meia em meia hora, etc.)
+    // gera os horários da faixa que esse DIA vai atender (ex: sábado 08:00–13:00)
     const faixa = gerarFaixa(de, ate, passo);
 
-    // monta a nova grade
-    let novaGrade;
-    if (substituir) {
-      novaGrade = faixa.slice();
-    } else {
-      // mescla com a grade existente (sem duplicar)
-      novaGrade = Array.from(new Set([...(CAL.horariosDisponiveis || []), ...faixa]));
-    }
-    novaGrade.sort();
-    CAL.horariosDisponiveis = novaGrade;
+    // ── IMPORTANTE: a grade (CAL.horariosDisponiveis) é ÚNICA pra todos os dias.
+    // Pra cada dia ter sua própria "cara" SEM vazar pros outros, a gente:
+    //  1) garante que a grade-base contenha TODOS os horários possíveis (união)
+    //  2) pro DIA selecionado, BLOQUEIA tudo que está fora da faixa escolhida
+    // Assim, sábado 8–13h bloqueia 13–18h SÓ no sábado; segunda continua 8–18h.
 
-    // trata o almoço: os horários do almoço ficam BLOQUEADOS nesse dia
+    // 1) grade-base = união da grade atual + a faixa nova (não remove nada de outros dias)
+    const gradeBase = Array.from(new Set([...(CAL.horariosDisponiveis || []), ...faixa])).sort();
+    CAL.horariosDisponiveis = gradeBase;
+
+    // 2) calcula o que esse dia deve ter LIVRE (a faixa, menos o almoço)
+    const livresDoDia = new Set(faixa.filter(h => !(almocoOn && h >= almocoDe && h < almocoAte)));
+
+    // 3) bloqueia, NESTE dia, tudo da grade-base que NÃO está livre nele
     if (!CAL.horasBloqueadas) CAL.horasBloqueadas = {};
-    if (!CAL.horasBloqueadas[dateStr]) CAL.horasBloqueadas[dateStr] = [];
-    if (almocoOn) {
-      const horasAlmoco = faixa.filter(h => h >= almocoDe && h < almocoAte);
-      horasAlmoco.forEach(h => {
-        if (!CAL.horasBloqueadas[dateStr].includes(h)) CAL.horasBloqueadas[dateStr].push(h);
-      });
+    if (substituir) {
+      // "substituir" = redefine este dia do zero: bloqueia tudo que não está na faixa livre
+      CAL.horasBloqueadas[dateStr] = gradeBase.filter(h => !livresDoDia.has(h));
+    } else {
+      // "mesclar" = mantém os bloqueios que já existiam neste dia, e só garante
+      // que a faixa nova fique livre (remove esses dos bloqueios) + bloqueia o almoço
+      if (!CAL.horasBloqueadas[dateStr]) CAL.horasBloqueadas[dateStr] = [];
+      // libera os horários da faixa (tira dos bloqueios)
+      CAL.horasBloqueadas[dateStr] = CAL.horasBloqueadas[dateStr].filter(h => !livresDoDia.has(h));
+      // bloqueia o almoço, se marcado
+      if (almocoOn) {
+        const horasAlmoco = faixa.filter(h => h >= almocoDe && h < almocoAte);
+        horasAlmoco.forEach(h => { if (!CAL.horasBloqueadas[dateStr].includes(h)) CAL.horasBloqueadas[dateStr].push(h); });
+      }
     }
 
     // re-renderiza a grade do modal usando a função real do sistema
     if (typeof renderConfigSlotsGrid === 'function') renderConfigSlotsGrid(dateStr);
 
-    const livres = faixa.filter(h => !(almocoOn && h >= almocoDe && h < almocoAte)).length;
-    setStatus(`✓ ${livres} horários livres gerados — confira e clique em Salvar`);
+    setStatus(`✓ ${livresDoDia.size} horários livres nesse dia — confira e clique em Salvar`);
   }
 
   // engata na abertura do modal
