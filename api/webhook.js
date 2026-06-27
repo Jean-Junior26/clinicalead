@@ -273,26 +273,42 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       // trava: o horário está na grade DAQUELE DIA DA SEMANA (agenda_padrao)?
       // calcula o dia da semana da data (0=domingo ... 6=sábado)
       const diaSemana = new Date(`${data}T12:00:00`).getDay();
-      // tenta a agenda-padrão primeiro
-      const padR = await fetch(`${SUPABASE_URL}/rest/v1/agenda_padrao?clinic_id=eq.${clinic_id}&dia_semana=eq.${diaSemana}&select=horarios,ativo&limit=1`, { headers: sbHeaders });
-      const padA = padR.ok ? await padR.json() : [];
-      if (padA.length) {
-        // tem agenda-padrão configurada pra esse dia
-        const row = padA[0];
-        if (row.ativo === false) {
-          return { ok: false, motivo: 'clínica fechada nesse dia' };
+
+      // 0) EXCEÇÃO pra essa data específica (feriado/fechado)?
+      const exR = await fetch(`${SUPABASE_URL}/rest/v1/agenda_excecoes?clinic_id=eq.${clinic_id}&data=eq.${data}&select=fechado,horarios&limit=1`, { headers: sbHeaders });
+      const exA = exR.ok ? await exR.json() : [];
+      if (exA.length) {
+        const ex = exA[0];
+        if (ex.fechado !== false) {
+          return { ok: false, motivo: 'clínica fechada nesse dia (feriado/exceção)' };
         }
-        const gradeDia = Array.isArray(row.horarios) ? row.horarios : [];
-        if (gradeDia.length && !gradeDia.includes(hora)) {
-          return { ok: false, motivo: 'horário fora da grade do dia' };
+        // dia com horário especial: valida contra ele
+        const gradeEx = Array.isArray(ex.horarios) ? ex.horarios : [];
+        if (gradeEx.length && !gradeEx.includes(hora)) {
+          return { ok: false, motivo: 'horário fora da grade especial do dia' };
         }
+        // se passou na exceção, pula a checagem de padrão
       } else {
-        // fallback: agenda-padrão não configurada → usa a grade antiga (agenda_config)
-        const cfgR = await fetch(`${SUPABASE_URL}/rest/v1/agenda_config?clinic_id=eq.${clinic_id}&select=horarios&limit=1`, { headers: sbHeaders });
-        const cfgA = cfgR.ok ? await cfgR.json() : [];
-        const grade = (cfgA[0] && Array.isArray(cfgA[0].horarios)) ? cfgA[0].horarios : [];
-        if (grade.length && !grade.includes(hora)) {
-          return { ok: false, motivo: 'horário fora da grade' };
+        // tenta a agenda-padrão
+        const padR = await fetch(`${SUPABASE_URL}/rest/v1/agenda_padrao?clinic_id=eq.${clinic_id}&dia_semana=eq.${diaSemana}&select=horarios,ativo&limit=1`, { headers: sbHeaders });
+        const padA = padR.ok ? await padR.json() : [];
+        if (padA.length) {
+          const row = padA[0];
+          if (row.ativo === false) {
+            return { ok: false, motivo: 'clínica fechada nesse dia' };
+          }
+          const gradeDia = Array.isArray(row.horarios) ? row.horarios : [];
+          if (gradeDia.length && !gradeDia.includes(hora)) {
+            return { ok: false, motivo: 'horário fora da grade do dia' };
+          }
+        } else {
+          // fallback: agenda-padrão não configurada → usa a grade antiga (agenda_config)
+          const cfgR = await fetch(`${SUPABASE_URL}/rest/v1/agenda_config?clinic_id=eq.${clinic_id}&select=horarios&limit=1`, { headers: sbHeaders });
+          const cfgA = cfgR.ok ? await cfgR.json() : [];
+          const grade = (cfgA[0] && Array.isArray(cfgA[0].horarios)) ? cfgA[0].horarios : [];
+          if (grade.length && !grade.includes(hora)) {
+            return { ok: false, motivo: 'horário fora da grade' };
+          }
         }
       }
       // trava ANTI-DUPLO-AGENDAMENTO: já tem consulta nesse dia+hora (não cancelada)?
