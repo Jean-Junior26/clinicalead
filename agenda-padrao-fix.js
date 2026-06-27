@@ -53,20 +53,51 @@
       const { data } = await database.from('agenda_padrao').select('*').eq('clinic_id', clinic.id);
       (data || []).forEach(row => {
         const hrs = Array.isArray(row.horarios) ? row.horarios : [];
-        estado[row.dia_semana] = {
-          ativo: row.ativo,
-          de: hrs.length ? hrs[0] : '08:00',
-          ate: hrs.length ? hrs[hrs.length - 1] : '18:00',
-          passo: 30,
-          almocoOn: false, almocoDe: '12:00', almocoAte: '14:00',
-          _horarios: hrs,
-        };
+        estado[row.dia_semana] = reconstruirEstado(row.ativo, hrs);
       });
     } catch (e) { console.error('[agenda-padrao] carregar', e); }
     // garante todos os dias no estado (default)
     DIAS.forEach(d => {
       if (!estado[d.n]) estado[d.n] = { ativo: d.n !== 0, de: '08:00', ate: d.n === 6 ? '13:00' : '18:00', passo: 30, almocoOn: false, almocoDe: '12:00', almocoAte: '14:00' };
     });
+  }
+
+  // ── reconstrói os campos da tela (de, ate, passo, almoço) a partir da lista salva ──
+  function reconstruirEstado(ativo, hrs) {
+    if (!hrs.length) {
+      return { ativo, de: '08:00', ate: '18:00', passo: 30, almocoOn: false, almocoDe: '12:00', almocoAte: '14:00' };
+    }
+    const toMin = (h) => { const [a, b] = h.split(':').map(Number); return a * 60 + b; };
+    const toStr = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+
+    const de = hrs[0];
+    // detecta o passo (menor diferença entre horários consecutivos)
+    let passo = 30;
+    if (hrs.length > 1) {
+      let menor = Infinity;
+      for (let i = 1; i < hrs.length; i++) {
+        const diff = toMin(hrs[i]) - toMin(hrs[i - 1]);
+        if (diff > 0 && diff < menor) menor = diff;
+      }
+      if (menor !== Infinity) passo = menor;
+    }
+    // o "até" = último horário da lista (bate com o que o usuário digitou ao gerar)
+    const ate = hrs[hrs.length - 1];
+
+    // detecta o almoço: um "buraco" maior que o passo no meio da sequência
+    let almocoOn = false, almocoDe = '12:00', almocoAte = '14:00';
+    for (let i = 1; i < hrs.length; i++) {
+      const diff = toMin(hrs[i]) - toMin(hrs[i - 1]);
+      if (diff > passo) {
+        // achou um buraco = almoço
+        almocoOn = true;
+        almocoDe = toStr(toMin(hrs[i - 1]) + passo); // começa após o último antes do buraco
+        almocoAte = hrs[i]; // termina quando volta
+        break;
+      }
+    }
+
+    return { ativo, de, ate, passo, almocoOn, almocoDe, almocoAte };
   }
 
   function abrirModal() {
