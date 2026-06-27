@@ -16,6 +16,31 @@
   // ⭐ LISTA DE NOVIDADES (a mais nova no TOPO) ⭐
   const NOVIDADES = [
     {
+      id: 13, data: "27/06/2026", icone: "ti-robot",
+      titulo: "Brian IA — seu vendedor que nunca dorme! 🤖",
+      texto: "Chegou o Brian IA, seu atendente virtual de vendas no WhatsApp! Ele conversa com seus leads, tira dúvidas, encanta o paciente com a transformação do sorriso e AGENDA a avaliação automaticamente — 24h por dia. Enquanto você cuida dos pacientes, o Brian transforma curiosos em agendamentos! 🦷✨"
+    },
+    {
+      id: 12, data: "27/06/2026", icone: "ti-dental",
+      titulo: "Vários dentistas na mesma agenda 🦷",
+      texto: "Sua clínica tem mais de um dentista? Agora dá pra cadastrar todos e agendar pacientes no mesmo horário para dentistas diferentes! Cadastre os dentistas no botão 'Dentistas' da agenda e escolha quem atende na hora de agendar. Cada profissional com sua agenda, sem conflito!"
+    },
+    {
+      id: 11, data: "27/06/2026", icone: "ti-calendar-cog",
+      titulo: "Configure sua semana de uma vez só 📅",
+      texto: "Cansado de configurar horário dia por dia? Agora tem o 'Horário-padrão': defina os horários de cada dia da semana UMA vez e pronto, vale pra sempre! Tem almoço? Configura também. Feriado? É só fechar aquele dia específico. Sua agenda sem trabalho repetido."
+    },
+    {
+      id: 10, data: "27/06/2026", icone: "ti-sparkles",
+      titulo: "Brian IA ainda mais afiado nas vendas 💬",
+      texto: "O Brian agora encanta os pacientes contando a transformação do sorriso, mostra casos de antes e depois na conversa, respeita o horário da sua clínica, oferece sempre os horários mais próximos e reativa leads que somem no meio do papo. Mais vendas, menos leads perdidos!"
+    },
+    {
+      id: 9, data: "27/06/2026", icone: "ti-clock-check",
+      titulo: "Lembretes mais espertos 📲",
+      texto: "Os lembretes de consulta agora pegam qualquer horário (até os 'quebrados' como 10:15), e o follow-up dos leads só sai em horário comercial — nada de mensagem de madrugada! Tudo pra sua clínica parecer cada vez mais profissional."
+    },
+    {
       id: 8, data: "19/06/2026", icone: "ti-printer",
       titulo: "Orçamentos impressos",
       texto: "Imprima orçamentos personalizados com a logo da sua clínica e mensagem no rodapé!"
