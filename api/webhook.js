@@ -794,7 +794,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
                 const respBrian = await fetch(`${SUPABASE_URL}/functions/v1/brian`, {
                   method: 'POST',
                   headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ action: 'responder_auto', clinic_id, phone }),
+                  body: JSON.stringify({ action: 'responder_auto', clinic_id, phone, ultima_msg: content }),
                 });
                 const dataBrian = respBrian.ok ? await respBrian.json() : null;
                 let textoResposta = dataBrian && dataBrian.ok ? dataBrian.sugestao : null;
