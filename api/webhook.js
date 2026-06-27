@@ -74,7 +74,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
 
       // ── Trava 8: limite de mensagens por conversa (anti-abuso / protege saldo) ──
       // Brian responde no máximo LIMITE_MSGS por conversa por dia. Reseta a cada 24h.
-      const LIMITE_MSGS = 8;
+      const LIMITE_MSGS = 10;
       const hojeBRT = new Date(Date.now() - 3 * 3600 * 1000).toISOString().split('T')[0];
       if (conv) {
         // se o contador é de hoje e já bateu o limite → não responde (escala)
@@ -788,8 +788,29 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
               if (!liberadoTeste) {
                 console.log(`[BRIAN-ENVIO] ⏸️ modo teste: ${phone} não está na lista de teste — não envia`);
               } else {
-                // anti-loop final: já respondeu essa exata mensagem recentemente?
-                // (evita responder 2x se o webhook for chamado em duplicidade)
+                // ── DEBOUNCE: espera o lead terminar de digitar ──
+                // O lead costuma mandar várias mensagens seguidas (linha por linha).
+                // Esperamos DEBOUNCE_MS; se durante a espera chegar uma mensagem MAIS NOVA
+                // desse mesmo lead, ABORTAMOS esta resposta (a execução da msg mais nova
+                // vai responder, já considerando o contexto completo). Assim o Brian
+                // responde UMA vez só, lendo tudo junto, e não queima mensagens à toa.
+                const DEBOUNCE_MS = 10000; // 10 segundos
+                const meuCreatedAt = created_at; // timestamp desta mensagem
+                await new Promise((r) => setTimeout(r, DEBOUNCE_MS));
+                // chegou mensagem mais nova desse lead depois desta?
+                try {
+                  const sufixoDeb = String(phone).replace(/\D/g, '').slice(-8);
+                  const chkResp = await fetch(
+                    `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixoDeb}&from_me=eq.false&created_at=gt.${encodeURIComponent(meuCreatedAt)}&select=id&limit=1`,
+                    { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+                  );
+                  const maisNovas = chkResp.ok ? await chkResp.json() : [];
+                  if (maisNovas.length) {
+                    console.log(`[BRIAN-DEBOUNCE] ⏭️ ${phone} mandou msg mais nova — esta execução aborta (a mais nova responde)`);
+                    continue; // pula pro próximo; a mensagem mais nova cuida da resposta
+                  }
+                } catch (e) { /* se a checagem falhar, segue e responde normal */ }
+
                 console.log(`[BRIAN-ENVIO] 🤖 gerando resposta para ${phone}...`);
                 const respBrian = await fetch(`${SUPABASE_URL}/functions/v1/brian`, {
                   method: 'POST',
@@ -858,7 +879,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
                     // incrementa o contador de mensagens da conversa
                     const totalDia = await brianIncrementarContador(clinic_id, phone);
                     // se ESTA resposta atingiu o limite, escala pra equipe (avisa + cria tarefa)
-                    const LIMITE = 8;
+                    const LIMITE = 10;
                     if (totalDia >= LIMITE) {
                       const nomeLead = (campoLead && campoLead.nome) || (campoAgendar && campoAgendar.nome) || '';
                       const primeiro = String(nomeLead).split(' ')[0] || '';
