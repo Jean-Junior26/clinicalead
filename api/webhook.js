@@ -357,7 +357,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
   // Envia 1-2 imagens de casos do procedimento via Evolution (sendMedia)
   async function brianEnviarCasos(instanceName, clinic_id, phone, procedimento) {
     try {
-      if (!instanceName || !procedimento) return;
+      if (!instanceName || !procedimento) return false;
       const proc = String(procedimento).trim();
       // busca casos ativos desse procedimento (limita a 2)
       const r = await fetch(
@@ -365,13 +365,16 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
         { headers: sbHeaders }
       );
       const casos = r.ok ? await r.json() : [];
-      if (!casos.length) { console.log(`[BRIAN-CASOS] nenhum caso de "${proc}" pra enviar`); return; }
+      if (!casos.length) { console.log(`[BRIAN-CASOS] nenhum caso de "${proc}" pra enviar`); return false; }
 
       const cleanPhone = String(phone).replace(/\D/g, '');
       const number = cleanPhone.startsWith('55') ? cleanPhone : '55' + cleanPhone;
 
+      let enviou = false;
       for (const caso of casos) {
         try {
+          // legenda: usa a da clínica, ou um texto padrão que explica que é caso real
+          const legenda = caso.legenda || `✨ Olha esse resultado real de ${proc} que fizemos! 😍`;
           await fetch(`${EVO_URL}/message/sendMedia/${instanceName}`, {
             method: 'POST',
             headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
@@ -380,7 +383,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
               mediatype: 'image',
               mimetype: 'image/jpeg',
               media: caso.imagem_url,
-              caption: caso.legenda || '',
+              caption: legenda,
               fileName: 'caso.jpg',
             }),
           });
@@ -390,14 +393,16 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
             headers: { ...sbHeaders, Prefer: 'return=minimal' },
             body: JSON.stringify({
               clinic_id, phone: number, contact_name: 'BRIAN_AUTO',
-              content: caso.legenda || '📷 Caso', type: 'image', from_me: true,
+              content: legenda, type: 'image', from_me: true,
               media_url: caso.imagem_url, created_at: new Date().toISOString(),
             }),
           });
+          enviou = true;
           console.log(`[BRIAN-CASOS] ✅ enviou caso de "${proc}"`);
         } catch (e) { console.log('[BRIAN-CASOS] erro ao enviar 1 caso:', e.message); }
       }
-    } catch (e) { console.log('[BRIAN-CASOS] erro:', e.message); }
+      return enviou;
+    } catch (e) { console.log('[BRIAN-CASOS] erro:', e.message); return false; }
   }
 
   // Monta e envia a confirmação de agendamento (com endereço/mapa da clínica)
