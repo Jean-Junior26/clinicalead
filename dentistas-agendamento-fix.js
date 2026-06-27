@@ -126,12 +126,26 @@
       }
 
       try {
-        return await _origSalvar.apply(this, args);
+        const resultado = await _origSalvar.apply(this, args);
+        // restaura a lista completa imediatamente (a salvar já fez seu trabalho)
+        CAL.consultas = _consultasOriginais;
+        // ── RECARREGA do banco pra garantir que TODAS as consultas aparecem ──
+        // (a manipulação temporária de CAL.consultas pode deixar a lista incompleta;
+        //  recarregar do banco é a fonte da verdade e evita consulta "sumindo").
+        try {
+          const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
+          if (clinic) {
+            const { data: frescas } = await database.from('consultas').select('*').eq('clinic_id', clinic.id).order('data').order('hora');
+            if (frescas) {
+              CAL.consultas = frescas;
+              if (typeof renderCalendar === 'function') renderCalendar();
+              if (typeof CAL !== 'undefined' && CAL.selectedDate && typeof renderDaySchedule === 'function') renderDaySchedule(CAL.selectedDate);
+            }
+          }
+        } catch (e) { console.error('[dentistas] recarregar pós-save', e); }
+        return resultado;
       } finally {
         database.from = _origFrom; // restaura
-        // restaura a lista completa, preservando qualquer consulta nova que a salvar adicionou
-        const novas = CAL.consultas.filter(c => !_consultasOriginais.includes(c));
-        CAL.consultas = _consultasOriginais.concat(novas);
       }
     };
     console.log('✅ dentistas-agendamento-fix.js: salvar envelopado');
