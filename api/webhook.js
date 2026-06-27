@@ -161,16 +161,22 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
         const todasPalavras = [...padrao, ...daClinica];
         let bateu = todasPalavras.some(p => p && txt.includes(p));
 
-        // Lógica extra: se a mensagem é minimamente substancial (mais que uma saudação solta),
-        // trata como interesse. Evita bloquear leads reais que escrevem de forma natural.
+        // FILOSOFIA: na dúvida, RESPONDE. Um lead real que manda "oi" e é ignorado
+        // some pra sempre. O custo de responder "Olá, como posso ajudar?" é mínimo;
+        // perder um lead é muito pior. Então saudações e mensagens normais são atendidas.
+        // A trava só vale pra RUÍDO óbvio (mensagem sem nada útil), não pra "oi".
         if (!bateu) {
-          const soSaudacao = /^(oi+|ola+|olá+|opa+|e ai+|eai+|bom dia+|boa tarde+|boa noite+|hey+|alo+|alô+)[\s!.,]*$/i.test(txt.trim());
-          const palavras = txt.trim().split(/\s+/).filter(Boolean);
-          // se NÃO é só saudação E tem ao menos 4 palavras, provavelmente é um lead real falando algo
-          if (!soSaudacao && palavras.length >= 4) bateu = true;
+          const limpo = txt.trim();
+          // ruído real: vazio, só pontuação/emoji/números soltos, ou link cru sem texto
+          const soPontuacaoOuEmoji = !/[a-z0-9á-ú]/i.test(limpo);
+          const soNumeros = /^\d+$/.test(limpo.replace(/\s/g, ''));
+          const soLink = /^https?:\/\/\S+$/i.test(limpo);
+          const ehRuido = soPontuacaoOuEmoji || soNumeros || soLink || limpo.length < 2;
+          // se NÃO é ruído (ou seja, é uma mensagem humana de verdade, inclusive "oi"), responde
+          if (!ehRuido) bateu = true;
         }
 
-        if (!bateu) return motivo(false, 'número novo sem palavra-chave de interesse (camada 1+2)');
+        if (!bateu) return motivo(false, 'número novo enviou apenas ruído (sem texto útil)');
       }
 
       // ── Passou em todas as travas! ──
