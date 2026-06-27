@@ -107,10 +107,31 @@
         return builder;
       };
 
+      // ── NEUTRALIZA A TRAVA ANTIGA (que ignora o dentista) ──
+      // As travas existentes checam CAL.consultas por data+hora (sem olhar dentista),
+      // então bloqueariam "ocupado" mesmo com dentista diferente. Durante a execução
+      // da salvar, escondemos as consultas de OUTROS dentistas no mesmo horário —
+      // assim a trava antiga não enxerga conflito. (Minha trava por dentista, acima,
+      // já garantiu que o MESMO dentista não tem conflito.)
+      const _consultasOriginais = CAL.consultas;
+      if (dentistaId) {
+        const dataSel = document.getElementById('naData')?.value;
+        const horaSel = document.getElementById('naHora')?.value;
+        // mantém só as consultas que NÃO são de outro dentista no mesmo dia+hora
+        CAL.consultas = _consultasOriginais.filter(c => {
+          const mesmoSlot = c.data === dataSel && c.hora === horaSel;
+          const deOutroDentista = mesmoSlot && c.dentista_id && c.dentista_id !== dentistaId;
+          return !deOutroDentista; // esconde as de outro dentista nesse slot
+        });
+      }
+
       try {
         return await _origSalvar.apply(this, args);
       } finally {
         database.from = _origFrom; // restaura
+        // restaura a lista completa, preservando qualquer consulta nova que a salvar adicionou
+        const novas = CAL.consultas.filter(c => !_consultasOriginais.includes(c));
+        CAL.consultas = _consultasOriginais.concat(novas);
       }
     };
     console.log('✅ dentistas-agendamento-fix.js: salvar envelopado');
