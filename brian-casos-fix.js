@@ -53,7 +53,7 @@
           <h2 style="margin:0;color:var(--gold,#C9A84C);font-size:20px;">📸 Casos Brian IA</h2>
           <button onclick="document.getElementById('brianCasosModal').style.display='none'" style="background:none;border:none;color:var(--text-secondary);font-size:22px;cursor:pointer;">×</button>
         </div>
-        <p style="color:var(--text-muted);font-size:13px;margin:0 0 18px;">Suba fotos de casos (antes/depois) por procedimento. No momento certo da conversa, o Brian envia 1–2 casos pra mostrar o resultado. 🦷✨</p>
+        <p style="color:var(--text-muted);font-size:11px;margin:0 0 18px;">Suba fotos de casos (antes/depois) por procedimento — máximo <b>3 por procedimento</b>. No momento certo da conversa, o Brian envia 1–2 casos pra mostrar o resultado. 🦷✨</p>
 
         <div style="background:var(--bg-input,#16161A);border:1px solid var(--border,rgba(201,168,76,0.15));border-radius:10px;padding:16px;margin-bottom:20px;">
           <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:10px;">➕ Adicionar caso</div>
@@ -100,6 +100,18 @@
     const file = fileInput.files && fileInput.files[0];
     if (!proc) { setStatus('Escolha o procedimento'); return; }
     if (!file) { setStatus('Selecione uma foto'); return; }
+
+    // trava: máximo 3 casos por procedimento
+    setStatus('Verificando…');
+    try {
+      const { data: existentes } = await sb.from('brian_casos')
+        .select('id').eq('clinic_id', clinic.id).eq('procedimento', proc).eq('ativo', true);
+      if ((existentes || []).length >= 3) {
+        setStatus('');
+        if (typeof toast === 'function') toast('Máximo de 3 casos por procedimento. Exclua um antes de adicionar outro.', 'error');
+        return;
+      }
+    } catch (e) { /* se a checagem falhar, segue (não bloqueia por erro de leitura) */ }
 
     setStatus('Enviando imagem…');
     try {
