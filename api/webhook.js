@@ -65,12 +65,24 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
 
       // ── Trava 4: conversa com Brian desligado? (vence a geral) ──
       const convResp = await fetch(
-        `${SUPABASE_URL}/rest/v1/brian_conversa?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixo}&select=auto_desligado,humano_respondeu_em&limit=1`,
+        `${SUPABASE_URL}/rest/v1/brian_conversa?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixo}&select=auto_desligado,humano_respondeu_em,msgs_contador,contador_data,escalado&limit=1`,
         { headers: sbHeaders }
       );
       const convArr = convResp.ok ? await convResp.json() : [];
       const conv = convArr[0];
       if (conv && conv.auto_desligado === true) return motivo(false, 'Brian desligado nesta conversa (chave por conversa)');
+
+      // ── Trava 8: limite de mensagens por conversa (anti-abuso / protege saldo) ──
+      // Brian responde no máximo LIMITE_MSGS por conversa por dia. Reseta a cada 24h.
+      const LIMITE_MSGS = 8;
+      const hojeBRT = new Date(Date.now() - 3 * 3600 * 1000).toISOString().split('T')[0];
+      if (conv) {
+        // se o contador é de hoje e já bateu o limite → não responde (escala)
+        const contadorHoje = (conv.contador_data === hojeBRT) ? (conv.msgs_contador || 0) : 0;
+        if (contadorHoje >= LIMITE_MSGS) {
+          return motivo(false, `limite de ${LIMITE_MSGS} mensagens atingido na conversa (escalado pra equipe)`);
+        }
+      }
 
       // ── Trava 2 (horário): depende do MODO de atendimento ──
       //   'sempre' (Ágil)   = responde a qualquer hora (recuo do humano cuida do resto)
@@ -273,6 +285,67 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       });
       return { ok: true };
     } catch (e) { return { ok: false, motivo: e.message }; }
+  }
+
+  // Incrementa o contador de mensagens da conversa (reseta por dia).
+  // Retorna o novo total do dia.
+  async function brianIncrementarContador(clinic_id, phone) {
+    try {
+      const sufixo = String(phone).replace(/\D/g, '').slice(-8);
+      const hojeBRT = new Date(Date.now() - 3 * 3600 * 1000).toISOString().split('T')[0];
+      // lê o atual
+      const r = await fetch(
+        `${SUPABASE_URL}/rest/v1/brian_conversa?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixo}&select=phone,msgs_contador,contador_data&limit=1`,
+        { headers: sbHeaders }
+      );
+      const arr = r.ok ? await r.json() : [];
+      const atual = arr[0];
+      let novoTotal = 1;
+      if (atual && atual.contador_data === hojeBRT) novoTotal = (atual.msgs_contador || 0) + 1;
+
+      if (atual) {
+        // atualiza (usa o phone exato que está no banco)
+        await fetch(`${SUPABASE_URL}/rest/v1/brian_conversa?clinic_id=eq.${clinic_id}&phone=eq.${encodeURIComponent(atual.phone)}`, {
+          method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
+          body: JSON.stringify({ msgs_contador: novoTotal, contador_data: hojeBRT }),
+        });
+      } else {
+        // cria o registro da conversa com o contador
+        await fetch(`${SUPABASE_URL}/rest/v1/brian_conversa`, {
+          method: 'POST', headers: { ...sbHeaders, Prefer: 'return=minimal' },
+          body: JSON.stringify({ clinic_id, phone: String(phone).replace(/\D/g, ''), msgs_contador: 1, contador_data: hojeBRT }),
+        });
+      }
+      return novoTotal;
+    } catch (e) { console.log('[BRIAN-CONTADOR] erro:', e.message); return 0; }
+  }
+
+  // Escala a conversa pra equipe: marca escalado + cria tarefa (se houver tabela de tarefas).
+  async function brianEscalar(clinic_id, phone, nomeLead) {
+    try {
+      const sufixo = String(phone).replace(/\D/g, '').slice(-8);
+      // marca a conversa como escalada
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/brian_conversa?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixo}&select=phone&limit=1`, { headers: sbHeaders });
+      const arr = r.ok ? await r.json() : [];
+      if (arr[0]) {
+        await fetch(`${SUPABASE_URL}/rest/v1/brian_conversa?clinic_id=eq.${clinic_id}&phone=eq.${encodeURIComponent(arr[0].phone)}`, {
+          method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
+          body: JSON.stringify({ escalado: true }),
+        });
+      }
+      // tenta criar uma tarefa pra equipe (best-effort; se a tabela não existir, ignora)
+      try {
+        await fetch(`${SUPABASE_URL}/rest/v1/tarefas_resolvidas`, {
+          method: 'POST', headers: { ...sbHeaders, Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            clinic_id,
+            tarefa_chave: `brian_escalou:${sufixo}:${new Date().toISOString().split('T')[0]}`,
+            resolvida_em: null, // null = tarefa pendente
+          }),
+        });
+      } catch (e) { /* sem tabela de tarefas: ignora */ }
+      console.log(`[BRIAN-ESCALOU] 🆘 conversa ${phone} escalada pra equipe`);
+    } catch (e) { console.log('[BRIAN-ESCALAR] erro:', e.message); }
   }
 
   // Envia 1-2 imagens de casos do procedimento via Evolution (sendMedia)
@@ -781,6 +854,18 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
                   if (textoResposta) {
                     await responderPaciente(instanceName, clinic_id, phone, textoResposta, 'BRIAN_AUTO');
                     console.log(`[BRIAN-ENVIO] ✅ respondeu ${phone}: "${String(textoResposta).slice(0, 60)}"`);
+
+                    // incrementa o contador de mensagens da conversa
+                    const totalDia = await brianIncrementarContador(clinic_id, phone);
+                    // se ESTA resposta atingiu o limite, escala pra equipe (avisa + cria tarefa)
+                    const LIMITE = 8;
+                    if (totalDia >= LIMITE) {
+                      const nomeLead = (campoLead && campoLead.nome) || (campoAgendar && campoAgendar.nome) || '';
+                      const primeiro = String(nomeLead).split(' ')[0] || '';
+                      const aviso = `${primeiro ? primeiro + ', ' : ''}vou pedir pra um especialista da nossa equipe te dar uma atenção mais completa, tá? 😊 Em breve alguém continua seu atendimento por aqui!`;
+                      await responderPaciente(instanceName, clinic_id, phone, aviso, 'BRIAN_AUTO');
+                      await brianEscalar(clinic_id, phone, nomeLead);
+                    }
                   }
 
                   // 1.5) envia os casos (antes/depois) se o Brian sinalizou
