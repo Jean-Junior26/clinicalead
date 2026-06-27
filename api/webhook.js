@@ -209,18 +209,33 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
     try {
       const digitos = String(phone).replace(/\D/g, '');
       const sufixo = digitos.slice(-8);
+      const nomeLimpo = (nome || '').trim();
       // 1) já existe?
       const r = await fetch(
         `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinic_id}&telefone=ilike.*${sufixo}&select=id,nome&limit=1`,
         { headers: sbHeaders }
       );
       const arr = r.ok ? await r.json() : [];
-      if (arr[0] && arr[0].id) return arr[0];
+      if (arr[0] && arr[0].id) {
+        // já existe: se chegou um nome REAL (2+ palavras) e o atual é provisório, atualiza
+        const atual = (arr[0].nome || '').trim();
+        const ehProvisorio = !atual || atual === 'Lead WhatsApp' || atual.split(/\s+/).length < 2;
+        const nomeNovoEhReal = nomeLimpo && nomeLimpo !== 'Lead WhatsApp' && nomeLimpo.split(/\s+/).length >= 1;
+        if (ehProvisorio && nomeNovoEhReal && nomeLimpo !== atual) {
+          await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${arr[0].id}`, {
+            method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
+            body: JSON.stringify({ nome: nomeLimpo }),
+          });
+          console.log(`[BRIAN-LEAD] ✏️ nome atualizado: "${atual}" → "${nomeLimpo}"`);
+          return { id: arr[0].id, nome: nomeLimpo };
+        }
+        return arr[0];
+      }
 
       // 2) não existe → cria
       const novo = {
         clinic_id,
-        nome: (nome || 'Lead WhatsApp').trim(),
+        nome: nomeLimpo || 'Lead WhatsApp',
         telefone: digitos,
         origem: 'Brian IA',
         status: 'novo',
@@ -886,6 +901,15 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
                   if (textoResposta) {
                     await responderPaciente(instanceName, clinic_id, phone, textoResposta, 'BRIAN_AUTO');
                     console.log(`[BRIAN-ENVIO] ✅ respondeu ${phone}: "${String(textoResposta).slice(0, 60)}"`);
+
+                    // ── GARANTE O LEAD CEDO (pra follow-up reaquecer quem some sem dar o nome) ──
+                    // Se a pessoa demonstrou interesse (o Brian respondeu), ela já vira lead,
+                    // mesmo sem ter dito o nome. Usa o pushName do WhatsApp como nome provisório.
+                    // Quando ela disser o nome depois, o [[LEAD]] atualiza (brianAcharOuCriarLead não duplica).
+                    if (!campoAgendar) {
+                      const nomeProvisorio = (campoLead && campoLead.nome) || contact_name || null;
+                      await brianAcharOuCriarLead(clinic_id, phone, nomeProvisorio);
+                    }
 
                     // incrementa o contador de mensagens da conversa
                     const totalDia = await brianIncrementarContador(clinic_id, phone);
