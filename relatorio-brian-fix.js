@@ -11,7 +11,7 @@
   function getDb() { return (typeof db !== 'undefined') ? db : (window.supabaseClient || window.sb || null); }
   function clinicAtual() { return (typeof currentClinic === 'function') ? currentClinic() : null; }
 
-  const RB = { periodo: 30 }; // dias
+  const RB = { periodo: 30, dataIni: null, dataFim: null }; // dias OU intervalo custom
 
   // ── cria a página (uma vez) ──
   function garantirPagina() {
@@ -26,20 +26,28 @@
           <h1 style="margin:0;display:flex;align-items:center;gap:8px;"><i class="ti ti-robot" style="color:var(--gold,#C9A84C);"></i> Agendamentos IA</h1>
           <p style="color:var(--text-muted,#888);font-size:13px;margin:4px 0 0;">O impacto do Brian IA na sua clínica</p>
         </div>
-        <div id="rbPeriodos" style="display:flex;gap:6px;">
-          <button class="rb-per" data-d="7">7 dias</button>
-          <button class="rb-per" data-d="30">30 dias</button>
-          <button class="rb-per" data-d="90">90 dias</button>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+          <div id="rbPeriodos" style="display:flex;gap:6px;">
+            <button class="rb-per" data-d="7">7 dias</button>
+            <button class="rb-per" data-d="30">30 dias</button>
+            <button class="rb-per" data-d="90">90 dias</button>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;border-left:1px solid var(--gold-border,#333);padding-left:10px;">
+            <input type="date" id="rbDataIni" class="rb-data" title="Data inicial">
+            <span style="color:var(--text-muted,#888);font-size:12px;">até</span>
+            <input type="date" id="rbDataFim" class="rb-data" title="Data final">
+            <button id="rbAplicarData" class="rb-per">Aplicar</button>
+          </div>
         </div>
       </div>
       <div id="rbConteudo"><div style="padding:40px;text-align:center;color:var(--text-muted,#888);">Carregando…</div></div>`;
     container.appendChild(page);
 
-    // estilo dos botões de período
     const st = document.createElement('style');
     st.textContent = `
       .rb-per{padding:7px 16px;border-radius:8px;border:1px solid var(--gold-border,#333);background:transparent;color:var(--text-secondary,#888);cursor:pointer;font-size:13px;font-weight:600;}
       .rb-per.active{background:var(--gold,#C9A84C);color:#0A0A0B;border-color:var(--gold,#C9A84C);}
+      .rb-data{padding:6px 8px;border-radius:7px;border:1px solid var(--gold-border,#333);background:var(--bg-base,#0A0A0B);color:var(--text-primary,#F0EAD6);font-size:12px;}
       .rb-kpi{background:var(--bg-card,#1C1C20);border:1px solid var(--gold-border,rgba(201,168,76,0.2));border-radius:14px;padding:22px;}
       .rb-kpi-num{font-size:34px;font-weight:800;color:var(--gold,#C9A84C);line-height:1;}
       .rb-kpi-lbl{font-size:13px;color:var(--text-secondary,#8A8570);margin-top:8px;}`;
@@ -65,16 +73,41 @@
 
   window.abrirRelatorioBrian = async function () {
     garantirPagina();
-    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    // esconde TODAS as outras páginas e mostra a nossa (corrige a "tela preta vazia")
+    document.querySelectorAll('.page').forEach(p => { p.classList.remove('active'); p.style.display = ''; });
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-    document.getElementById('page-relatorio-brian').classList.add('active');
+    const pg = document.getElementById('page-relatorio-brian');
+    pg.classList.add('active');
+    pg.style.display = 'block';
+    // rola pro topo (o conteúdo estava aparecendo lá embaixo)
+    pg.scrollIntoView({ block: 'start' });
+    window.scrollTo(0, 0);
     const item = document.getElementById('navRelatorioBrian');
     if (item) item.classList.add('active');
-    // listeners dos períodos
-    document.querySelectorAll('.rb-per').forEach(b => {
-      b.classList.toggle('active', parseInt(b.dataset.d) === RB.periodo);
-      b.onclick = () => { RB.periodo = parseInt(b.dataset.d); document.querySelectorAll('.rb-per').forEach(x => x.classList.toggle('active', x === b)); carregarERender(); };
+
+    // listeners dos períodos rápidos
+    document.querySelectorAll('.rb-per[data-d]').forEach(b => {
+      b.classList.toggle('active', !RB.dataIni && parseInt(b.dataset.d) === RB.periodo);
+      b.onclick = () => {
+        RB.periodo = parseInt(b.dataset.d); RB.dataIni = null; RB.dataFim = null;
+        document.querySelectorAll('.rb-per[data-d]').forEach(x => x.classList.toggle('active', x === b));
+        const di = document.getElementById('rbDataIni'); const df = document.getElementById('rbDataFim');
+        if (di) di.value = ''; if (df) df.value = '';
+        carregarERender();
+      };
     });
+    // listener da data personalizada
+    const aplicar = document.getElementById('rbAplicarData');
+    if (aplicar) aplicar.onclick = () => {
+      const di = document.getElementById('rbDataIni').value;
+      const df = document.getElementById('rbDataFim').value;
+      if (!di || !df) { if (typeof toast === 'function') toast('Escolha as duas datas', 'error'); return; }
+      if (di > df) { if (typeof toast === 'function') toast('Data inicial deve ser antes da final', 'error'); return; }
+      RB.dataIni = di; RB.dataFim = df;
+      document.querySelectorAll('.rb-per[data-d]').forEach(x => x.classList.remove('active'));
+      carregarERender();
+    };
+
     await carregarERender();
   };
 
@@ -88,19 +121,30 @@
   async function carregarDados() {
     const database = getDb(); const clinic = clinicAtual();
     if (!database || !clinic) return null;
-    const desde = new Date(Date.now() - RB.periodo * 86400000).toISOString();
-    const dadosOut = { leads: 0, agendados: 0, msgs: 0, compareceu: 0, periodo: RB.periodo };
+    // define o intervalo: datas personalizadas OU últimos N dias
+    let desde, ateInc, rotuloPeriodo;
+    if (RB.dataIni && RB.dataFim) {
+      desde = new Date(RB.dataIni + 'T00:00:00').toISOString();
+      ateInc = new Date(RB.dataFim + 'T23:59:59').toISOString();
+      const fmt = (s) => s.split('-').reverse().join('/');
+      rotuloPeriodo = `${fmt(RB.dataIni)} a ${fmt(RB.dataFim)}`;
+    } else {
+      desde = new Date(Date.now() - RB.periodo * 86400000).toISOString();
+      ateInc = new Date().toISOString();
+      rotuloPeriodo = `últimos ${RB.periodo} dias`;
+    }
+    const dadosOut = { leads: 0, agendados: 0, msgs: 0, compareceu: 0, rotulo: rotuloPeriodo };
     try {
       // leads captados pelo Brian (origem Brian IA)
       const { count: cLeads } = await database.from('leads')
         .select('id', { count: 'exact', head: true })
-        .eq('clinic_id', clinic.id).eq('origem', 'Brian IA').gte('created_at', desde);
+        .eq('clinic_id', clinic.id).eq('origem', 'Brian IA').gte('created_at', desde).lte('created_at', ateInc);
       dadosOut.leads = cLeads || 0;
 
       // consultas agendadas pelo Brian (observacoes marca isso)
       const { data: cons } = await database.from('consultas')
         .select('id, status, observacoes, created_at')
-        .eq('clinic_id', clinic.id).gte('created_at', desde);
+        .eq('clinic_id', clinic.id).gte('created_at', desde).lte('created_at', ateInc);
       const consBrian = (cons || []).filter(c => (c.observacoes || '').includes('Brian IA'));
       dadosOut.agendados = consBrian.length;
       dadosOut.compareceu = consBrian.filter(c => c.status === 'compareceu').length;
@@ -108,7 +152,7 @@
       // mensagens respondidas pelo Brian (BRIAN_AUTO, from_me)
       const { count: cMsgs } = await database.from('mensagens')
         .select('id', { count: 'exact', head: true })
-        .eq('clinic_id', clinic.id).eq('contact_name', 'BRIAN_AUTO').eq('from_me', true).gte('created_at', desde);
+        .eq('clinic_id', clinic.id).eq('contact_name', 'BRIAN_AUTO').eq('from_me', true).gte('created_at', desde).lte('created_at', ateInc);
       dadosOut.msgs = cMsgs || 0;
     } catch (e) { console.error('[relatorio-brian]', e); }
     return dadosOut;
@@ -120,28 +164,43 @@
     if (!d) { cont.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-muted,#888);">Sem dados.</div>'; return; }
 
     const conversao = d.leads > 0 ? Math.round((d.agendados / d.leads) * 100) : 0;
-    const compareceu = d.agendados > 0 ? Math.round((d.compareceu / d.agendados) * 100) : 0;
 
     cont.innerHTML = `
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:20px;">
-        <div class="rb-kpi"><div class="rb-kpi-num">${d.leads}</div><div class="rb-kpi-lbl">🤖 Leads captados pelo Brian</div></div>
-        <div class="rb-kpi"><div class="rb-kpi-num">${d.agendados}</div><div class="rb-kpi-lbl">📅 Avaliações agendadas</div></div>
-        <div class="rb-kpi"><div class="rb-kpi-num">${d.msgs}</div><div class="rb-kpi-lbl">💬 Mensagens respondidas</div></div>
-        <div class="rb-kpi"><div class="rb-kpi-num">${conversao}%</div><div class="rb-kpi-lbl">📈 Conversão (lead → agendamento)</div></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:20px;">
+        <div class="rb-kpi" style="border-left:4px solid var(--gold,#C9A84C);">
+          <div class="rb-kpi-num">${d.leads}</div>
+          <div class="rb-kpi-lbl">🤖 Leads captados pelo Brian</div>
+        </div>
+        <div class="rb-kpi" style="border-left:4px solid #5B8DB8;">
+          <div class="rb-kpi-num" style="color:#7BA9D0;">${d.agendados}</div>
+          <div class="rb-kpi-lbl">📅 Avaliações agendadas</div>
+        </div>
+        <div class="rb-kpi" style="border-left:4px solid #6FBF8E;">
+          <div class="rb-kpi-num" style="color:#6FBF8E;">${d.msgs}</div>
+          <div class="rb-kpi-lbl">💬 Mensagens respondidas</div>
+        </div>
+        <div class="rb-kpi" style="border-left:4px solid var(--gold,#C9A84C);">
+          <div class="rb-kpi-num">${conversao}%</div>
+          <div class="rb-kpi-lbl">📈 Conversão (lead → agendamento)</div>
+        </div>
       </div>
 
-      <div class="rb-kpi" style="margin-bottom:20px;">
-        <div style="font-size:15px;font-weight:600;color:var(--text-primary,#F0EAD6);margin-bottom:14px;">💡 Resumo do impacto (últimos ${d.periodo} dias)</div>
-        <p style="font-size:14px;color:var(--text-secondary,#8A8570);line-height:1.7;margin:0;">
-          Nos últimos ${d.periodo} dias, o <b style="color:var(--gold,#C9A84C);">Brian IA</b> captou <b>${d.leads} leads</b>,
-          respondeu <b>${d.msgs} mensagens</b> automaticamente e agendou <b>${d.agendados} avaliações</b> sozinho —
-          ${d.compareceu > 0 ? `sendo que <b>${d.compareceu}</b> já compareceram. ` : ''}
-          Isso é trabalho que rodou no automático, 24h por dia, sem ocupar sua equipe. 🚀
+      <div class="rb-kpi" style="background:linear-gradient(135deg, rgba(201,168,76,0.08), rgba(201,168,76,0.02));border:1px solid var(--gold-border,rgba(201,168,76,0.3));">
+        <div style="font-size:16px;font-weight:700;color:var(--gold,#C9A84C);margin-bottom:14px;display:flex;align-items:center;gap:8px;">
+          💡 Resumo do impacto <span style="font-size:12px;font-weight:500;color:var(--text-muted,#888);">(${d.rotulo})</span>
+        </div>
+        <p style="font-size:15px;color:var(--text-secondary,#C8C2AE);line-height:1.8;margin:0;">
+          O <b style="color:var(--gold,#C9A84C);">Brian IA</b> captou <b style="color:var(--text-primary,#F0EAD6);">${d.leads} leads</b>,
+          respondeu <b style="color:var(--text-primary,#F0EAD6);">${d.msgs} mensagens</b> automaticamente
+          e agendou <b style="color:var(--text-primary,#F0EAD6);">${d.agendados} avaliações</b> sozinho${d.compareceu > 0 ? `,
+          sendo que <b style="color:var(--text-primary,#F0EAD6);">${d.compareceu}</b> já compareceram` : ''}.
+          <br><br>
+          Tudo isso no <b>automático, 24h por dia</b>, sem ocupar a sua equipe. 🚀
         </p>
       </div>
 
-      ${d.leads === 0 && d.agendados === 0 ? `
-        <div class="rb-kpi" style="text-align:center;color:var(--text-muted,#888);">
+      ${d.leads === 0 && d.agendados === 0 && d.msgs === 0 ? `
+        <div class="rb-kpi" style="text-align:center;color:var(--text-muted,#888);margin-top:16px;">
           Ainda não há dados do Brian nesse período. Conforme ele atende, os números aparecem aqui! 😊
         </div>` : ''}
     `;
