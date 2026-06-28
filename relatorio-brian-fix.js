@@ -10,8 +10,13 @@
 
   function getDb() { return (typeof db !== 'undefined') ? db : (window.supabaseClient || window.sb || null); }
   function clinicAtual() { return (typeof currentClinic === 'function') ? currentClinic() : null; }
+  function ehAdminMaster() {
+    const role = (typeof STATE !== 'undefined' && STATE.profile) ? STATE.profile.role : null;
+    return role === 'admin' || role === 'administrador';
+  }
 
-  const RB = { periodo: 30, dataIni: null, dataFim: null }; // dias OU intervalo custom
+  const RB = { periodo: 30, dataIni: null, dataFim: null, escopo: 'atual', clinicasLista: [] };
+  // escopo: 'atual' (clínica selecionada) | 'todas' (consolidado) | <clinic_id> (uma específica)
 
   // ── cria a página (uma vez) ──
   function garantirPagina() {
@@ -24,9 +29,10 @@
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px;">
         <div>
           <h1 style="margin:0;display:flex;align-items:center;gap:8px;"><i class="ti ti-robot" style="color:var(--gold,#C9A84C);"></i> Agendamentos IA</h1>
-          <p style="color:var(--text-muted,#888);font-size:13px;margin:4px 0 0;">O impacto do Brian IA na sua clínica</p>
+          <p style="color:var(--text-muted,#888);font-size:13px;margin:4px 0 0;">O impacto do Brian IA${ehAdminMaster() ? ' (visão de administrador)' : ' na sua clínica'}</p>
         </div>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+          <select id="rbEscopo" class="rb-data" style="display:none;font-weight:600;padding:7px 10px;"></select>
           <div id="rbPeriodos" style="display:flex;gap:6px;">
             <button class="rb-per" data-d="7">7 dias</button>
             <button class="rb-per" data-d="30">30 dias</button>
@@ -85,6 +91,24 @@
     const item = document.getElementById('navRelatorioBrian');
     if (item) item.classList.add('active');
 
+    // ── SELETOR DE CLÍNICA (só admin master) ──
+    const selEscopo = document.getElementById('rbEscopo');
+    if (selEscopo && ehAdminMaster()) {
+      selEscopo.style.display = 'inline-block';
+      if (!RB.clinicasLista.length) await carregarClinicas();
+      const opcoes = ['<option value="todas">🌐 Todas as clínicas</option>']
+        .concat(RB.clinicasLista.map(c => `<option value="${c.id}">${c.nome}</option>`));
+      selEscopo.innerHTML = opcoes.join('');
+      // valor atual: se escopo é 'atual', seleciona a clínica atual; senão o escopo
+      const atual = clinicAtual();
+      if (RB.escopo === 'atual' && atual) { RB.escopo = atual.id; }
+      selEscopo.value = RB.escopo;
+      selEscopo.onchange = () => { RB.escopo = selEscopo.value; carregarERender(); };
+    } else if (selEscopo) {
+      selEscopo.style.display = 'none';
+      RB.escopo = 'atual'; // cliente comum: sempre só a própria clínica
+    }
+
     // listeners dos períodos rápidos
     document.querySelectorAll('.rb-per[data-d]').forEach(b => {
       b.classList.toggle('active', !RB.dataIni && parseInt(b.dataset.d) === RB.periodo);
@@ -118,9 +142,38 @@
     render(dados);
   }
 
+  // carrega a lista de clínicas (só admin precisa)
+  async function carregarClinicas() {
+    const database = getDb();
+    if (!database) return;
+    try {
+      const { data } = await database.from('clinicas').select('id, nome').order('nome');
+      RB.clinicasLista = data || [];
+    } catch (e) { console.error('[relatorio-brian] carregar clínicas', e); RB.clinicasLista = []; }
+  }
+
   async function carregarDados() {
-    const database = getDb(); const clinic = clinicAtual();
-    if (!database || !clinic) return null;
+    const database = getDb();
+    if (!database) return null;
+
+    // define o ESCOPO de clínicas: todas, uma específica, ou a atual
+    let clinicIds = null; // null = todas; array = filtra por essas
+    let escopoLabel = '';
+    if (RB.escopo === 'todas' && ehAdminMaster()) {
+      clinicIds = null; // todas as clínicas (consolidado) — só admin
+      escopoLabel = 'Todas as clínicas';
+    } else if (RB.escopo && RB.escopo !== 'atual' && RB.escopo !== 'todas' && ehAdminMaster()) {
+      clinicIds = [RB.escopo]; // uma clínica específica (só admin pode escolher outra)
+      const c = RB.clinicasLista.find(x => x.id === RB.escopo);
+      escopoLabel = c ? c.nome : '';
+    } else {
+      // cliente comum (ou admin com escopo 'atual'): SEMPRE só a clínica atual
+      const clinic = clinicAtual();
+      if (!clinic) return null;
+      clinicIds = [clinic.id];
+      escopoLabel = clinic.nome || '';
+    }
+
     // define o intervalo: datas personalizadas OU últimos N dias
     let desde, ateInc, rotuloPeriodo;
     if (RB.dataIni && RB.dataFim) {
@@ -133,26 +186,36 @@
       ateInc = new Date().toISOString();
       rotuloPeriodo = `últimos ${RB.periodo} dias`;
     }
-    const dadosOut = { leads: 0, agendados: 0, msgs: 0, compareceu: 0, rotulo: rotuloPeriodo };
+    const dadosOut = { leads: 0, agendados: 0, msgs: 0, compareceu: 0, rotulo: rotuloPeriodo, escopoLabel };
+
+    // helper: aplica o filtro de clínica numa query (se clinicIds for null, não filtra = todas)
+    const aplicarEscopo = (q) => clinicIds ? q.in('clinic_id', clinicIds) : q;
+
     try {
       // leads captados pelo Brian (origem Brian IA)
-      const { count: cLeads } = await database.from('leads')
+      let qLeads = database.from('leads')
         .select('id', { count: 'exact', head: true })
-        .eq('clinic_id', clinic.id).eq('origem', 'Brian IA').gte('created_at', desde).lte('created_at', ateInc);
+        .eq('origem', 'Brian IA').gte('created_at', desde).lte('created_at', ateInc);
+      qLeads = aplicarEscopo(qLeads);
+      const { count: cLeads } = await qLeads;
       dadosOut.leads = cLeads || 0;
 
       // consultas agendadas pelo Brian (observacoes marca isso)
-      const { data: cons } = await database.from('consultas')
-        .select('id, status, observacoes, created_at')
-        .eq('clinic_id', clinic.id).gte('created_at', desde).lte('created_at', ateInc);
+      let qCons = database.from('consultas')
+        .select('id, status, observacoes, created_at, clinic_id')
+        .gte('created_at', desde).lte('created_at', ateInc);
+      qCons = aplicarEscopo(qCons);
+      const { data: cons } = await qCons;
       const consBrian = (cons || []).filter(c => (c.observacoes || '').includes('Brian IA'));
       dadosOut.agendados = consBrian.length;
       dadosOut.compareceu = consBrian.filter(c => c.status === 'compareceu').length;
 
       // mensagens respondidas pelo Brian (BRIAN_AUTO, from_me)
-      const { count: cMsgs } = await database.from('mensagens')
+      let qMsgs = database.from('mensagens')
         .select('id', { count: 'exact', head: true })
-        .eq('clinic_id', clinic.id).eq('contact_name', 'BRIAN_AUTO').eq('from_me', true).gte('created_at', desde).lte('created_at', ateInc);
+        .eq('contact_name', 'BRIAN_AUTO').eq('from_me', true).gte('created_at', desde).lte('created_at', ateInc);
+      qMsgs = aplicarEscopo(qMsgs);
+      const { count: cMsgs } = await qMsgs;
       dadosOut.msgs = cMsgs || 0;
     } catch (e) { console.error('[relatorio-brian]', e); }
     return dadosOut;
@@ -186,8 +249,9 @@
       </div>
 
       <div class="rb-kpi" style="background:linear-gradient(135deg, rgba(201,168,76,0.08), rgba(201,168,76,0.02));border:1px solid var(--gold-border,rgba(201,168,76,0.3));">
-        <div style="font-size:16px;font-weight:700;color:var(--gold,#C9A84C);margin-bottom:14px;display:flex;align-items:center;gap:8px;">
-          💡 Resumo do impacto <span style="font-size:12px;font-weight:500;color:var(--text-muted,#888);">(${d.rotulo})</span>
+        <div style="font-size:16px;font-weight:700;color:var(--gold,#C9A84C);margin-bottom:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          💡 Resumo do impacto
+          <span style="font-size:12px;font-weight:500;color:var(--text-muted,#888);">(${d.rotulo}${d.escopoLabel ? ' · ' + d.escopoLabel : ''})</span>
         </div>
         <p style="font-size:15px;color:var(--text-secondary,#C8C2AE);line-height:1.8;margin:0;">
           O <b style="color:var(--gold,#C9A84C);">Brian IA</b> captou <b style="color:var(--text-primary,#F0EAD6);">${d.leads} leads</b>,
