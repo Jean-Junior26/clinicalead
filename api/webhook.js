@@ -254,6 +254,31 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
     } catch (e) { console.log('[BRIAN-LEAD] erro:', e.message); return null; }
   }
 
+  // Move o lead pra status 'contato' (em atendimento) quando a clínica responde —
+  // seja o Brian, um humano pelo WhatsApp, ou pelo Inbox do sistema.
+  // Só muda se o lead ainda está 'novo' — não rebaixa quem já avançou (agendado/etc).
+  async function marcarLeadEmAtendimento(clinic_id, phone) {
+    try {
+      const sufixo = String(phone).replace(/\D/g, '').slice(-8);
+      if (sufixo.length < 8) return;
+      const r = await fetch(
+        `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinic_id}&telefone=ilike.*${sufixo}&select=id,status&limit=1`,
+        { headers: sbHeaders }
+      );
+      const arr = r.ok ? await r.json() : [];
+      const lead = arr[0];
+      if (!lead || !lead.id) return;
+      // só promove de 'novo' pra 'contato' (não mexe em agendado/confirmado/fechado/etc)
+      if (lead.status === 'novo') {
+        await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${lead.id}`, {
+          method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
+          body: JSON.stringify({ status: 'contato' }),
+        });
+        console.log(`[BRIAN-LEAD] 📞 lead movido pra 'contato' (em atendimento): ${lead.id}`);
+      }
+    } catch (e) { console.log('[BRIAN-LEAD] erro ao marcar em atendimento:', e.message); }
+  }
+
   // Cria a consulta ocupando o horário. Travas: data/hora válidas, não no passado,
   // horário existe na grade e está LIVRE (anti-duplo-agendamento). Retorna true se criou.
   async function brianCriarConsulta(clinic_id, lead_id, data, hora) {
@@ -829,6 +854,17 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
         }
         if (!fromMe && type === 'text') await processarConfirmacao(clinic_id, phone, content, instanceName);
 
+        // ── RESPOSTA DA CLÍNICA (humano OU Brian) → move lead pra "em atendimento" ──
+        // Qualquer mensagem que SAI da clínica (from_me) significa que alguém respondeu
+        // o lead — seja o Brian, o WhatsApp do celular, ou o Inbox do sistema. Então o
+        // lead deixa de ser "novo/sem contato" e vai pra "contato" (em atendimento).
+        // Só promove de 'novo' (não rebaixa quem já avançou). Cobre os 3 jeitos de responder.
+        if (fromMe) {
+          try {
+            await marcarLeadEmAtendimento(clinic_id, phone);
+          } catch (e) { console.log('[LEAD-STATUS] erro ao mover pra contato:', e.message); }
+        }
+
         // ── GARANTE LEAD PRA TODA MENSAGEM RECEBIDA (nenhum contato fica invisível) ──
         // Se chega mensagem de um cliente e ainda não existe lead, cria agora — mesmo
         // que o Brian esteja desligado. Assim toda conversa aparece no funil e gera
@@ -954,6 +990,8 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
                     if (!campoAgendar) {
                       const nomeProvisorio = (campoLead && campoLead.nome) || contact_name || null;
                       await brianAcharOuCriarLead(clinic_id, phone, nomeProvisorio);
+                      // (o status 'contato' já é cuidado pelo handler de from_me, que cobre
+                      //  Brian + humano + inbox — não precisa duplicar aqui)
                     }
 
                     // incrementa o contador de mensagens da conversa
@@ -986,7 +1024,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
                         console.log(`[BRIAN-AGENDAR] ⚠️ NÃO agendou (${r.motivo}) — avisa o paciente`);
                         // se o horário deu problema (ocupado/passado), avisa gentilmente
                         if (r.motivo === 'horário já ocupado' || r.motivo === 'horário no passado') {
-                          await responderPaciente(instanceName, clinic_id, phone, 'Ihh, esse horário acabou de ser preenchido 😅 Me dá um instante que já te passo as próximas opções, tá?', 'BRIAN_AUTO');
+                          await responderPaciente(instanceName, clinic_id, phone, 'Ihh, esse horário já está ocupado 😅 Mas me diz: qual outro dia ou período fica bom pra você? Aí já confirmo um horário certinho! 😊', 'BRIAN_AUTO');
                         }
                       }
                     }
