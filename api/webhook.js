@@ -279,9 +279,37 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
     } catch (e) { console.log('[BRIAN-LEAD] erro ao marcar em atendimento:', e.message); }
   }
 
+  // Resolve o dentista_id a partir de um NOME (vindo do direcionamento do Brian).
+  // O Brian decide o nome do dentista (lendo o direcionamento no template) e manda
+  // no marcador [[AGENDAR|...|dentista=Nome]]. Aqui casamos esse nome com a tabela
+  // dentistas da clínica. Se a clínica não tem dentistas, retorna null (sem dentista).
+  async function brianResolverDentista(clinic_id, nomeDentista) {
+    try {
+      const r = await fetch(
+        `${SUPABASE_URL}/rest/v1/dentistas?clinic_id=eq.${clinic_id}&ativo=eq.true&select=id,nome`,
+        { headers: sbHeaders }
+      );
+      const lista = r.ok ? await r.json() : [];
+      if (!lista.length) return null; // clínica sem dentistas → consulta sem dentista (compatível)
+
+      const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+      const alvo = norm(nomeDentista);
+
+      if (alvo) {
+        // 1) match exato; 2) match por "contém" (ex.: "Ana" casa "Dra. Ana Paula")
+        let achou = lista.find(d => norm(d.nome) === alvo);
+        if (!achou) achou = lista.find(d => norm(d.nome).includes(alvo) || alvo.includes(norm(d.nome)));
+        if (achou) return achou.id;
+      }
+      // se não casou nome (ou Brian não mandou nome): usa o PRIMEIRO dentista como padrão
+      // (evita consulta sem dentista numa clínica que tem dentistas cadastrados)
+      return lista[0].id;
+    } catch (e) { console.log('[BRIAN-DENTISTA] erro ao resolver:', e.message); return null; }
+  }
+
   // Cria a consulta ocupando o horário. Travas: data/hora válidas, não no passado,
   // horário existe na grade e está LIVRE (anti-duplo-agendamento). Retorna true se criou.
-  async function brianCriarConsulta(clinic_id, lead_id, data, hora) {
+  async function brianCriarConsulta(clinic_id, lead_id, data, hora, dentista_id) {
     try {
       if (!lead_id || !data || !hora) return { ok: false, motivo: 'dados incompletos' };
       // formato data AAAA-MM-DD e hora HH:MM
@@ -337,12 +365,15 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
         }
       }
       // trava ANTI-DUPLO-AGENDAMENTO: já tem consulta nesse dia+hora (não cancelada)?
-      const ocupR = await fetch(
-        `${SUPABASE_URL}/rest/v1/consultas?clinic_id=eq.${clinic_id}&data=eq.${data}&hora=eq.${hora}&status=neq.cancelado&select=id&limit=1`,
-        { headers: sbHeaders }
-      );
+      // Se há dentista, a trava é POR DENTISTA (mesmo horário livre pra dentistas diferentes).
+      let ocupUrl = `${SUPABASE_URL}/rest/v1/consultas?clinic_id=eq.${clinic_id}&data=eq.${data}&hora=eq.${hora}&status=neq.cancelado&select=id,dentista_id`;
+      if (dentista_id) {
+        // só conflita se for o MESMO dentista nesse horário
+        ocupUrl += `&dentista_id=eq.${dentista_id}`;
+      }
+      const ocupR = await fetch(ocupUrl, { headers: sbHeaders });
       const ocupA = ocupR.ok ? await ocupR.json() : [];
-      if (ocupA.length) return { ok: false, motivo: 'horário já ocupado' };
+      if (ocupA.length) return { ok: false, motivo: dentista_id ? 'dentista já ocupado nesse horário' : 'horário já ocupado' };
 
       // cria a consulta (ocupa o slot na hora)
       const nova = {
@@ -352,6 +383,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
         observacoes: 'Agendado automaticamente pelo Brian IA',
         created_at: new Date().toISOString(),
       };
+      if (dentista_id) nova.dentista_id = dentista_id; // atribui o dentista direcionado
       const ins = await fetch(`${SUPABASE_URL}/rest/v1/consultas`, {
         method: 'POST',
         headers: { ...sbHeaders, Prefer: 'return=minimal' },
@@ -1016,14 +1048,16 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
                   if (campoAgendar && campoAgendar.data && campoAgendar.hora) {
                     const lead = await brianAcharOuCriarLead(clinic_id, phone, campoAgendar.nome || (campoLead && campoLead.nome));
                     if (lead && lead.id) {
-                      const r = await brianCriarConsulta(clinic_id, lead.id, campoAgendar.data, campoAgendar.hora);
+                      // resolve o dentista pelo direcionamento (nome vindo no marcador) ou padrão da clínica
+                      const dentistaId = await brianResolverDentista(clinic_id, campoAgendar.dentista || '');
+                      const r = await brianCriarConsulta(clinic_id, lead.id, campoAgendar.data, campoAgendar.hora, dentistaId);
                       if (r.ok) {
-                        console.log(`[BRIAN-AGENDAR] ✅ CONSULTA CRIADA | ${campoAgendar.data} ${campoAgendar.hora} | lead ${lead.id}`);
+                        console.log(`[BRIAN-AGENDAR] ✅ CONSULTA CRIADA | ${campoAgendar.data} ${campoAgendar.hora} | lead ${lead.id}${dentistaId ? ' | dentista ' + dentistaId : ''}`);
                         await brianEnviarConfirmacao(instanceName, clinic_id, phone, lead.nome || campoAgendar.nome, campoAgendar.data, campoAgendar.hora);
                       } else {
                         console.log(`[BRIAN-AGENDAR] ⚠️ NÃO agendou (${r.motivo}) — avisa o paciente`);
                         // se o horário deu problema (ocupado/passado), avisa gentilmente
-                        if (r.motivo === 'horário já ocupado' || r.motivo === 'horário no passado') {
+                        if (r.motivo === 'horário já ocupado' || r.motivo === 'dentista já ocupado nesse horário' || r.motivo === 'horário no passado') {
                           await responderPaciente(instanceName, clinic_id, phone, 'Ihh, esse horário já está ocupado 😅 Mas me diz: qual outro dia ou período fica bom pra você? Aí já confirmo um horário certinho! 😊', 'BRIAN_AUTO');
                         }
                       }
