@@ -284,6 +284,24 @@
     ref.parentNode.insertBefore(btn, ref.nextSibling);
   }
 
+  // injeta botão FIXO "Recarregar Brian" no menu — visível pra TODOS, sempre acessível
+  // (resolve: cliente quer antecipar recarga mesmo com saldo alto)
+  function injetarBotaoRecarga() {
+    if (document.getElementById('navRecarregarBrian')) return;
+    // coloca perto do menu "Cobranças" ou "Brian IA" ou "Meu Plano"
+    const ref = document.querySelector('.nav-item[data-page="cobrancas"]')
+             || document.querySelector('.nav-item[data-page="brian"]')
+             || document.querySelector('.nav-item[data-page="meu-plano"]')
+             || document.querySelector('.nav-item[data-page="planos"]');
+    if (!ref) return;
+    const btn = document.createElement('button');
+    btn.className = 'nav-item';
+    btn.id = 'navRecarregarBrian';
+    btn.innerHTML = '<i class="ti ti-bolt"></i> Recarregar Brian';
+    btn.onclick = () => abrirRecargaBrian();
+    ref.parentNode.insertBefore(btn, ref.nextSibling);
+  }
+
   // ── inicialização ──
   function iniciar() {
     if (typeof STATE === 'undefined') return false;
@@ -297,6 +315,8 @@
     }, 2000);
     injetarBotaoAdmin();
     setInterval(injetarBotaoAdmin, 1500);
+    injetarBotaoRecarga();
+    setInterval(injetarBotaoRecarga, 1500);
     console.log('✅ saldo-brian-fix.js carregado');
     return true;
   }
