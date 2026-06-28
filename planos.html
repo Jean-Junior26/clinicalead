@@ -88,16 +88,15 @@
 <div class="plans">
   <div class="plan-card" id="card-basico">
     <div class="plan-name">Básico</div>
-    <div class="plan-desc">Para clínicas começando com IA</div>
-    <div class="plan-price"><span class="price-value" id="price-basico">R$ 149,90</span><span class="price-period">/mês</span></div>
+    <div class="plan-desc">Tudo que sua clínica precisa + IA</div>
+    <div class="plan-price"><span class="price-value" id="price-basico">R$ 159,90</span><span class="price-period">/mês</span></div>
     <div class="price-total" id="total-basico"></div>
     <ul class="plan-features">
-      <li>CRM completo (agenda, leads, kanban)</li>
-      <li>🤖 Brian IA — atendente no WhatsApp</li>
-      <li>1.000 mensagens de IA/mês</li>
-      <li>Lembretes e confirmações automáticas</li>
-      <li>Relatórios inteligentes</li>
-      <li>1 número de WhatsApp</li>
+      <li>CRM completo + automações</li>
+      <li>Multi-dentista e follow-up</li>
+      <li>🤖 Brian IA no WhatsApp</li>
+      <li><strong>1.000 mensagens de IA/mês</strong></li>
+      <li><strong>1 número de WhatsApp</strong></li>
     </ul>
     <button class="btn-plan secondary" id="btn-basico" onclick="assinar('basico')">Começar grátis</button>
   </div>
@@ -105,16 +104,15 @@
   <div class="plan-card popular" id="card-premium">
     <div class="popular-badge">⭐ Mais popular</div>
     <div class="plan-name">Premium</div>
-    <div class="plan-desc">Para clínicas em crescimento</div>
-    <div class="plan-price"><span class="price-value" id="price-premium">R$ 199,90</span><span class="price-period">/mês</span></div>
+    <div class="plan-desc">Para clínicas com mais movimento</div>
+    <div class="plan-price"><span class="price-value" id="price-premium">R$ 209,90</span><span class="price-period">/mês</span></div>
     <div class="price-total" id="total-premium"></div>
     <ul class="plan-features">
-      <li>Tudo do Básico</li>
-      <li>🤖 3.000 mensagens de IA/mês</li>
-      <li>Multi-dentista na agenda</li>
-      <li>Follow-up e reativação de leads</li>
-      <li>Banco de casos (antes/depois)</li>
-      <li>1 número de WhatsApp</li>
+      <li>CRM completo + automações</li>
+      <li>Multi-dentista e follow-up</li>
+      <li>🤖 Brian IA no WhatsApp</li>
+      <li><strong>3.000 mensagens de IA/mês</strong></li>
+      <li><strong>2 números de WhatsApp</strong></li>
     </ul>
     <button class="btn-plan primary" id="btn-premium" onclick="assinar('premium')">Começar grátis</button>
   </div>
@@ -122,21 +120,21 @@
   <div class="plan-card" id="card-platinum">
     <div class="plan-name">Platinum</div>
     <div class="plan-desc">Para clínicas que querem o máximo</div>
-    <div class="plan-price"><span class="price-value" id="price-platinum">R$ 249,90</span><span class="price-period">/mês</span></div>
+    <div class="plan-price"><span class="price-value" id="price-platinum">R$ 269,90</span><span class="price-period">/mês</span></div>
     <div class="price-total" id="total-platinum"></div>
     <ul class="plan-features">
-      <li>Tudo do Premium</li>
-      <li>🤖 5.000 mensagens de IA/mês</li>
-      <li>Multi-dentista ilimitado</li>
+      <li>CRM completo + automações</li>
+      <li>Multi-dentista e follow-up</li>
+      <li>🤖 Brian IA no WhatsApp</li>
+      <li><strong>5.000 mensagens de IA/mês</strong></li>
+      <li><strong>3 números de WhatsApp</strong></li>
       <li>Prioridade no suporte</li>
-      <li>Acesso antecipado a novidades</li>
-      <li>1 número de WhatsApp</li>
     </ul>
     <button class="btn-plan secondary" id="btn-platinum" onclick="assinar('platinum')">Começar grátis</button>
   </div>
 </div>
 
-<p style="text-align:center;color:#666;font-size:13px;margin:-20px 20px 40px;">📱 WhatsApp adicional: <strong style="color:#d4af37;">R$ 39,90/mês</strong> por número extra</p>
+<p style="text-align:center;color:#666;font-size:13px;margin:-20px 20px 40px;">📱 Precisa de mais números? WhatsApp extra: <strong style="color:#d4af37;">R$ 39,90/mês</strong> por número adicional</p>
 
 <div class="faq">
   <h3>Dúvidas frequentes</h3>
@@ -168,15 +166,15 @@ const { createClient } = supabase;
 const db = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const precos = {
-  basico:   { mensal: 149.90, semestral: 127.42, anual: 112.43 },
-  premium:  { mensal: 199.90, semestral: 169.91, anual: 149.93 },
-  platinum: { mensal: 249.90, semestral: 212.41, anual: 187.43 },
+  basico:   { mensal: 159.90, semestral: 135.91, anual: 119.93 },
+  premium:  { mensal: 209.90, semestral: 178.41, anual: 157.43 },
+  platinum: { mensal: 269.90, semestral: 229.41, anual: 202.42 },
 };
 
 const totais = {
-  basico:   { mensal: '', semestral: 'R$ 764,49 cobrado a cada 6 meses', anual: 'R$ 1.349,10 cobrado anualmente' },
-  premium:  { mensal: '', semestral: 'R$ 1.019,49 cobrado a cada 6 meses', anual: 'R$ 1.799,10 cobrado anualmente' },
-  platinum: { mensal: '', semestral: 'R$ 1.274,49 cobrado a cada 6 meses', anual: 'R$ 2.249,10 cobrado anualmente' },
+  basico:   { mensal: '', semestral: 'R$ 815,49 cobrado a cada 6 meses', anual: 'R$ 1.439,10 cobrado anualmente' },
+  premium:  { mensal: '', semestral: 'R$ 1.070,49 cobrado a cada 6 meses', anual: 'R$ 1.889,10 cobrado anualmente' },
+  platinum: { mensal: '', semestral: 'R$ 1.376,49 cobrado a cada 6 meses', anual: 'R$ 2.429,10 cobrado anualmente' },
 };
 
 let periodoAtual = 'mensal';
