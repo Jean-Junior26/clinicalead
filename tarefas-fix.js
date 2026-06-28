@@ -44,6 +44,27 @@ async function tarefasCarregarDados() {
   TAREFAS.resolvidas = {};
   (res || []).forEach(r => { TAREFAS.resolvidas[r.tarefa_chave] = r; });
 
+  // ── ÚLTIMA MENSAGEM por lead (pra saber se já houve resposta do Brian/humano) ──
+  // Um lead só está "esfriando" se a última mensagem foi DELE (esperando resposta).
+  // Se o Brian ou um humano já respondeu, NÃO está esfriando.
+  TAREFAS.ultimaMsgPorTelefone = {};
+  try {
+    const { data: msgs } = await db.from('mensagens')
+      .select('phone, from_me, contact_name, created_at')
+      .eq('clinic_id', clinic.id)
+      .order('created_at', { ascending: false })
+      .limit(800); // últimas mensagens da clínica (suficiente pra leads recentes)
+    // guarda só a PRIMEIRA (mais recente) de cada telefone
+    (msgs || []).forEach(m => {
+      if (!m.phone) return;
+      const sufixo = String(m.phone).replace(/\D/g, '').slice(-8);
+      if (sufixo.length < 8) return;
+      if (!TAREFAS.ultimaMsgPorTelefone[sufixo]) {
+        TAREFAS.ultimaMsgPorTelefone[sufixo] = m; // a mais recente (já vem ordenado desc)
+      }
+    });
+  } catch (e) { console.error('[tarefas] carregar mensagens', e); TAREFAS.ultimaMsgPorTelefone = {}; }
+
   // Orçamentos parados: sem nenhuma aprovação há 3+ dias
   try {
     const { data: orcsParados } = await db.from('orcamentos')
@@ -139,19 +160,42 @@ function tarefasGerar() {
       });
     });
 
-  // 🔴 3. Leads novos sem contato há mais de 1h
+  // 🔴 3. Leads novos REALMENTE esfriando: última mensagem foi do LEAD (ninguém respondeu)
+  // Antes olhava só "lead criado há 1h" — mas isso gerava tarefa falsa quando o Brian
+  // já tinha criado E respondido o lead. Agora checa a ÚLTIMA mensagem: só é "esfriando"
+  // se o lead falou por último e nem o Brian nem um humano respondeu.
   leads
     .filter(l => l.status === 'novo' && l.created_at)
     .forEach(l => {
       const horas = (agora - new Date(l.created_at).getTime()) / 3600000;
       if (horas < 1) return;
-      const tempo = horas < 24 ? `${Math.floor(horas)}h` : `${Math.floor(horas/24)} dia(s)`;
+
+      // checa a última mensagem dessa conversa
+      const sufixo = String(l.telefone || '').replace(/\D/g, '').slice(-8);
+      const ultimaMsg = (sufixo.length === 8) ? (TAREFAS.ultimaMsgPorTelefone || {})[sufixo] : null;
+
+      if (ultimaMsg) {
+        // se a última mensagem foi DO BRIAN ou de um HUMANO da clínica (from_me=true),
+        // o lead JÁ FOI atendido → NÃO está esfriando, não gera tarefa.
+        if (ultimaMsg.from_me === true) return;
+        // se a última foi do lead, recalcula o "tempo esfriando" a partir dela
+        // (é o tempo real sem resposta, não desde a criação do lead)
+        const horasSemResposta = (agora - new Date(ultimaMsg.created_at).getTime()) / 3600000;
+        if (horasSemResposta < 1) return; // respondeu/falou há pouco, dá um tempo
+      }
+      // se não há mensagem nenhuma registrada, mantém o comportamento antigo
+      // (lead criado mas sem conversa = vale lembrar de fazer o primeiro contato)
+
+      // tempo a exibir: desde a última msg do lead (se houver) ou desde a criação
+      const refTempo = ultimaMsg ? new Date(ultimaMsg.created_at).getTime() : new Date(l.created_at).getTime();
+      const horasRef = (agora - refTempo) / 3600000;
+      const tempo = horasRef < 24 ? `${Math.floor(horasRef)}h` : `${Math.floor(horasRef/24)} dia(s)`;
       tarefas.push({
         chave: `novo_lead:${l.id}`,
         prio: 1,
         icon: 'ti-flame',
-        titulo: `Lead novo esfriando: ${l.nome}`,
-        desc: `Sem primeiro contato há ${tempo} — lead respondido rápido converte muito mais!`,
+        titulo: `Lead aguardando resposta: ${l.nome}`,
+        desc: `Sem resposta há ${tempo} — lead respondido rápido converte muito mais!`,
         telefone: l.telefone || null,
       });
     });
