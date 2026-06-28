@@ -20,8 +20,17 @@
 
   // ── cria a página (uma vez) ──
   function garantirPagina() {
-    if (document.getElementById('page-relatorio-brian')) return;
-    const container = document.querySelector('.main-content') || document.querySelector('main') || document.body;
+    const existente = document.getElementById('page-relatorio-brian');
+    // container correto: o mesmo .content onde ficam as outras páginas (page-dashboard, etc.)
+    const container = document.querySelector('.content')
+      || (document.getElementById('page-dashboard') || document.querySelector('.page'))?.parentElement
+      || document.querySelector('.main-content') || document.body;
+
+    if (existente) {
+      // se por algum motivo foi criada no lugar errado (body), move pro container certo
+      if (container && existente.parentElement !== container) container.appendChild(existente);
+      return;
+    }
     const page = document.createElement('div');
     page.className = 'page';
     page.id = 'page-relatorio-brian';
@@ -79,14 +88,12 @@
 
   window.abrirRelatorioBrian = async function () {
     garantirPagina();
-    // esconde TODAS as outras páginas e mostra a nossa (corrige a "tela preta vazia")
-    document.querySelectorAll('.page').forEach(p => { p.classList.remove('active'); p.style.display = ''; });
+    // usa o MESMO padrão das outras páginas: só a classe 'active' controla a exibição
+    // (o CSS do sistema já cuida do display via .page / .page.active)
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     const pg = document.getElementById('page-relatorio-brian');
     pg.classList.add('active');
-    pg.style.display = 'block';
-    // rola pro topo (o conteúdo estava aparecendo lá embaixo)
-    pg.scrollIntoView({ block: 'start' });
     window.scrollTo(0, 0);
     const item = document.getElementById('navRelatorioBrian');
     if (item) item.classList.add('active');
