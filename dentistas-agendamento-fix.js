@@ -15,8 +15,19 @@
   // ── injeta o dropdown "Dentista" no modal (se houver dentistas cadastrados) ──
   function injetarSelectDentista() {
     const lista = dentistas();
-    if (!lista.length) return; // clínica sem dentistas (ex: Hugo) → não mostra nada
-    if (document.getElementById('naDentistaGroup')) { popular(); return; }
+    const grupoExistente = document.getElementById('naDentistaGroup');
+    if (!lista.length) {
+      // clínica atual NÃO tem dentistas (ex: Hugo) → remove o dropdown se existir
+      // (evita mostrar dentistas de outra clínica que ficaram no DOM)
+      if (grupoExistente) grupoExistente.remove();
+      // revalida em 600ms: a lista pode estar recarregando pra clínica certa
+      setTimeout(() => {
+        const novaLista = dentistas();
+        if (novaLista.length && !document.getElementById('naDentistaGroup')) injetarSelectDentista();
+      }, 600);
+      return;
+    }
+    if (grupoExistente) { popular(); return; }
     // coloca depois do campo de hora (ou antes das obs)
     const ref = document.getElementById('naHora')?.closest('.form-group')
              || document.getElementById('naObs')?.closest('.form-group');
@@ -62,8 +73,9 @@
       const selDent = document.getElementById('naDentista');
       const dentistaId = selDent ? selDent.value : '';
 
-      // se a clínica TEM dentistas cadastrados, o dentista é obrigatório
-      if (lista.length && !dentistaId) {
+      // se a clínica TEM dentistas cadastrados E o dropdown está na tela, o dentista é obrigatório
+      const dropdownNaTela = !!document.getElementById('naDentistaGroup');
+      if (lista.length && dropdownNaTela && !dentistaId) {
         if (typeof toast === 'function') toast('Selecione o dentista', 'error');
         return;
       }
