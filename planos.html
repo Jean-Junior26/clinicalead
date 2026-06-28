@@ -76,71 +76,73 @@
 <div class="header">
   <div class="logo">Clínica<span>Lead</span></div>
   <div class="subtitle">Escolha o plano ideal para sua clínica</div>
-  <div class="trial-badge">🎉 7 dias grátis em todos os planos</div>
+  <div class="trial-badge">🎉 3 dias grátis em todos os planos</div>
 </div>
 
 <div class="periodo-tabs">
   <button class="periodo-btn active" onclick="setPeriodo('mensal')">Mensal</button>
-  <button class="periodo-btn" onclick="setPeriodo('semestral')">Semestral <span class="desconto">~8% off</span></button>
-  <button class="periodo-btn" onclick="setPeriodo('anual')">Anual <span class="desconto">~25% off</span></button>
+  <button class="periodo-btn" onclick="setPeriodo('semestral')">Semestral <span class="desconto">15% off</span></button>
+  <button class="periodo-btn" onclick="setPeriodo('anual')">Anual <span class="desconto">25% off</span></button>
 </div>
 
 <div class="plans">
-  <div class="plan-card" id="card-solo">
-    <div class="plan-name">Solo</div>
-    <div class="plan-desc">Para dentistas autônomos</div>
-    <div class="plan-price"><span class="price-value" id="price-solo">R$ 119,90</span><span class="price-period">/mês</span></div>
-    <div class="price-total" id="total-solo"></div>
+  <div class="plan-card" id="card-basico">
+    <div class="plan-name">Básico</div>
+    <div class="plan-desc">Para clínicas começando com IA</div>
+    <div class="plan-price"><span class="price-value" id="price-basico">R$ 149,90</span><span class="price-period">/mês</span></div>
+    <div class="price-total" id="total-basico"></div>
     <ul class="plan-features">
-      <li>1 usuário</li>
-      <li>1 clínica</li>
-      <li>Inbox WhatsApp</li>
-      <li>Funil de leads</li>
-      <li>Agenda integrada</li>
-      <li>Automações</li>
+      <li>CRM completo (agenda, leads, kanban)</li>
+      <li>🤖 Brian IA — atendente no WhatsApp</li>
+      <li>1.000 mensagens de IA/mês</li>
+      <li>Lembretes e confirmações automáticas</li>
+      <li>Relatórios inteligentes</li>
+      <li>1 número de WhatsApp</li>
     </ul>
-    <button class="btn-plan secondary" id="btn-solo" onclick="assinar('solo')">Começar grátis</button>
+    <button class="btn-plan secondary" id="btn-basico" onclick="assinar('basico')">Começar grátis</button>
   </div>
 
-  <div class="plan-card popular" id="card-clinica">
+  <div class="plan-card popular" id="card-premium">
     <div class="popular-badge">⭐ Mais popular</div>
-    <div class="plan-name">Clínica</div>
+    <div class="plan-name">Premium</div>
     <div class="plan-desc">Para clínicas em crescimento</div>
-    <div class="plan-price"><span class="price-value" id="price-clinica">R$ 169,90</span><span class="price-period">/mês</span></div>
-    <div class="price-total" id="total-clinica"></div>
+    <div class="plan-price"><span class="price-value" id="price-premium">R$ 199,90</span><span class="price-period">/mês</span></div>
+    <div class="price-total" id="total-premium"></div>
     <ul class="plan-features">
-      <li>Até 3 usuários</li>
-      <li>1 clínica</li>
-      <li>Inbox WhatsApp</li>
-      <li>Funil de leads</li>
-      <li>Agenda integrada</li>
-      <li>Automações</li>
+      <li>Tudo do Básico</li>
+      <li>🤖 3.000 mensagens de IA/mês</li>
+      <li>Multi-dentista na agenda</li>
+      <li>Follow-up e reativação de leads</li>
+      <li>Banco de casos (antes/depois)</li>
+      <li>1 número de WhatsApp</li>
     </ul>
-    <button class="btn-plan primary" id="btn-clinica" onclick="assinar('clinica')">Começar grátis</button>
+    <button class="btn-plan primary" id="btn-premium" onclick="assinar('premium')">Começar grátis</button>
   </div>
 
-  <div class="plan-card" id="card-rede">
-    <div class="plan-name">Rede</div>
-    <div class="plan-desc">Para redes de clínicas</div>
-    <div class="plan-price"><span class="price-value" id="price-rede">R$ 299,90</span><span class="price-period">/mês</span></div>
-    <div class="price-total" id="total-rede"></div>
+  <div class="plan-card" id="card-platinum">
+    <div class="plan-name">Platinum</div>
+    <div class="plan-desc">Para clínicas que querem o máximo</div>
+    <div class="plan-price"><span class="price-value" id="price-platinum">R$ 249,90</span><span class="price-period">/mês</span></div>
+    <div class="price-total" id="total-platinum"></div>
     <ul class="plan-features">
-      <li>Usuários ilimitados</li>
-      <li>Múltiplas clínicas</li>
-      <li>Inbox WhatsApp</li>
-      <li>Funil de leads</li>
-      <li>Agenda integrada</li>
-      <li>Automações</li>
+      <li>Tudo do Premium</li>
+      <li>🤖 5.000 mensagens de IA/mês</li>
+      <li>Multi-dentista ilimitado</li>
+      <li>Prioridade no suporte</li>
+      <li>Acesso antecipado a novidades</li>
+      <li>1 número de WhatsApp</li>
     </ul>
-    <button class="btn-plan secondary" id="btn-rede" onclick="assinar('rede')">Começar grátis</button>
+    <button class="btn-plan secondary" id="btn-platinum" onclick="assinar('platinum')">Começar grátis</button>
   </div>
 </div>
+
+<p style="text-align:center;color:#666;font-size:13px;margin:-20px 20px 40px;">📱 WhatsApp adicional: <strong style="color:#d4af37;">R$ 39,90/mês</strong> por número extra</p>
 
 <div class="faq">
   <h3>Dúvidas frequentes</h3>
   <details class="faq-item">
     <summary>Como funciona o período gratuito?</summary>
-    <p>Você tem 7 dias para testar o plano escolhido sem cobrança. Pode cancelar a qualquer momento antes do fim do período e não será cobrado nada.</p>
+    <p>Você tem 3 dias para testar o plano escolhido sem cobrança. Pode cancelar a qualquer momento antes do fim do período e não será cobrado nada.</p>
   </details>
   <details class="faq-item">
     <summary>Posso mudar de plano depois?</summary>
@@ -166,15 +168,15 @@ const { createClient } = supabase;
 const db = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const precos = {
-  solo:    { mensal: 119.90, semestral: 109.90, anual: 89.90 },
-  clinica: { mensal: 169.90, semestral: 139.90, anual: 99.90 },
-  rede:    { mensal: 299.90, semestral: 269.90, anual: 199.90 },
+  basico:   { mensal: 149.90, semestral: 127.42, anual: 112.43 },
+  premium:  { mensal: 199.90, semestral: 169.91, anual: 149.93 },
+  platinum: { mensal: 249.90, semestral: 212.41, anual: 187.43 },
 };
 
 const totais = {
-  solo:    { mensal: '', semestral: 'R$ 659,40 cobrado a cada 6 meses', anual: 'R$ 1.078,80 cobrado anualmente' },
-  clinica: { mensal: '', semestral: 'R$ 839,40 cobrado a cada 6 meses', anual: 'R$ 1.198,80 cobrado anualmente' },
-  rede:    { mensal: '', semestral: 'R$ 1.619,40 cobrado a cada 6 meses', anual: 'R$ 2.398,80 cobrado anualmente' },
+  basico:   { mensal: '', semestral: 'R$ 764,49 cobrado a cada 6 meses', anual: 'R$ 1.349,10 cobrado anualmente' },
+  premium:  { mensal: '', semestral: 'R$ 1.019,49 cobrado a cada 6 meses', anual: 'R$ 1.799,10 cobrado anualmente' },
+  platinum: { mensal: '', semestral: 'R$ 1.274,49 cobrado a cada 6 meses', anual: 'R$ 2.249,10 cobrado anualmente' },
 };
 
 let periodoAtual = 'mensal';
@@ -233,7 +235,7 @@ async function carregarAssinaturaAtual() {
 
 function marcarPlanoAtual(plano) {
   const p = (plano || '').toLowerCase();
-  ['solo','clinica','rede'].forEach(nome => {
+  ['basico','premium','platinum'].forEach(nome => {
     const card = document.getElementById('card-' + nome);
     const btn = document.getElementById('btn-' + nome);
     const old = card.querySelector('.current-plan-badge');
@@ -254,7 +256,7 @@ function setPeriodo(p) {
   document.querySelectorAll('.periodo-btn').forEach((btn, i) => {
     btn.classList.toggle('active', ['mensal','semestral','anual'][i] === p);
   });
-  ['solo','clinica','rede'].forEach(plano => {
+  ['basico','premium','platinum'].forEach(plano => {
     document.getElementById('price-' + plano).textContent = 'R$ ' + precos[plano][p].toFixed(2).replace('.',',');
     document.getElementById('total-' + plano).textContent = totais[plano][p];
   });
