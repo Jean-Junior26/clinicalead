@@ -65,6 +65,18 @@ async function tarefasCarregarDados() {
     });
   } catch (e) { console.error('[tarefas] carregar mensagens', e); TAREFAS.ultimaMsgPorTelefone = {}; }
 
+  // ── CONVERSAS DO BRIAN ESCALADAS pra equipe (bateu limite de mensagens) ──
+  // Quando o Brian atinge o limite e avisa "a equipe vai entrar em contato", a
+  // conversa é marcada escalado=true. Geramos uma tarefa pra alguém realmente atender.
+  TAREFAS.escaladas = [];
+  try {
+    const { data: esc } = await db.from('brian_conversa')
+      .select('phone, escalado, escalado_em')
+      .eq('clinic_id', clinic.id)
+      .eq('escalado', true);
+    TAREFAS.escaladas = esc || [];
+  } catch (e) { console.error('[tarefas] carregar escaladas', e); TAREFAS.escaladas = []; }
+
   // Orçamentos parados: sem nenhuma aprovação há 3+ dias
   try {
     const { data: orcsParados } = await db.from('orcamentos')
@@ -199,6 +211,36 @@ function tarefasGerar() {
         telefone: l.telefone || null,
       });
     });
+
+  // 🔴 3b. Conversas do Brian ESCALADAS pra equipe (bateu limite de mensagens)
+  // O Brian avisou o lead que "a equipe vai entrar em contato" — então alguém PRECISA
+  // entrar em contato. Tarefa urgente pra não deixar o lead no vácuo.
+  (TAREFAS.escaladas || []).forEach(conv => {
+    const sufixo = String(conv.phone || '').replace(/\D/g, '').slice(-8);
+    if (sufixo.length < 8) return;
+    // acha o lead correspondente (pra pegar o nome)
+    const lead = (STATE.leads || []).find(l => String(l.telefone || '').replace(/\D/g, '').slice(-8) === sufixo);
+    // se esse lead já agendou, não precisa de atendimento humano (já resolveu)
+    if (lead) {
+      const jaAgendou = (TAREFAS.consultas || []).some(c =>
+        c.lead_id === lead.id && ['agendado', 'confirmado', 'compareceu'].includes(c.status));
+      if (jaAgendou) return;
+    }
+    const nome = lead?.nome || 'Lead';
+    let tempo = '';
+    if (conv.escalado_em) {
+      const h = (agora - new Date(conv.escalado_em).getTime()) / 3600000;
+      tempo = h < 24 ? ` (há ${Math.max(1, Math.floor(h))}h)` : ` (há ${Math.floor(h / 24)} dia(s))`;
+    }
+    tarefas.push({
+      chave: `brian_escalou:${sufixo}`,
+      prio: 1, // urgente
+      icon: 'ti-headset',
+      titulo: `🆘 ${nome} precisa de atendimento humano`,
+      desc: `O Brian IA chegou no limite e avisou que a equipe entraria em contato${tempo}. Assuma essa conversa pra não perder o lead!`,
+      telefone: lead?.telefone || conv.phone || null,
+    });
+  });
 
   // 🟡 4. Recuperar faltas (últimos 7 dias)
   TAREFAS.consultas
@@ -452,6 +494,17 @@ async function tarefaConcluir(chave) {
     { clinic_id: clinic.id, tarefa_chave: chave, adiada_ate: null, resolvida_em: new Date().toISOString() },
     { onConflict: 'clinic_id,tarefa_chave' }
   );
+  // se for tarefa de conversa escalada do Brian, desmarca o escalado (não reaparece)
+  if (String(chave).startsWith('brian_escalou:')) {
+    try {
+      const sufixo = chave.split(':')[1];
+      const { data: convs } = await db.from('brian_conversa')
+        .select('phone').eq('clinic_id', clinic.id).ilike('phone', `%${sufixo}%`);
+      for (const c of (convs || [])) {
+        await db.from('brian_conversa').update({ escalado: false }).eq('clinic_id', clinic.id).eq('phone', c.phone);
+      }
+    } catch (e) { console.error('[tarefa] desescalar', e); }
+  }
   TAREFAS.resolvidas[chave] = { adiada_ate: null };
   tarefasGerar();
   tarefasRenderCard();
