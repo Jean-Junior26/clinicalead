@@ -2,7 +2,8 @@
 // CLINICALEAD — BRIAN: Dashboard de custo (ADMIN)
 // Mostra, por clínica, o consumo de tokens e o custo estimado em R$
 // (baseado na tabela brian_uso). Ajuda a medir o custo real e precificar.
-// Preços Claude Sonnet 4.6: US$3,00/milhão (entrada) e US$15,00/milhão (saída).
+// Preços Claude Haiku 4.5: US$1,00/milhão (entrada) e US$5,00/milhão (saída).
+// O Brian usa Haiku (não Sonnet) — modelo rápido e econômico.
 // O câmbio USD→BRL é ajustável no topo do arquivo.
 // Aparece como botão no painel "Brian — Liberações".
 // ============================================================
@@ -10,9 +11,9 @@
 (function () {
   'use strict';
 
-  // ── parâmetros de custo (ajuste conforme a realidade) ──
-  const USD_POR_MI_IN = 3.00;    // entrada: US$ por 1 milhão de tokens
-  const USD_POR_MI_OUT = 15.00;  // saída: US$ por 1 milhão de tokens
+  // ── parâmetros de custo (Haiku 4.5 — o modelo que o Brian usa de verdade) ──
+  const USD_POR_MI_IN = 1.00;    // entrada: US$ por 1 milhão de tokens (Haiku 4.5)
+  const USD_POR_MI_OUT = 5.00;   // saída: US$ por 1 milhão de tokens (Haiku 4.5)
   const USD_BRL = 5.40;          // câmbio dólar→real (ajuste quando quiser)
 
   function ehAdmin() {
@@ -94,8 +95,8 @@
         </div>
       </div>
       <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;">
-        Base: Sonnet 4.6 (US$ ${USD_POR_MI_IN.toFixed(2)}/mi entrada, US$ ${USD_POR_MI_OUT.toFixed(2)}/mi saída) · câmbio R$ ${USD_BRL.toFixed(2)}.
-        Edite os valores no topo do arquivo se mudar.
+        Base: Haiku 4.5 (US$ ${USD_POR_MI_IN.toFixed(2)}/mi entrada, US$ ${USD_POR_MI_OUT.toFixed(2)}/mi saída) · câmbio R$ ${USD_BRL.toFixed(2)}.
+        Com prompt caching ativo, o custo real de entrada é ainda menor.
       </div>
       <table style="width:100%;border-collapse:collapse;font-size:12px;">
         <thead>
