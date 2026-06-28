@@ -205,7 +205,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
   // ════════════════════════════════════════════════════════════
 
   // Acha o lead pelo telefone; se não existe, cria. Retorna o lead {id, nome} ou null.
-  async function brianAcharOuCriarLead(clinic_id, phone, nome) {
+  async function brianAcharOuCriarLead(clinic_id, phone, nome, origem) {
     try {
       const digitos = String(phone).replace(/\D/g, '');
       const sufixo = digitos.slice(-8);
@@ -237,7 +237,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
         clinic_id,
         nome: nomeLimpo || 'Lead WhatsApp',
         telefone: digitos,
-        origem: 'Brian IA',
+        origem: origem || 'Brian IA',
         status: 'novo',
         procedimento: 'Avaliação',
         created_at: new Date().toISOString(),
@@ -828,6 +828,17 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
           insertados.push(phone);
         }
         if (!fromMe && type === 'text') await processarConfirmacao(clinic_id, phone, content, instanceName);
+
+        // ── GARANTE LEAD PRA TODA MENSAGEM RECEBIDA (nenhum contato fica invisível) ──
+        // Se chega mensagem de um cliente e ainda não existe lead, cria agora — mesmo
+        // que o Brian esteja desligado. Assim toda conversa aparece no funil e gera
+        // tarefa de "aguardando resposta" se ninguém responder. Não duplica (a função
+        // procura antes de criar). Usa o pushName como nome provisório.
+        if (!fromMe) {
+          try {
+            await brianAcharOuCriarLead(clinic_id, phone, contact_name || null, 'WhatsApp');
+          } catch (e) { console.log('[LEAD-AUTO] erro ao garantir lead:', e.message); }
+        }
 
         // ── BRIAN 2.3.b — decide e, se aprovado + número de teste, RESPONDE ──
         if (!fromMe && type === 'text') {
