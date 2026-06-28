@@ -10,21 +10,31 @@
   function getDb() { return (typeof db !== 'undefined') ? db : (window.supabaseClient || window.sb || null); }
   function clinicAtual() { return (typeof currentClinic === 'function') ? currentClinic() : null; }
 
-  let DENT = { lista: [] };
+  let DENT = { lista: [], clinicId: null };
 
-  // carrega os dentistas da clínica
+  // carrega os dentistas da clínica ATUAL (sempre filtrando pela clínica certa)
   async function carregar() {
     const database = getDb(); const clinic = clinicAtual();
-    if (!database || !clinic) return;
+    if (!database || !clinic) { DENT.lista = []; DENT.clinicId = null; return; }
     try {
       const { data } = await database.from('dentistas').select('*').eq('clinic_id', clinic.id).eq('ativo', true).order('nome');
       DENT.lista = data || [];
-    } catch (e) { console.error('[dentistas] carregar', e); DENT.lista = []; }
+      DENT.clinicId = clinic.id; // marca de qual clínica é a lista
+    } catch (e) { console.error('[dentistas] carregar', e); DENT.lista = []; DENT.clinicId = null; }
   }
 
   // expõe pra outros fixes usarem (Fase 2)
+  // IMPORTANTE: só retorna a lista se for da clínica ATUAL (evita vazamento entre clínicas)
   window.DENT_carregar = carregar;
-  window.DENT_lista = () => DENT.lista;
+  window.DENT_lista = () => {
+    const clinic = clinicAtual();
+    // se a lista carregada não é da clínica atual, retorna vazio (e dispara recarga)
+    if (!clinic || DENT.clinicId !== clinic.id) {
+      carregar(); // recarrega pra clínica certa (assíncrono, próxima chamada já vem certa)
+      return [];
+    }
+    return DENT.lista;
+  };
 
   // ── abre o modal de gestão de dentistas ──
   window.openDentistas = async function () {
@@ -128,6 +138,20 @@
 
   // pré-carrega
   setTimeout(carregar, 1500);
+
+  // ── DETECTOR DE TROCA DE CLÍNICA (evita vazamento de dentistas entre clínicas) ──
+  // se a clínica atual mudar, recarrega a lista de dentistas pra clínica certa.
+  let ultimaClinicId = null;
+  setInterval(() => {
+    const clinic = clinicAtual();
+    const id = clinic ? clinic.id : null;
+    if (id !== ultimaClinicId) {
+      ultimaClinicId = id;
+      DENT.lista = [];      // limpa imediatamente (não mostra dentista da clínica anterior)
+      DENT.clinicId = null;
+      carregar();           // recarrega pra clínica nova
+    }
+  }, 1500);
 
   console.log('✅ dentistas-fix.js carregado (Fase 1)');
 })();
