@@ -165,15 +165,22 @@
     }
   };
 
-  // ── AVISO NO ADMIN: clínicas com saldo baixo ──
+  // ── PAINEL ADMIN: pedidos de recarga + clínicas com saldo baixo ──
   window.verSaldosAdmin = async function () {
     if (!ehAdminMaster()) return;
     const database = getDb();
-    let linhas = [];
+    let linhas = [], pedidos = [], mapaClinica = {};
     try {
-      const { data: saldos } = await database.from('brian_saldo').select('*');
       const { data: clinicas } = await database.from('clinicas').select('id, nome');
-      const mapaClinica = {}; (clinicas || []).forEach(c => mapaClinica[c.id] = c.nome);
+      (clinicas || []).forEach(c => mapaClinica[c.id] = c.nome);
+
+      // pedidos de recarga PENDENTES
+      const { data: peds } = await database.from('recargas_pedidos')
+        .select('*').eq('status', 'pendente').order('created_at', { ascending: false });
+      pedidos = (peds || []).map(p => ({ ...p, clinicaNome: mapaClinica[p.clinic_id] || p.clinic_id }));
+
+      // clínicas com saldo baixo
+      const { data: saldos } = await database.from('brian_saldo').select('*');
       (saldos || []).forEach(s => {
         const calc = calcSaldo(s);
         if (calc && calc.total > 0 && calc.pctUsado >= ALERTA_AMARELO) {
@@ -189,7 +196,23 @@
     modal.id = 'modalSaldosAdmin';
     modal.className = 'modal-overlay';
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px;';
-    const corpo = linhas.length
+
+    // SEÇÃO 1: pedidos de recarga pendentes (com botão Liberar)
+    const corpoPedidos = pedidos.length
+      ? pedidos.map(p => {
+          const data = new Date(p.created_at).toLocaleDateString('pt-BR');
+          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:12px;border-radius:9px;background:var(--bg-base,#0A0A0B);margin-bottom:8px;border-left:3px solid #6FBF8E;">
+            <div>
+              <b>${p.clinicaNome}</b>
+              <div style="font-size:12px;color:var(--text-muted,#888);">Pacote ${p.pacote} · ${(p.msgs||0).toLocaleString('pt-BR')} msgs · R$ ${Number(p.valor).toFixed(2).replace('.', ',')} · ${data}</div>
+            </div>
+            <button onclick="liberarRecarga('${p.id}','${p.clinic_id}',${p.msgs})" style="padding:7px 14px;border-radius:8px;border:none;background:#6FBF8E;color:#0A0A0B;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap;">✓ Liberar</button>
+          </div>`;
+        }).join('')
+      : '<p style="text-align:center;color:var(--text-muted,#888);padding:14px;font-size:13px;">Nenhum pedido de recarga pendente.</p>';
+
+    // SEÇÃO 2: clínicas com saldo baixo
+    const corpoSaldos = linhas.length
       ? linhas.map(l => {
           const verm = l.pctUsado >= ALERTA_VERMELHO;
           return `<div style="display:flex;justify-content:space-between;align-items:center;padding:12px;border-radius:9px;background:var(--bg-base,#0A0A0B);margin-bottom:8px;border-left:3px solid ${verm ? '#C0624A' : '#C9A84C'};">
@@ -197,17 +220,53 @@
             <div style="font-weight:800;color:${verm ? '#C0624A' : '#C9A84C'};">${l.pctUsado}%</div>
           </div>`;
         }).join('')
-      : '<p style="text-align:center;color:var(--text-muted,#888);padding:20px;">✅ Nenhuma clínica com saldo baixo. Tudo tranquilo!</p>';
+      : '<p style="text-align:center;color:var(--text-muted,#888);padding:14px;font-size:13px;">✅ Nenhuma clínica com saldo baixo.</p>';
+
     modal.innerHTML = `
-      <div style="background:var(--bg-surface,#141414);border:1px solid var(--gold-border,#333);border-radius:16px;padding:26px;max-width:520px;width:100%;max-height:90vh;overflow:auto;">
+      <div style="background:var(--bg-surface,#141414);border:1px solid var(--gold-border,#333);border-radius:16px;padding:26px;max-width:560px;width:100%;max-height:90vh;overflow:auto;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
-          <h2 style="margin:0;font-size:19px;">⚠️ Clínicas com saldo baixo</h2>
+          <h2 style="margin:0;font-size:19px;">💰 Saldos & Recargas do Brian</h2>
           <button onclick="document.getElementById('modalSaldosAdmin').remove()" style="background:none;border:none;color:var(--text-muted,#888);font-size:24px;cursor:pointer;">×</button>
         </div>
-        ${corpo}
+        <div style="font-size:14px;font-weight:700;color:#6FBF8E;margin-bottom:10px;">⚡ Pedidos de recarga pendentes${pedidos.length ? ` (${pedidos.length})` : ''}</div>
+        ${corpoPedidos}
+        <div style="font-size:14px;font-weight:700;color:var(--gold,#C9A84C);margin:20px 0 10px;">⚠️ Clínicas com saldo baixo</div>
+        ${corpoSaldos}
       </div>`;
     document.body.appendChild(modal);
     modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+  };
+
+  // libera a recarga: soma as msgs no extra_comprado da clínica + marca pedido como liberado
+  window.liberarRecarga = async function (pedidoId, clinicId, msgs) {
+    if (!ehAdminMaster()) return;
+    if (!confirm(`Confirmar liberação de ${Number(msgs).toLocaleString('pt-BR')} mensagens para esta clínica?`)) return;
+    const database = getDb();
+    try {
+      // 1) pega o saldo atual da clínica
+      const { data: s } = await database.from('brian_saldo')
+        .select('extra_comprado').eq('clinic_id', clinicId).maybeSingle();
+      const extraAtual = (s && s.extra_comprado) ? s.extra_comprado : 0;
+      const novoExtra = extraAtual + Number(msgs);
+
+      // 2) atualiza o extra_comprado (cria a linha se não existir)
+      if (s) {
+        await database.from('brian_saldo').update({ extra_comprado: novoExtra }).eq('clinic_id', clinicId);
+      } else {
+        await database.from('brian_saldo').insert({ clinic_id: clinicId, extra_comprado: novoExtra });
+      }
+
+      // 3) marca o pedido como liberado
+      await database.from('recargas_pedidos')
+        .update({ status: 'liberado', liberado_em: new Date().toISOString() })
+        .eq('id', pedidoId);
+
+      if (typeof toast === 'function') toast('Recarga liberada! Saldo adicionado. ✓', 'success');
+      verSaldosAdmin(); // recarrega o painel
+    } catch (e) {
+      console.error('[liberar-recarga]', e);
+      if (typeof toast === 'function') toast('Erro ao liberar recarga', 'error');
+    }
   };
 
   // injeta botão de "saldos" no menu (só admin)
