@@ -432,31 +432,22 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
     } catch (e) { console.log('[BRIAN-CONTADOR] erro:', e.message); return 0; }
   }
 
-  // Escala a conversa pra equipe: marca escalado + cria tarefa (se houver tabela de tarefas).
+  // Escala a conversa pra equipe: marca escalado=true na brian_conversa.
+  // A tarefa pro dashboard é GERADA dinamicamente pelo tarefas-fix.js a partir
+  // desse flag (não escrevemos em tarefas_resolvidas, que é só controle de resolvidas).
   async function brianEscalar(clinic_id, phone, nomeLead) {
     try {
       const sufixo = String(phone).replace(/\D/g, '').slice(-8);
-      // marca a conversa como escalada
+      // marca a conversa como escalada (+ registra quando, pra ordenar a tarefa)
       const r = await fetch(`${SUPABASE_URL}/rest/v1/brian_conversa?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixo}&select=phone&limit=1`, { headers: sbHeaders });
       const arr = r.ok ? await r.json() : [];
       if (arr[0]) {
         await fetch(`${SUPABASE_URL}/rest/v1/brian_conversa?clinic_id=eq.${clinic_id}&phone=eq.${encodeURIComponent(arr[0].phone)}`, {
           method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
-          body: JSON.stringify({ escalado: true }),
+          body: JSON.stringify({ escalado: true, escalado_em: new Date().toISOString() }),
         });
       }
-      // tenta criar uma tarefa pra equipe (best-effort; se a tabela não existir, ignora)
-      try {
-        await fetch(`${SUPABASE_URL}/rest/v1/tarefas_resolvidas`, {
-          method: 'POST', headers: { ...sbHeaders, Prefer: 'return=minimal' },
-          body: JSON.stringify({
-            clinic_id,
-            tarefa_chave: `brian_escalou:${sufixo}:${new Date().toISOString().split('T')[0]}`,
-            resolvida_em: null, // null = tarefa pendente
-          }),
-        });
-      } catch (e) { /* sem tabela de tarefas: ignora */ }
-      console.log(`[BRIAN-ESCALOU] 🆘 conversa ${phone} escalada pra equipe`);
+      console.log(`[BRIAN-ESCALOU] 🆘 conversa ${phone} escalada pra equipe (tarefa gerada no dashboard)`);
     } catch (e) { console.log('[BRIAN-ESCALAR] erro:', e.message); }
   }
 
