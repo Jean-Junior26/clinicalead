@@ -89,16 +89,27 @@
 
     // ── desconectar um número EXTRA (encerra sessão, mantém o cadastro pra reconectar) ──
     window.desconectarNumeroExtra = async function (instId) {
-      const inst = (window.MWA && MWA.instancias) ? MWA.instancias.find(i => i.id === instId) : null;
+      const database = getDb();
+      // busca o número direto na tabela 'instancias' (fonte real), não só no cache MWA
+      let inst = (window.MWA && MWA.instancias) ? MWA.instancias.find(i => String(i.id) === String(instId)) : null;
+      if (!inst) {
+        try {
+          const { data } = await database.from('instancias').select('*').eq('id', instId).maybeSingle();
+          inst = data;
+        } catch (e) {}
+      }
       if (!inst) { if (typeof toast === 'function') toast('Número não encontrado', 'error'); return; }
       if (!confirm(`Desconectar o número "${inst.nome_exibicao}"?\n\n⚠️ O Inbox e o atendimento deste número param até reconectar. (O cadastro é mantido — você reconecta quando quiser.)`)) return;
       if (typeof toast === 'function') toast('Desconectando…');
       try {
+        // encerra a sessão no Evolution (mantém a instância pra reconectar)
         if (typeof evoRequest === 'function') {
           await evoRequest('DELETE', `/instance/logout/${inst.instance_name}`).catch(() => {});
         }
+        // marca como não conectado no banco (pra o painel mostrar "Conectar")
+        await database.from('instancias').update({ conectado: false }).eq('id', instId);
         if (typeof toast === 'function') toast('Número desconectado. Clique em Conectar pra gerar novo QR.', 'success');
-        if (typeof carregarNumeros === 'function') carregarNumeros();
+        if (typeof carregarNumeros === 'function') await carregarNumeros();
       } catch (e) {
         console.error('[desconectar-extra]', e);
         if (typeof toast === 'function') toast('Erro ao desconectar', 'error');
