@@ -74,7 +74,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
 
       // ── Trava 8: limite de mensagens por conversa (anti-abuso / protege saldo) ──
       // Brian responde no máximo LIMITE_MSGS por conversa por dia. Reseta a cada 24h.
-      const LIMITE_MSGS = 10;
+      const LIMITE_MSGS = 12;
       const hojeBRT = new Date(Date.now() - 3 * 3600 * 1000).toISOString().split('T')[0];
       if (conv) {
         // se o contador é de hoje e já bateu o limite → não responde (escala)
@@ -1020,7 +1020,7 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
                     // incrementa o contador de mensagens da conversa
                     const totalDia = await brianIncrementarContador(clinic_id, phone);
                     // se ESTA resposta atingiu o limite, escala pra equipe (avisa + cria tarefa)
-                    const LIMITE = 10;
+                    const LIMITE = 12;
                     if (totalDia >= LIMITE) {
                       const nomeLead = (campoLead && campoLead.nome) || (campoAgendar && campoAgendar.nome) || '';
                       const primeiro = String(nomeLead).split(' ')[0] || '';
