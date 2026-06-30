@@ -35,6 +35,19 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       const sufixo = digitos.slice(-8);
       if (sufixo.length < 8) return motivo(false, 'telefone inválido');
 
+      // ── CONTATO PROTEGIDO (família/amigo) — Brian NUNCA responde ──
+      try {
+        const protR = await fetch(
+          `${SUPABASE_URL}/rest/v1/contatos_protegidos?clinic_id=eq.${clinic_id}&select=phone`,
+          { headers: sbHeaders }
+        );
+        if (protR.ok) {
+          const prot = await protR.json();
+          const protegido = (prot || []).some(p => String(p.phone).replace(/\D/g, '').slice(-8) === sufixo);
+          if (protegido) return motivo(false, 'contato protegido (pessoal) — Brian não responde');
+        }
+      } catch (e) { /* se falhar, segue o fluxo normal */ }
+
       // ── Anti-loop EXTRA: não responde números que são instâncias conectadas ──
       // (se o número que mandou for outra instância da própria clínica/sistema, ignora —
       //  senão dois números conectados ficariam se respondendo em loop infinito).
