@@ -40,9 +40,21 @@
     const hora = (consulta.hora || '').slice(0, 5);
     const nome = (lead?.nome || 'Paciente').toUpperCase();
     const proc = consulta.observacoes || consulta.procedimento || 'Consulta';
+    const tel = (lead?.telefone || '').replace(/\D/g, '');
+    const leadId = consulta.lead_id || (lead?.id) || '';
+    const cid = consulta.id;
     const agPor = consulta.agendado_por
       ? `<div class="sched-agendado-por" style="font-size:11px;color:var(--text-muted);margin-top:2px;"><i class="ti ti-user" style="font-size:11px;"></i> Agendado por: <strong style="color:var(--text-secondary);">${consulta.agendado_por}</strong></div>`
       : '';
+
+    // botões-base, iguais aos que a base coloca nos itens normais
+    // (montados com os dados REAIS da consulta/lead injetada)
+    const btnInbox = tel ? `<button class="btn btn-sm" onclick="event.stopPropagation();tarefaWhats('${tel}')" title="Abrir conversa no Inbox"><i class="ti ti-message-circle" style="color:#25D366;"></i></button>` : '';
+    const btnCadastro = leadId ? `<button class="btn btn-sm" onclick="event.stopPropagation();abrirCadastroNovaAba('${leadId}')" title="Abrir cadastro em nova aba"><i class="ti ti-external-link"></i></button>` : '';
+    const btnConfirmar = `<button class="btn btn-sm" onclick="event.stopPropagation();sendWAConsulta('${cid}')"><i class="ti ti-brand-whatsapp"></i> Confirmar</button>`;
+    const btnCompareceu = `<button class="btn btn-sm" onclick="event.stopPropagation();marcarCompareceu('${cid}')"><i class="ti ti-check"></i> Compareceu</button>`;
+    const btnCancelar = `<button class="btn btn-sm btn-danger" onclick="event.stopPropagation();cancelarConsulta('${cid}')"><i class="ti ti-x"></i></button>`;
+
     return `
       <div class="sched-time" style="color:var(--gold);">${hora}</div>
       <div class="sched-line-col"><div class="sched-dot" style="background:var(--green);"></div></div>
@@ -50,7 +62,9 @@
         <div class="sched-name">${nome}</div>
         <div class="sched-proc">${proc}</div>
         ${agPor}
-        <div class="sched-acts" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"></div>
+        <div class="sched-acts" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center;">
+          ${btnInbox}${btnCadastro}${btnConfirmar}${btnCompareceu}${btnCancelar}
+        </div>
       </div>`;
   }
 
