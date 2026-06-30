@@ -656,21 +656,28 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       const digitos = String(phone).replace(/\D/g, '');
       const sufixo = digitos.slice(-8);
       if (sufixo.length < 8) return;
+      // Busca TODOS os leads com esse telefone (pode haver DUPLICADOS com o
+      // telefone escrito em formatos diferentes — ex: "(17) 99217-1699" e
+      // "5517992171699"). Procurar em todos evita a confirmação falhar quando
+      // a consulta está vinculada a um lead duplicado.
       const leadResp = await fetch(
-        `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinic_id}&telefone=ilike.*${sufixo}&select=id,nome&limit=1`,
+        `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinic_id}&telefone=ilike.*${sufixo}&select=id,nome`,
         { headers: sbHeaders }
       );
       if (!leadResp.ok) return;
       const leadsEnc = await leadResp.json();
+      if (!leadsEnc.length) return; // número não é lead conhecido
+      const leadIds = leadsEnc.map(l => l.id);
+      // usa o primeiro como "lead principal" pro nome na mensagem
       const lead = leadsEnc[0];
-      if (!lead || !lead.id) return; // número não é lead conhecido: não há consulta pra confirmar
       const hojeBRT = new Date(Date.now() - 3 * 3600 * 1000).toISOString().split('T')[0];
       const amanhaBRT = new Date(Date.now() - 3 * 3600 * 1000 + 24 * 3600 * 1000).toISOString().split('T')[0];
-      // Busca as consultas próximas (hoje/amanhã) do lead. Traz várias
-      // pra escolher a MAIS RELEVANTE (a que a pessoa está respondendo),
-      // não simplesmente a mais antiga.
+      // Busca as consultas próximas (hoje/amanhã) de TODOS os leads com esse
+      // telefone (cobre o caso de lead duplicado). Traz várias pra escolher a
+      // MAIS RELEVANTE (a que a pessoa está respondendo).
+      const leadIdsFiltro = leadIds.map(id => `"${id}"`).join(',');
       const consResp = await fetch(
-        `${SUPABASE_URL}/rest/v1/consultas?lead_id=eq.${lead.id}&clinic_id=eq.${clinic_id}&status=in.(agendado,confirmado)&data=in.(${hojeBRT},${amanhaBRT})&select=id,data,hora,lembrete_24h,status&limit=10`,
+        `${SUPABASE_URL}/rest/v1/consultas?lead_id=in.(${leadIdsFiltro})&clinic_id=eq.${clinic_id}&status=in.(agendado,confirmado)&data=in.(${hojeBRT},${amanhaBRT})&select=id,data,hora,lembrete_24h,status,lead_id&limit=10`,
         { headers: sbHeaders }
       );
       if (!consResp.ok) return;
