@@ -24,14 +24,20 @@ async function desconectarWhatsAppClinica(clinicId) {
 
   toast('Desconectando...');
 
-  // 1. Desloga a sessão no Evolution (se falhar, segue em frente)
+  // 1. Desloga a sessão no Evolution — COM TIMEOUT.
+  //    Se o Evolution não responder rápido, o await ficava PENDURADO
+  //    e a função nunca chegava a zerar o banco (por isso continuava
+  //    aparecendo "conectado"). Agora: espera no máximo 6s e segue.
   try {
-    await evoRequest('DELETE', `/instance/logout/${clinic.whatsapp_instance}`);
+    await Promise.race([
+      evoRequest('DELETE', `/instance/logout/${clinic.whatsapp_instance}`),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout logout Evolution')), 6000)),
+    ]);
   } catch (e) {
-    console.warn('[whatsapp-fix] Logout no Evolution falhou (seguindo):', e.message);
+    console.warn('[whatsapp-fix] Logout no Evolution falhou/timeout (seguindo):', e.message);
   }
 
-  // 2. Remove o vínculo no banco
+  // 2. Remove o vínculo no banco (o que REALMENTE desconecta no CRM)
   const { error } = await db
     .from('clinicas')
     .update({ whatsapp_instance: null })
@@ -72,14 +78,22 @@ async function excluirInstanciaClinica(clinicId) {
 
   toast('Excluindo instância...');
 
-  // 1. Logout (boa prática antes de deletar; ignora erro)
-  try { await evoRequest('DELETE', `/instance/logout/${inst}`); } catch (e) {}
-
-  // 2. Apaga a instância do Evolution
+  // 1. Logout (boa prática antes de deletar; ignora erro/timeout)
   try {
-    await evoRequest('DELETE', `/instance/delete/${inst}`);
+    await Promise.race([
+      evoRequest('DELETE', `/instance/logout/${inst}`),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 6000)),
+    ]);
+  } catch (e) {}
+
+  // 2. Apaga a instância do Evolution — COM TIMEOUT (não trava a UI)
+  try {
+    await Promise.race([
+      evoRequest('DELETE', `/instance/delete/${inst}`),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout delete')), 8000)),
+    ]);
   } catch (e) {
-    toast('Erro ao excluir no Evolution: ' + (e.message || 'verifique a conexão'), 'error');
+    toast('Erro ou timeout ao excluir no Evolution: ' + (e.message || 'verifique a conexão'), 'error');
     return;
   }
 
