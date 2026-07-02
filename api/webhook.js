@@ -379,14 +379,24 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       }
       // trava ANTI-DUPLO-AGENDAMENTO: já tem consulta nesse dia+hora (não cancelada)?
       // Se há dentista, a trava é POR DENTISTA (mesmo horário livre pra dentistas diferentes).
-      let ocupUrl = `${SUPABASE_URL}/rest/v1/consultas?clinic_id=eq.${clinic_id}&data=eq.${data}&hora=eq.${hora}&status=neq.cancelado&select=id,dentista_id`;
+      let ocupUrl = `${SUPABASE_URL}/rest/v1/consultas?clinic_id=eq.${clinic_id}&data=eq.${data}&hora=eq.${hora}&status=neq.cancelado&select=id,dentista_id,lead_id`;
       if (dentista_id) {
         // só conflita se for o MESMO dentista nesse horário
         ocupUrl += `&dentista_id=eq.${dentista_id}`;
       }
       const ocupR = await fetch(ocupUrl, { headers: sbHeaders });
       const ocupA = ocupR.ok ? await ocupR.json() : [];
-      if (ocupA.length) return { ok: false, motivo: dentista_id ? 'dentista já ocupado nesse horário' : 'horário já ocupado' };
+      // Se o horário está ocupado, checa DE QUEM é. Se for a consulta do
+      // PRÓPRIO lead (o Brian processou 2x a mesma intenção — mensagens
+      // coladas), NÃO é conflito: ele já agendou pra esse paciente. Trata
+      // como sucesso (idempotente) em vez de dizer "ocupado" (bug do fantasma).
+      if (ocupA.length) {
+        const consultaDoProprioLead = ocupA.find(c => c.lead_id === lead_id);
+        if (consultaDoProprioLead) {
+          return { ok: true, jaAgendado: true, motivo: 'já agendado para este paciente' };
+        }
+        return { ok: false, motivo: dentista_id ? 'dentista já ocupado nesse horário' : 'horário já ocupado' };
+      }
 
       // REMARCAÇÃO INTELIGENTE: se o paciente JÁ tem consulta ativa futura
       // (agendado/confirmado), isso é uma REMARCAÇÃO — cancela a(s) anterior(es)
@@ -1092,7 +1102,12 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
                       // resolve o dentista pelo direcionamento (nome vindo no marcador) ou padrão da clínica
                       const dentistaId = await brianResolverDentista(clinic_id, campoAgendar.dentista || '');
                       const r = await brianCriarConsulta(clinic_id, lead.id, campoAgendar.data, campoAgendar.hora, dentistaId);
-                      if (r.ok) {
+                      if (r.ok && r.jaAgendado) {
+                        // o Brian processou a mesma intenção 2x (mensagens coladas).
+                        // Já estava agendado pra esse paciente nesse horário — não
+                        // cria de novo nem reenvia confirmação (evita o "fantasma").
+                        console.log(`[BRIAN-AGENDAR] ↩️ já estava agendado (${campoAgendar.data} ${campoAgendar.hora}) — ignora duplicata`);
+                      } else if (r.ok) {
                         console.log(`[BRIAN-AGENDAR] ✅ CONSULTA CRIADA | ${campoAgendar.data} ${campoAgendar.hora} | lead ${lead.id}${dentistaId ? ' | dentista ' + dentistaId : ''}`);
                         await brianEnviarConfirmacao(instanceName, clinic_id, phone, lead.nome || campoAgendar.nome, campoAgendar.data, campoAgendar.hora);
                       } else {
