@@ -388,6 +388,36 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       const ocupA = ocupR.ok ? await ocupR.json() : [];
       if (ocupA.length) return { ok: false, motivo: dentista_id ? 'dentista já ocupado nesse horário' : 'horário já ocupado' };
 
+      // REMARCAÇÃO INTELIGENTE: se o paciente JÁ tem consulta ativa futura
+      // (agendado/confirmado), isso é uma REMARCAÇÃO — cancela a(s) anterior(es)
+      // antes de criar a nova, pra não ficar com 2 horários na agenda.
+      // (o Brian às vezes oferece um horário, o paciente troca, e sem isso
+      //  ele criava uma 2ª consulta em vez de remarcar.)
+      try {
+        const hojeRemarca = new Date(Date.now() - 3 * 3600 * 1000).toISOString().split('T')[0];
+        const antigasR = await fetch(
+          `${SUPABASE_URL}/rest/v1/consultas?clinic_id=eq.${clinic_id}&lead_id=eq.${lead_id}&status=in.(agendado,confirmado)&data=gte.${hojeRemarca}&select=id,data,hora`,
+          { headers: sbHeaders }
+        );
+        const antigas = antigasR.ok ? await antigasR.json() : [];
+        // cancela todas as consultas futuras ativas que NÃO são exatamente a que
+        // está sendo criada agora (mesma data+hora seria duplicata, já barrada acima)
+        for (const ant of antigas) {
+          if (ant.data === data && ant.hora === hora) continue; // é a mesma, ignora
+          await fetch(`${SUPABASE_URL}/rest/v1/consultas?id=eq.${ant.id}`, {
+            method: 'PATCH',
+            headers: { ...sbHeaders, Prefer: 'return=minimal' },
+            body: JSON.stringify({
+              status: 'cancelado',
+              observacoes: `Remarcado pelo Brian IA (era ${ant.data} ${ant.hora})`,
+            }),
+          });
+          console.log(`[BRIAN-REMARCAR] cancelou consulta antiga ${ant.id} (${ant.data} ${ant.hora}) → nova ${data} ${hora}`);
+        }
+      } catch (eRemarca) {
+        console.error('[BRIAN-REMARCAR] erro ao cancelar antiga (segue criando a nova):', eRemarca.message);
+      }
+
       // cria a consulta (ocupa o slot na hora)
       const nova = {
         clinic_id, lead_id, data, hora,
