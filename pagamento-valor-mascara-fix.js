@@ -1,73 +1,64 @@
 // ============================================================
-// CLINICALEAD — FIX: campo de VALOR do pagamento com máscara
-// de TELEFONE (bug do data-mask-tel no campo errado).
+// CLINICALEAD — FIX v2: campo de VALOR do pagamento com máscara
+// de TELEFONE (bug do data-mask-tel + listener de telefone).
 //
-// O campo pagValor-XXXX (valor do pagamento no orçamento) foi
-// marcado por engano com data-mask-tel="1", fazendo a máscara
-// global de telefone formatar o valor como "(34) 99946-5229".
+// PROBLEMA: o campo pagValor-XXXX é recriado com data-mask-tel="1",
+// e a máscara global de telefone (função 'formatar') roda no input,
+// transformando "500" em "(50) 0". O campo é re-renderizado, então
+// corrigir "depois" perde a corrida.
 //
-// Este fix: remove o data-mask-tel dos campos de VALOR e aplica
-// neles uma máscara de MOEDA correta (só números, com vírgula
-// decimal). Mantém a máscara de telefone nos campos certos.
+// SOLUÇÃO v2: intercepta o input no MODO CAPTURA (roda ANTES de
+// todos os outros listeners) e, se o campo for de VALOR, formata
+// como moeda e IMPEDE a máscara de telefone de rodar
+// (stopImmediatePropagation). Assim vence a corrida sempre.
 // Carregar por último no index.
 // ============================================================
 (function () {
   'use strict';
 
-  // formata como moeda: mantém dígitos e uma vírgula/ponto decimal
-  function formatarValor(v) {
-    // tira tudo que não é dígito, vírgula ou ponto
-    let s = String(v).replace(/[^\d.,]/g, '');
-    // troca ponto por vírgula (padrão BR), mantém só a última como decimal
-    s = s.replace(/\./g, ',');
+  // é um campo de valor de pagamento?
+  function ehCampoValor(el) {
+    if (!el || el.tagName !== 'INPUT') return false;
+    const id = el.id || '';
+    const ph = (el.placeholder || '').toLowerCase();
+    return id.startsWith('pagValor-') || /valor|r\$|preç|prec/.test(ph);
+  }
+
+  // formata como moeda BR: dígitos + vírgula decimal (máx 2 casas)
+  function formatarMoeda(v) {
+    let s = String(v).replace(/[^\d,]/g, '');       // só dígitos e vírgula
     const partes = s.split(',');
-    if (partes.length > 2) {
-      // junta tudo e deixa só a última vírgula como decimal
-      s = partes.slice(0, -1).join('') + ',' + partes[partes.length - 1];
-    }
-    // limita a 2 casas decimais
-    const m = s.match(/^(\d*)(,(\d{0,2}))?/);
+    if (partes.length > 2) s = partes[0] + ',' + partes.slice(1).join('');
+    const m = s.match(/^(\d*)(,\d{0,2})?/);
     return m ? m[0] : s;
   }
 
-  // desmancha a máscara de telefone e instala a de moeda num campo de valor
-  function corrigirCampoValor(campo) {
-    if (!campo || campo.__valorCorrigido) return;
-    // remove a marcação que ativava a máscara de telefone
-    campo.removeAttribute('data-mask-tel');
-    // se o valor atual veio formatado como telefone, limpa
-    if (/[()\-\s]/.test(campo.value) && campo.value.replace(/\D/g, '').length >= 8) {
-      campo.value = '';
-    }
-    // clona o campo pra remover TODOS os listeners antigos (a máscara de telefone)
-    const novo = campo.cloneNode(true);
-    campo.parentNode.replaceChild(novo, campo);
-    // instala a máscara de moeda correta
-    novo.addEventListener('input', function () {
-      const pos = novo.selectionStart;
-      novo.value = formatarValor(novo.value);
-    });
-    novo.setAttribute('inputmode', 'decimal');
-    novo.__valorCorrigido = true;
-  }
+  // INTERCEPTA no modo captura (true) — roda ANTES da máscara de telefone.
+  // Se for campo de valor: formata como moeda e BLOQUEIA os outros
+  // listeners de input (a máscara de telefone não chega a rodar).
+  document.addEventListener('input', function (e) {
+    const el = e.target;
+    if (!ehCampoValor(el)) return;
+    // remove a marcação de telefone (defensivo)
+    if (el.hasAttribute('data-mask-tel')) el.removeAttribute('data-mask-tel');
+    // formata como moeda
+    const novo = formatarMoeda(el.value);
+    if (el.value !== novo) el.value = novo;
+    // impede a máscara de telefone (e qualquer outro listener) de rodar
+    e.stopImmediatePropagation();
+  }, true); // <-- captura: essencial pra rodar ANTES da máscara
 
-  // varre os campos de valor de pagamento e corrige
-  function varrer() {
-    document.querySelectorAll('[id^="pagValor-"]').forEach(corrigirCampoValor);
-    // outros campos de valor que possam ter o mesmo problema
-    document.querySelectorAll('input[data-mask-tel]').forEach(campo => {
-      const ctx = (campo.id + ' ' + (campo.placeholder || '')).toLowerCase();
-      if (/valor|preco|preço|r\$|pag/.test(ctx)) corrigirCampoValor(campo);
+  // limpa valores que JÁ vieram formatados como telefone (ao abrir o form)
+  function limparValoresTelefone() {
+    document.querySelectorAll('[id^="pagValor-"]').forEach(el => {
+      if (el.hasAttribute('data-mask-tel')) el.removeAttribute('data-mask-tel');
+      // se tem parênteses/traço (cara de telefone), limpa
+      if (/[()\-]/.test(el.value)) el.value = '';
+      el.setAttribute('inputmode', 'decimal');
     });
   }
+  limparValoresTelefone();
+  setInterval(limparValoresTelefone, 1000);
 
-  // o form de pagamento abre dinamicamente → fica observando
-  varrer();
-  setInterval(varrer, 800);
-
-  // também observa mudanças no DOM (quando abre o form)
-  const obs = new MutationObserver(() => varrer());
-  obs.observe(document.body, { childList: true, subtree: true });
-
-  console.log('✅ pagamento-valor-mascara-fix.js carregado — campo de valor sem máscara de telefone');
+  console.log('✅ pagamento-valor-mascara-fix.js v2 carregado — campo de valor protegido da máscara de telefone');
 })();
