@@ -737,6 +737,36 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
         consulta = consultasEnc[0];
       }
 
+      // ── TRAVA ANTI-CONSULTA-VENCIDA (o bug da Elaide) ──
+      // Não trata como confirmação/cancelamento se a consulta escolhida JÁ PASSOU.
+      // Ex: consulta hoje 09:30; a paciente responde "ok" de tarde numa conversa
+      // qualquer → antes, o CRM confirmava uma consulta vencida (constrangedor).
+      // Só confirma consulta cujo horário ainda está no FUTURO (com folga de 15min
+      // pra cobrir quem confirma em cima da hora). Se já passou, pula a consulta
+      // vencida e tenta achar uma FUTURA na lista; se não houver, ignora.
+      function dataHoraNoFuturo(c) {
+        if (!c || !c.data) return false;
+        const horaC = (c.hora || '00:00').slice(0, 5);
+        // monta o Date da consulta em horário de Brasília (UTC-3)
+        const dtConsulta = new Date(`${c.data}T${horaC}:00-03:00`);
+        if (isNaN(dtConsulta)) return false;
+        // válida se falta pra consulta (ou passou no máx. 15 min — tolerância)
+        return dtConsulta.getTime() > (Date.now() - 15 * 60 * 1000);
+      }
+      if (!dataHoraNoFuturo(consulta)) {
+        // a mais relevante já venceu — procura alguma FUTURA na lista
+        const futuras = consultasEnc
+          .filter(dataHoraNoFuturo)
+          .sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora));
+        if (futuras.length) {
+          consulta = futuras[0];
+        } else {
+          // nenhuma consulta futura pra confirmar → é só um "ok" de conversa, ignora
+          console.log('[webhook] confirmação ignorada: nenhuma consulta futura (evita confirmar vencida)');
+          return;
+        }
+      }
+
       // ── JANELA DE CONTEXTO (anti-conversa-aleatória) ──
       // Só trata como resposta a lembrete se:
       //  (1) a mensagem é CURTA (resposta objetiva, não conversa), E
@@ -783,6 +813,15 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       const horaFmt = (consulta.hora || '').slice(0, 5);
       const primeiroNome = ((lead && lead.nome) || '').split(' ')[0] || '';
       if (ehConfirmarFinal) {
+        // ── REGRA ANTI-RECONFIRMAÇÃO ──
+        // Se a consulta JÁ está com status 'confirmado', não confirma de novo
+        // nem reenvia a mensagem. Ex: paciente confirmou ontem; hoje manda "ok"
+        // numa conversa qualquer → não deve receber "consulta confirmada!" de novo.
+        // Só processa a confirmação se a consulta ainda está 'agendado' (aguardando).
+        if (consulta.status === 'confirmado') {
+          console.log('[webhook] confirmação ignorada: consulta já estava confirmada (não reenvia)');
+          return;
+        }
         await fetch(`${SUPABASE_URL}/rest/v1/consultas?id=eq.${consulta.id}`, {
           method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
           body: JSON.stringify({ status: 'confirmado' }),
