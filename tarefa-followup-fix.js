@@ -1,8 +1,8 @@
 // ============================================================
 // CLINICALEAD — Tarefa de follow-up pelo inbox
-// Botão "Tarefa" no topo da conversa → cria uma tarefa manual
-// (data + hora + descrição) que aparece no dashboard SÓ quando
-// chega a data/hora agendada (aparecer_em).
+// Botão "Tarefa" na barra de digitação da conversa → cria uma
+// tarefa manual (data + hora + descrição) que aparece no
+// dashboard SÓ quando chega a data/hora agendada (aparecer_em).
 //
 // Ex: "entra em contato daqui 1 mês" → cria tarefa com
 // aparecer_em = hoje+30d → só aparece no dashboard nessa data.
@@ -17,24 +17,31 @@
 
   // ── 1) Injeta o botão "Tarefa" na barra de digitação ──────────
   // (o header do chat fica ATRÁS da topbar — os primeiros ~62px são
-  //  cobertos pela barra superior. Por isso colocamos o botão na barra
-  //  de baixo, junto dos ícones de emoji/imagem/áudio, que é clicável.)
+  //  cobertos pela barra superior. Por isso o botão vai na barra de
+  //  baixo, junto dos ícones de emoji/imagem/áudio, que é clicável.)
   function injetarBotaoTarefa() {
     if (typeof INBOX === 'undefined' || !INBOX.activeChat) return;
-    const barra = document.querySelector('.chat-input-btns');
-    if (!barra || barra.querySelector('.btn-criar-tarefa')) return;
+    // pode haver mais de uma .chat-input-btns no DOM (uma oculta).
+    // Pega só a VISÍVEL (offsetParent != null e com largura real).
+    const barras = Array.from(document.querySelectorAll('.chat-input-btns'));
+    const barra = barras.find(b => b.offsetParent !== null && b.getBoundingClientRect().width > 0);
+    if (!barra) return;
+    // remove botões-fantasma de barras ocultas/antigas
+    document.querySelectorAll('.btn-criar-tarefa').forEach(b => {
+      if (!barra.contains(b)) b.remove();
+    });
+    if (barra.querySelector('.btn-criar-tarefa')) return;
 
     const btn = document.createElement('button');
     btn.className = 'chat-input-btn btn-criar-tarefa';
     btn.type = 'button';
     btn.title = 'Criar tarefa de retorno';
     btn.innerHTML = '<i class="ti ti-calendar-plus"></i>';
-    // insere como primeiro botão da barra
     barra.insertBefore(btn, barra.firstChild);
   }
 
-  // Listener DELEGADO no document: funciona mesmo se a barra for
-  // re-renderizada. Captura o clique no botão .btn-criar-tarefa.
+  // Listener DELEGADO no document (captura): funciona mesmo se a
+  // barra for re-renderizada. Detecta o clique no botão.
   document.addEventListener('click', function (e) {
     const btn = e.target.closest && e.target.closest('.btn-criar-tarefa');
     if (btn) {
@@ -52,7 +59,6 @@
     const telefone = chat.phone || (chat.lead && chat.lead.telefone) || '';
     const leadId = chat.lead ? chat.lead.id : null;
 
-    // data/hora padrão: amanhã 9h
     const amanha = new Date(Date.now() + 24 * 3600 * 1000);
     const dataPadrao = amanha.toISOString().split('T')[0];
 
@@ -92,7 +98,7 @@
             <button class="btn btn-sm" onclick="tfAtalhoData(30)" style="font-size:11px;">Em 1 mês</button>
             <button class="btn btn-sm" onclick="tfAtalhoData(90)" style="font-size:11px;">Em 3 meses</button>
           </div>
-          <button class="btn btn-primary" style="width:100%;" onclick="salvarTarefaFollowup('${leadId || ''}','${telefone}','${nome.replace(/'/g,"")}')">
+          <button class="btn btn-primary" style="width:100%;" onclick="salvarTarefaFollowup('${leadId || ''}','${telefone}','${nome.replace(/'/g, '')}')">
             <i class="ti ti-check"></i> Criar tarefa
           </button>
         </div>
@@ -100,7 +106,6 @@
     document.body.appendChild(modal);
   };
 
-  // atalho: define a data pra X dias frente
   window.tfAtalhoData = function (dias) {
     const d = new Date(Date.now() + dias * 24 * 3600 * 1000);
     const inp = document.getElementById('tfData');
@@ -116,7 +121,6 @@
     if (!titulo) { if (typeof toast === 'function') toast('Escreva o que fazer', 'error'); return; }
 
     const clinic = currentClinic();
-    // monta o aparecer_em em horário de Brasília (UTC-3)
     const aparecerEm = new Date(`${data}T${hora}:00-03:00`).toISOString();
 
     try {
@@ -135,13 +139,17 @@
       }
       const modal = document.getElementById('modalTarefaFollowup');
       if (modal) modal.remove();
+      // recarrega já (caso a tarefa seja pra agora/passado)
+      await carregarTarefasManuais();
+      if (typeof tarefasGerar === 'function') tarefasGerar();
+      if (typeof tarefasRenderCard === 'function') tarefasRenderCard();
+      if (typeof tarefasAtualizarBadge === 'function') tarefasAtualizarBadge();
     } catch (e) {
       if (typeof toast === 'function') toast('Erro ao criar tarefa', 'error');
     }
   };
 
   // ── 4) Integra as tarefas manuais VENCIDAS no dashboard ───────
-  // Guarda as tarefas manuais que já "chegaram na hora"
   window.TAREFAS_MANUAIS_CACHE = [];
 
   async function carregarTarefasManuais() {
@@ -150,7 +158,6 @@
     if (!clinic) return;
     const agora = new Date().toISOString();
     try {
-      // só as que já chegaram (aparecer_em <= agora) e não concluídas
       const { data } = await getDb().from('tarefas_manuais')
         .select('*')
         .eq('clinic_id', clinic.id)
@@ -161,7 +168,6 @@
     } catch (e) { window.TAREFAS_MANUAIS_CACHE = []; }
   }
 
-  // injeta as tarefas manuais na lista do dashboard (via wrap do tarefasGerar)
   if (typeof window.tarefasGerar === 'function' && !window.tarefasGerar.__followupFix) {
     const _origGerar = window.tarefasGerar;
     window.tarefasGerar = function () {
@@ -190,16 +196,14 @@
     window.tarefasGerar.__followupFix = true;
   }
 
-  // recarrega as manuais periodicamente (pra pegar quando "vence" uma nova)
   carregarTarefasManuais();
   setInterval(async () => {
     await carregarTarefasManuais();
     if (typeof tarefasGerar === 'function') tarefasGerar();
     if (typeof tarefasRenderCard === 'function') tarefasRenderCard();
     if (typeof tarefasAtualizarBadge === 'function') tarefasAtualizarBadge();
-  }, 60000); // a cada 1 min
+  }, 60000);
 
-  // fica injetando o botão no inbox (a conversa abre dinâmica)
   setInterval(injetarBotaoTarefa, 800);
 
   console.log('✅ tarefa-followup-fix.js carregado — tarefas de retorno pelo inbox');
