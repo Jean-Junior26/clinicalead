@@ -23,11 +23,23 @@
 
     const btn = document.createElement('button');
     btn.className = 'btn btn-sm btn-criar-tarefa';
+    btn.type = 'button';
     btn.style.cssText = 'background:var(--gold-pale);border-color:var(--gold-border);color:var(--gold);margin-left:6px;';
     btn.innerHTML = '<i class="ti ti-calendar-plus"></i> Tarefa';
-    btn.onclick = abrirFormTarefa;
     acts.appendChild(btn);
   }
+
+  // Listener DELEGADO no document: funciona mesmo se o header for
+  // re-renderizado por outro fix (o onclick direto era apagado/ignorado).
+  // Captura o clique no botão .btn-criar-tarefa (ou em qualquer filho dele).
+  document.addEventListener('click', function (e) {
+    const btn = e.target.closest && e.target.closest('.btn-criar-tarefa');
+    if (btn) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof window.abrirFormTarefa === 'function') window.abrirFormTarefa();
+    }
+  }, true);
 
   // ── 2) Abre o formulário de nova tarefa ───────────────────────
   window.abrirFormTarefa = function () {
