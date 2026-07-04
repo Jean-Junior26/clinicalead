@@ -15,28 +15,26 @@
 
   function getDb() { return (typeof db !== 'undefined') ? db : (window.supabaseClient || null); }
 
-  // ── 1) Injeta o botão "Tarefa" no header da conversa ──────────
+  // ── 1) Injeta o botão "Tarefa" na barra de digitação ──────────
+  // (o header do chat fica ATRÁS da topbar — os primeiros ~62px são
+  //  cobertos pela barra superior. Por isso colocamos o botão na barra
+  //  de baixo, junto dos ícones de emoji/imagem/áudio, que é clicável.)
   function injetarBotaoTarefa() {
-    const acts = document.querySelector('.chat-header-actions');
-    if (!acts || acts.querySelector('.btn-criar-tarefa')) return;
     if (typeof INBOX === 'undefined' || !INBOX.activeChat) return;
-
-    // garante que a área de ações do chat fique ACIMA da topbar
-    // (a topbar estava sobreposta e capturava o clique do botão)
-    acts.style.position = 'relative';
-    acts.style.zIndex = '100';
+    const barra = document.querySelector('.chat-input-btns');
+    if (!barra || barra.querySelector('.btn-criar-tarefa')) return;
 
     const btn = document.createElement('button');
-    btn.className = 'btn btn-sm btn-criar-tarefa';
+    btn.className = 'chat-input-btn btn-criar-tarefa';
     btn.type = 'button';
-    btn.style.cssText = 'background:var(--gold-pale);border-color:var(--gold-border);color:var(--gold);margin-left:6px;position:relative;z-index:100;';
-    btn.innerHTML = '<i class="ti ti-calendar-plus"></i> Tarefa';
-    acts.appendChild(btn);
+    btn.title = 'Criar tarefa de retorno';
+    btn.innerHTML = '<i class="ti ti-calendar-plus"></i>';
+    // insere como primeiro botão da barra
+    barra.insertBefore(btn, barra.firstChild);
   }
 
-  // Listener DELEGADO no document: funciona mesmo se o header for
-  // re-renderizado por outro fix (o onclick direto era apagado/ignorado).
-  // Captura o clique no botão .btn-criar-tarefa (ou em qualquer filho dele).
+  // Listener DELEGADO no document: funciona mesmo se a barra for
+  // re-renderizada. Captura o clique no botão .btn-criar-tarefa.
   document.addEventListener('click', function (e) {
     const btn = e.target.closest && e.target.closest('.btn-criar-tarefa');
     if (btn) {
