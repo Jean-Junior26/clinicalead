@@ -103,10 +103,15 @@
       // remove os botões de tempo já injetados (evita duplicar)
       acts.querySelectorAll('.btn-iniciar-atend, .btn-finalizar-atend').forEach(b => b.remove());
 
+      // SEMPRE remove o botão "Atendido" antigo do semáforo quando a consulta
+      // está no fluxo novo (compareceu/em_atendimento e ainda não finalizada).
+      // Isso corrige as consultas que já estavam "compareceu" antes do fix.
+      if ((c.status === 'compareceu' || c.status === 'em_atendimento') && !c.atendido) {
+        acts.querySelectorAll('.btn-atendido').forEach(b => b.remove());
+      }
+
       // COMPARECEU (e não iniciou) → botão "Iniciar atendimento"
       if (c.status === 'compareceu' && !c.atendido && !c.atendimento_inicio) {
-        // remove o botão "Atendido" antigo do semáforo (vamos usar o novo fluxo)
-        acts.querySelectorAll('.btn-atendido').forEach(b => b.remove());
         const btn = document.createElement('button');
         btn.className = 'btn btn-sm btn-iniciar-atend';
         btn.style.cssText = 'background:var(--gold-pale);border-color:var(--gold-border);color:var(--gold);';
@@ -117,7 +122,6 @@
 
       // EM ATENDIMENTO (iniciou, não finalizou) → botão "Finalizar"
       if (c.status === 'em_atendimento' && !c.atendido) {
-        acts.querySelectorAll('.btn-atendido').forEach(b => b.remove());
         const espera = calcularTempo(c.compareceu_em, c.atendimento_inicio);
         const btn = document.createElement('button');
         btn.className = 'btn btn-sm btn-finalizar-atend';
