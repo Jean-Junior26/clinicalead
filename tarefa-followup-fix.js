@@ -21,10 +21,15 @@
     if (!acts || acts.querySelector('.btn-criar-tarefa')) return;
     if (typeof INBOX === 'undefined' || !INBOX.activeChat) return;
 
+    // garante que a área de ações do chat fique ACIMA da topbar
+    // (a topbar estava sobreposta e capturava o clique do botão)
+    acts.style.position = 'relative';
+    acts.style.zIndex = '100';
+
     const btn = document.createElement('button');
     btn.className = 'btn btn-sm btn-criar-tarefa';
     btn.type = 'button';
-    btn.style.cssText = 'background:var(--gold-pale);border-color:var(--gold-border);color:var(--gold);margin-left:6px;';
+    btn.style.cssText = 'background:var(--gold-pale);border-color:var(--gold-border);color:var(--gold);margin-left:6px;position:relative;z-index:100;';
     btn.innerHTML = '<i class="ti ti-calendar-plus"></i> Tarefa';
     acts.appendChild(btn);
   }
