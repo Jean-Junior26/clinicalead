@@ -1,59 +1,38 @@
 // ============================================================
-// CLINICALEAD — Tarefa de follow-up pelo inbox (VERSÃO DEFINITIVA)
-// Botão "Tarefa" do lado do "Ver lead", no header VISÍVEL da conversa.
+// CLINICALEAD — Tarefa de follow-up pelo inbox (VERSÃO FINAL)
+// Botão "Tarefa" do lado do "Ver lead", usando onclick INLINE
+// (exatamente como o "Ver lead" que comprovadamente funciona).
 //
-// RAIZ DO BUG (descoberta): existem DOIS .chat-header no DOM —
-// um escondido (width 0) e o visível. Os querySelector pegavam o
-// escondido, então o botão ia pro header fantasma e nunca funcionava.
-// Solução: sempre selecionar o elemento VISÍVEL (offsetParent != null
-// e width > 0).
-//
-// Depende da tabela tarefas_manuais (criada via SQL).
-// Carregar por último no index (depois do tarefas-fix).
+// Cria tarefa manual (data+hora+descrição) que aparece no
+// dashboard SÓ quando chega a data/hora (aparecer_em).
+// Depende da tabela tarefas_manuais. Carregar por último no index.
 // ============================================================
 (function () {
   'use strict';
 
   function getDb() { return (typeof db !== 'undefined') ? db : (window.supabaseClient || null); }
 
-  // acha um elemento VISÍVEL pelo seletor (ignora os duplicados escondidos)
-  function acharVisivel(seletor) {
-    const els = Array.from(document.querySelectorAll(seletor));
-    return els.find(el => el.offsetParent !== null && el.getBoundingClientRect().width > 0) || null;
-  }
-
-  // ── 1) Injeta o botão "Tarefa" no header VISÍVEL, do lado do Ver lead ──
+  // ── 1) Injeta o botão no header, com onclick INLINE (igual o Ver lead) ──
+  // O "Ver lead" funciona porque usa onclick="openEditLead('...')" inline.
+  // Replicamos EXATAMENTE isso: onclick inline chamando abrirFormTarefa().
   function injetarBotaoTarefa() {
     if (typeof INBOX === 'undefined' || !INBOX.activeChat) return;
-    const acts = acharVisivel('.chat-header-actions');
+    const acts = document.querySelector('.chat-header-actions');
     if (!acts) return;
-    // limpa botões-fantasma que ficaram em headers escondidos
-    document.querySelectorAll('.btn-criar-tarefa').forEach(b => {
-      if (!acts.contains(b)) b.remove();
-    });
     if (acts.querySelector('.btn-criar-tarefa')) return;
 
     const btn = document.createElement('button');
     btn.className = 'btn btn-sm btn-criar-tarefa';
-    btn.type = 'button';
     btn.style.cssText = 'background:var(--gold-pale);border-color:var(--gold-border);color:var(--gold);margin-left:6px;';
     btn.innerHTML = '<i class="ti ti-calendar-plus"></i> Tarefa';
+    // onclick INLINE — idêntico ao mecanismo do "Ver lead" (openEditLead)
+    btn.setAttribute('onclick', 'abrirFormTarefa()');
     acts.appendChild(btn);
   }
 
-  // Listener DELEGADO no document (captura): sobrevive a re-render.
-  document.addEventListener('click', function (e) {
-    const btn = e.target.closest && e.target.closest('.btn-criar-tarefa');
-    if (btn) {
-      e.preventDefault();
-      e.stopPropagation();
-      if (typeof window.abrirFormTarefa === 'function') window.abrirFormTarefa();
-    }
-  }, true);
-
   // ── 2) Abre o formulário de nova tarefa ───────────────────────
   window.abrirFormTarefa = function () {
-    const chat = INBOX.activeChat;
+    const chat = (typeof INBOX !== 'undefined') ? INBOX.activeChat : null;
     if (!chat) return;
     const nome = chat.name || 'Contato';
     const telefone = chat.phone || (chat.lead && chat.lead.telefone) || '';
@@ -99,7 +78,7 @@
             <button class="btn btn-sm" onclick="tfAtalhoData(30)" style="font-size:11px;">Em 1 mês</button>
             <button class="btn btn-sm" onclick="tfAtalhoData(90)" style="font-size:11px;">Em 3 meses</button>
           </div>
-          <button class="btn btn-primary" style="width:100%;" onclick="salvarTarefaFollowup('${leadId || ''}','${telefone}','${nome.replace(/'/g, '')}')">
+          <button class="btn btn-primary" style="width:100%;" onclick="salvarTarefaFollowup('${leadId || ''}','${telefone}','${String(nome).replace(/'/g, '')}')">
             <i class="ti ti-check"></i> Criar tarefa
           </button>
         </div>
@@ -206,5 +185,5 @@
 
   setInterval(injetarBotaoTarefa, 800);
 
-  console.log('✅ tarefa-followup-fix.js DEFINITIVO carregado — botão no header visível');
+  console.log('✅ tarefa-followup-fix.js FINAL (onclick inline) carregado');
 })();
