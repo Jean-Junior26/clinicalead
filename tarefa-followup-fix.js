@@ -1,11 +1,12 @@
 // ============================================================
-// CLINICALEAD — Tarefa de follow-up pelo inbox
-// Botão "Tarefa" na barra de digitação da conversa → cria uma
-// tarefa manual (data + hora + descrição) que aparece no
-// dashboard SÓ quando chega a data/hora agendada (aparecer_em).
+// CLINICALEAD — Tarefa de follow-up pelo inbox (VERSÃO DEFINITIVA)
+// Botão "Tarefa" do lado do "Ver lead", no header VISÍVEL da conversa.
 //
-// Ex: "entra em contato daqui 1 mês" → cria tarefa com
-// aparecer_em = hoje+30d → só aparece no dashboard nessa data.
+// RAIZ DO BUG (descoberta): existem DOIS .chat-header no DOM —
+// um escondido (width 0) e o visível. Os querySelector pegavam o
+// escondido, então o botão ia pro header fantasma e nunca funcionava.
+// Solução: sempre selecionar o elemento VISÍVEL (offsetParent != null
+// e width > 0).
 //
 // Depende da tabela tarefas_manuais (criada via SQL).
 // Carregar por último no index (depois do tarefas-fix).
@@ -15,33 +16,32 @@
 
   function getDb() { return (typeof db !== 'undefined') ? db : (window.supabaseClient || null); }
 
-  // ── 1) Injeta o botão "Tarefa" na barra de digitação ──────────
-  // (o header do chat fica ATRÁS da topbar — os primeiros ~62px são
-  //  cobertos pela barra superior. Por isso o botão vai na barra de
-  //  baixo, junto dos ícones de emoji/imagem/áudio, que é clicável.)
-  function injetarBotaoTarefa() {
-    if (typeof INBOX === 'undefined' || !INBOX.activeChat) return;
-    // pode haver mais de uma .chat-input-btns no DOM (uma oculta).
-    // Pega só a VISÍVEL (offsetParent != null e com largura real).
-    const barras = Array.from(document.querySelectorAll('.chat-input-btns'));
-    const barra = barras.find(b => b.offsetParent !== null && b.getBoundingClientRect().width > 0);
-    if (!barra) return;
-    // remove botões-fantasma de barras ocultas/antigas
-    document.querySelectorAll('.btn-criar-tarefa').forEach(b => {
-      if (!barra.contains(b)) b.remove();
-    });
-    if (barra.querySelector('.btn-criar-tarefa')) return;
-
-    const btn = document.createElement('button');
-    btn.className = 'chat-input-btn btn-criar-tarefa';
-    btn.type = 'button';
-    btn.title = 'Criar tarefa de retorno';
-    btn.innerHTML = '<i class="ti ti-calendar-plus"></i>';
-    barra.insertBefore(btn, barra.firstChild);
+  // acha um elemento VISÍVEL pelo seletor (ignora os duplicados escondidos)
+  function acharVisivel(seletor) {
+    const els = Array.from(document.querySelectorAll(seletor));
+    return els.find(el => el.offsetParent !== null && el.getBoundingClientRect().width > 0) || null;
   }
 
-  // Listener DELEGADO no document (captura): funciona mesmo se a
-  // barra for re-renderizada. Detecta o clique no botão.
+  // ── 1) Injeta o botão "Tarefa" no header VISÍVEL, do lado do Ver lead ──
+  function injetarBotaoTarefa() {
+    if (typeof INBOX === 'undefined' || !INBOX.activeChat) return;
+    const acts = acharVisivel('.chat-header-actions');
+    if (!acts) return;
+    // limpa botões-fantasma que ficaram em headers escondidos
+    document.querySelectorAll('.btn-criar-tarefa').forEach(b => {
+      if (!acts.contains(b)) b.remove();
+    });
+    if (acts.querySelector('.btn-criar-tarefa')) return;
+
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-sm btn-criar-tarefa';
+    btn.type = 'button';
+    btn.style.cssText = 'background:var(--gold-pale);border-color:var(--gold-border);color:var(--gold);margin-left:6px;';
+    btn.innerHTML = '<i class="ti ti-calendar-plus"></i> Tarefa';
+    acts.appendChild(btn);
+  }
+
+  // Listener DELEGADO no document (captura): sobrevive a re-render.
   document.addEventListener('click', function (e) {
     const btn = e.target.closest && e.target.closest('.btn-criar-tarefa');
     if (btn) {
@@ -67,6 +67,7 @@
     modal = document.createElement('div');
     modal.className = 'modal-overlay';
     modal.id = 'modalTarefaFollowup';
+    modal.style.zIndex = '99999';
     modal.innerHTML = `
       <div class="modal" style="max-width:460px;width:96vw;">
         <div class="modal-header">
@@ -139,7 +140,6 @@
       }
       const modal = document.getElementById('modalTarefaFollowup');
       if (modal) modal.remove();
-      // recarrega já (caso a tarefa seja pra agora/passado)
       await carregarTarefasManuais();
       if (typeof tarefasGerar === 'function') tarefasGerar();
       if (typeof tarefasRenderCard === 'function') tarefasRenderCard();
@@ -206,5 +206,5 @@
 
   setInterval(injetarBotaoTarefa, 800);
 
-  console.log('✅ tarefa-followup-fix.js carregado — tarefas de retorno pelo inbox');
+  console.log('✅ tarefa-followup-fix.js DEFINITIVO carregado — botão no header visível');
 })();
