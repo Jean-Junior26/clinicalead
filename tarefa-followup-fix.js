@@ -46,7 +46,8 @@
     modal = document.createElement('div');
     modal.className = 'modal-overlay';
     modal.id = 'modalTarefaFollowup';
-    modal.style.zIndex = '99999';
+    // a classe .modal-overlay nasce com display:none no CSS — forçamos a exibição
+    modal.style.cssText = 'display:flex;align-items:center;justify-content:center;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.5);';
     modal.innerHTML = `
       <div class="modal" style="max-width:460px;width:96vw;">
         <div class="modal-header">
