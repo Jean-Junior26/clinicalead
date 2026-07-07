@@ -255,10 +255,23 @@
             </select>
           </div>
 
+          <div id="apBlocoProcedimento" style="display:none;">
+            <label class="form-label" style="font-size:12px;color:var(--text-muted);">Só para o procedimento (opcional)</label>
+            <input type="text" class="form-input" id="apCondProc" placeholder="Ex: lentes, implante, prótese... (vazio = todos os leads)" style="width:100%;" value="${(r.condicao && r.condicao.procedimento) || ''}"/>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Se preencher, esta automação só dispara para leads cujo <b>procedimento</b> contenha esse termo (ex: "lentes" pega "Lentes em Resina"). Vazio = automação <b>genérica</b> (todos os leads com interesse).</div>
+          </div>
+
           <div id="apBlocoMensagem">
             <label class="form-label" style="font-size:12px;color:var(--text-muted);">Mensagem</label>
-            <textarea class="form-input" id="apMensagem" rows="4" placeholder="Oi {nome}! ..." style="width:100%;resize:vertical;">${r.mensagem || ''}</textarea>
+            <textarea class="form-input" id="apMensagem" rows="5" placeholder="Oi {nome}! ..." style="width:100%;resize:vertical;">${r.mensagem || ''}</textarea>
             <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Variáveis: {nome}, {clinica}, {valor}, {vencimento}, {procedimento}, {data}, {hora}</div>
+            <div style="font-size:11px;color:var(--gold);margin-top:6px;background:var(--gold-pale);border:1px solid var(--gold-border);border-radius:8px;padding:8px 10px;line-height:1.5;">
+              💡 <b>Anti-repetição:</b> escreva <b>2 a 4 versões</b> da mensagem separadas por uma linha contendo só três traços (<b>---</b>).
+              A cada envio, o sistema <b>sorteia uma versão</b> — cada lead recebe uma mensagem diferente (mais humano e mais seguro contra bloqueio do WhatsApp).
+            </div>
+            <label class="form-label" style="font-size:12px;color:var(--text-muted);margin-top:12px;display:block;">Imagem (opcional)</label>
+            <input type="text" class="form-input" id="apImagemUrl" placeholder="https://... (link público da imagem)" style="width:100%;" value="${r.imagem_url || ''}"/>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Se preencher, a imagem vai <b>junto</b> com o disparo (a mensagem vira a legenda). Ex: antes/depois, arte da campanha, foto da clínica. Precisa ser um link público que termina em .jpg/.png (pode hospedar no site da clínica ou num serviço de imagem).</div>
           </div>
 
           <div id="apBlocoStatus" style="display:none;">
@@ -309,6 +322,10 @@
     const blocoMens = document.getElementById('apBlocoMensalidade');
     if (blocoMens) blocoMens.style.display = ehMens ? 'block' : 'none';
     if (ehMens) apMensQuandoMudou();
+    // condição por procedimento: só no follow-up de dias sem resposta
+    // (é onde o motor aplica o filtro regra.condicao.procedimento)
+    const blocoProc = document.getElementById('apBlocoProcedimento');
+    if (blocoProc) blocoProc.style.display = (evento === 'dias_sem_resposta') ? 'block' : 'none';
     // mensagem vs status conforme ação
     const blocoMsg = document.getElementById('apBlocoMensagem');
     const blocoStatus = document.getElementById('apBlocoStatus');
@@ -344,6 +361,10 @@
       espera_unidade = document.getElementById('apEsperaUnidade')?.value || 'horas';
     }
     const mensagem = (acao === 'mensagem' || acao === 'tarefa') ? (document.getElementById('apMensagem').value || '').trim() : null;
+    const imagem_url = (acao === 'mensagem') ? ((document.getElementById('apImagemUrl')?.value || '').trim() || null) : null;
+    // condição por procedimento (só no follow-up de dias sem resposta)
+    const condProcTxt = (evento === 'dias_sem_resposta') ? ((document.getElementById('apCondProc')?.value || '').trim()) : '';
+    const condicao = condProcTxt ? { procedimento: condProcTxt } : null;
     const nova_status = (acao === 'mudar_status') ? document.getElementById('apNovoStatus').value : null;
     const ehGlobalCheck = document.getElementById('apGlobal');
     const global = ehGlobalCheck ? ehGlobalCheck.checked : false;
@@ -352,6 +373,8 @@
 
     const dados = {
       nome, evento, espera_valor, espera_unidade, acao, mensagem, nova_status,
+      imagem_url,
+      condicao,
       ativo: true,
       global,
       clinic_id: global ? null : clinic.id,
