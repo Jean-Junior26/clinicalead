@@ -271,7 +271,12 @@
             </div>
             <label class="form-label" style="font-size:12px;color:var(--text-muted);margin-top:12px;display:block;">Imagem (opcional)</label>
             <input type="text" class="form-input" id="apImagemUrl" placeholder="https://... (link público da imagem)" style="width:100%;" value="${r.imagem_url || ''}"/>
-            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Se preencher, a imagem vai <b>junto</b> com o disparo (a mensagem vira a legenda). Ex: antes/depois, arte da campanha, foto da clínica. Precisa ser um link público que termina em .jpg/.png (pode hospedar no site da clínica ou num serviço de imagem).</div>
+            <div style="display:flex;gap:8px;margin-top:6px;align-items:center;">
+              <button type="button" class="btn btn-sm" id="apBtnUpload" onclick="apUploadImagem()" style="font-size:12px;">📤 Enviar do computador</button>
+              <input type="file" id="apImgFile" accept="image/*" style="display:none;" onchange="apImgSelecionada(event)">
+              <span style="font-size:11px;color:var(--text-muted);">ou cole um link acima</span>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Se preencher, a imagem vai <b>junto</b> com o disparo (a mensagem vira a legenda). Ex: antes/depois, arte da campanha, foto da clínica.</div>
           </div>
 
           <div id="apBlocoStatus" style="display:none;">
@@ -436,6 +441,46 @@
     console.log('✅ automacoes-pro-fix.js carregado');
     return true;
   }
+
+  // ── UPLOAD DE IMAGEM (Supabase Storage, bucket "automacoes") ──
+  // A clínica escolhe a foto do computador; o sistema sobe pro Storage
+  // e preenche o campo de URL automaticamente com o link público.
+  window.apUploadImagem = function () {
+    const inp = document.getElementById('apImgFile');
+    if (inp) inp.click();
+  };
+
+  window.apImgSelecionada = async function (ev) {
+    const file = ev.target.files && ev.target.files[0];
+    if (!file) return;
+    const btn = document.getElementById('apBtnUpload');
+    const urlInput = document.getElementById('apImagemUrl');
+    if (!file.type.startsWith('image/')) {
+      if (typeof toast === 'function') toast('Escolha uma imagem (jpg/png)', 'error');
+      ev.target.value = ''; return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      if (typeof toast === 'function') toast('Imagem muito grande (máx 5MB)', 'error');
+      ev.target.value = ''; return;
+    }
+    try {
+      if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Enviando...'; }
+      const clinic = currentClinic();
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+      const path = `${clinic.id}/${Date.now()}.${ext}`;
+      const { error } = await db.storage.from('automacoes').upload(path, file, { upsert: false, contentType: file.type });
+      if (error) throw error;
+      const { data: pub } = db.storage.from('automacoes').getPublicUrl(path);
+      if (urlInput && pub && pub.publicUrl) urlInput.value = pub.publicUrl;
+      if (typeof toast === 'function') toast('Imagem enviada! ✓ Link preenchido.');
+    } catch (e) {
+      console.error('[ap upload]', e);
+      if (typeof toast === 'function') toast('Erro ao enviar: ' + (e.message || 'verifique o bucket "automacoes"'), 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = '📤 Enviar do computador'; }
+      ev.target.value = '';
+    }
+  };
 
   if (!iniciar()) {
     const iv = setInterval(() => { if (iniciar()) clearInterval(iv); }, 600);
