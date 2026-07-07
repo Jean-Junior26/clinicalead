@@ -443,12 +443,38 @@
   }
 
   // ── UPLOAD DE IMAGEM (Supabase Storage, bucket "automacoes") ──
-  // A clínica escolhe a foto do computador; o sistema sobe pro Storage
-  // e preenche o campo de URL automaticamente com o link público.
+  // A clínica escolhe a foto do computador; o sistema COMPRIME
+  // automaticamente (fotos de celular vêm com 8-15MB) e sobe pro
+  // Storage, preenchendo o campo de URL com o link público.
   window.apUploadImagem = function () {
     const inp = document.getElementById('apImgFile');
     if (inp) inp.click();
   };
+
+  // comprime/redimensiona a imagem no navegador (máx 1600px, JPEG ~85%)
+  // → foto de 12MB do celular vira ~300-600KB, perfeita pro WhatsApp
+  async function apComprimirImagem(file) {
+    try {
+      // já é pequena? sobe como está
+      if (file.size < 900 * 1024) return { blob: file, ext: null };
+      const img = await createImageBitmap(file);
+      let { width, height } = img;
+      const MAX = 1600;
+      if (width > MAX || height > MAX) {
+        const escala = MAX / Math.max(width, height);
+        width = Math.round(width * escala);
+        height = Math.round(height * escala);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.85));
+      if (blob && blob.size < file.size) return { blob, ext: 'jpg' };
+      return { blob: file, ext: null };
+    } catch (_e) {
+      return { blob: file, ext: null }; // se a compressão falhar, tenta o original
+    }
+  }
 
   window.apImgSelecionada = async function (ev) {
     const file = ev.target.files && ev.target.files[0];
@@ -459,16 +485,20 @@
       if (typeof toast === 'function') toast('Escolha uma imagem (jpg/png)', 'error');
       ev.target.value = ''; return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      if (typeof toast === 'function') toast('Imagem muito grande (máx 5MB)', 'error');
-      ev.target.value = ''; return;
-    }
     try {
-      if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Enviando...'; }
+      if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Preparando...'; }
+      // comprime automaticamente (fotos grandes de celular viram leves)
+      const { blob, ext: extComp } = await apComprimirImagem(file);
+      if (blob.size > 5 * 1024 * 1024) {
+        if (typeof toast === 'function') toast('Imagem muito grande mesmo comprimida — tente outra foto', 'error');
+        return;
+      }
+      if (btn) btn.innerHTML = '⏳ Enviando...';
       const clinic = currentClinic();
-      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+      const extOrig = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+      const ext = extComp || extOrig;
       const path = `${clinic.id}/${Date.now()}.${ext}`;
-      const { error } = await db.storage.from('automacoes').upload(path, file, { upsert: false, contentType: file.type });
+      const { error } = await db.storage.from('automacoes').upload(path, blob, { upsert: false, contentType: extComp ? 'image/jpeg' : file.type });
       if (error) throw error;
       const { data: pub } = db.storage.from('automacoes').getPublicUrl(path);
       if (urlInput && pub && pub.publicUrl) urlInput.value = pub.publicUrl;
