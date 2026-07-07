@@ -218,41 +218,65 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
   // ════════════════════════════════════════════════════════════
 
   // Acha o lead pelo telefone; se não existe, cria. Retorna o lead {id, nome} ou null.
-  async function brianAcharOuCriarLead(clinic_id, phone, nome, origem) {
+  // Extrai o procedimento de interesse da mensagem padrão de ANÚNCIO.
+  // Leads de tráfego chegam com "Olá! Quero saber mais sobre X!" — o X é
+  // exatamente o procedimento da campanha. Capturamos na criação do lead
+  // (senão essa informação valiosa se perde e o lead fica só "Avaliação").
+  function extrairProcedimentoDaMsg(texto) {
+    const t = String(texto || '').trim();
+    const m = t.match(/quero saber mais sobre\s+(.{2,60}?)[!.?\s]*$/i)
+          || t.match(/tenho interesse em\s+(.{2,60}?)[!.?\s]*$/i)
+          || t.match(/gostaria de saber (?:mais )?sobre\s+(.{2,60}?)[!.?\s]*$/i);
+    if (!m) return null;
+    const proc = m[1].trim().replace(/\s+/g, ' ');
+    if (proc.length < 3 || proc.length > 60) return null;
+    return proc;
+  }
+
+  async function brianAcharOuCriarLead(clinic_id, phone, nome, origem, procInteresse) {
     try {
       const digitos = String(phone).replace(/\D/g, '');
       const sufixo = digitos.slice(-8);
       const nomeLimpo = (nome || '').trim();
       // 1) já existe?
       const r = await fetch(
-        `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinic_id}&telefone=ilike.*${sufixo}&select=id,nome&limit=1`,
+        `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinic_id}&telefone=ilike.*${sufixo}&select=id,nome,procedimento&limit=1`,
         { headers: sbHeaders }
       );
       const arr = r.ok ? await r.json() : [];
       if (arr[0] && arr[0].id) {
-        // já existe: se chegou um nome REAL (2+ palavras) e o atual é provisório, atualiza
+        const patch = {};
+        // se chegou um nome REAL (2+ palavras) e o atual é provisório, atualiza
         const atual = (arr[0].nome || '').trim();
         const ehProvisorio = !atual || atual === 'Lead WhatsApp' || atual.split(/\s+/).length < 2;
         const nomeNovoEhReal = nomeLimpo && nomeLimpo !== 'Lead WhatsApp' && nomeLimpo.split(/\s+/).length >= 1;
-        if (ehProvisorio && nomeNovoEhReal && nomeLimpo !== atual) {
+        if (ehProvisorio && nomeNovoEhReal && nomeLimpo !== atual) patch.nome = nomeLimpo;
+        // se chegou um procedimento de interesse e o atual é o placeholder "Avaliação"
+        // (ou vazio), atualiza — assim o lead ganha o interesse real (lentes, implante...)
+        const procAtual = (arr[0].procedimento || '').trim().toLowerCase();
+        if (procInteresse && (!procAtual || procAtual === 'avaliação' || procAtual === 'avaliacao')) {
+          patch.procedimento = procInteresse;
+        }
+        if (Object.keys(patch).length) {
           await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${arr[0].id}`, {
             method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
-            body: JSON.stringify({ nome: nomeLimpo }),
+            body: JSON.stringify(patch),
           });
-          console.log(`[BRIAN-LEAD] ✏️ nome atualizado: "${atual}" → "${nomeLimpo}"`);
-          return { id: arr[0].id, nome: nomeLimpo };
+          if (patch.nome) console.log(`[BRIAN-LEAD] ✏️ nome atualizado: "${atual}" → "${patch.nome}"`);
+          if (patch.procedimento) console.log(`[BRIAN-LEAD] 🎯 procedimento atualizado: "${arr[0].procedimento || ''}" → "${patch.procedimento}"`);
+          return { id: arr[0].id, nome: patch.nome || atual };
         }
         return arr[0];
       }
 
-      // 2) não existe → cria
+      // 2) não existe → cria (com o procedimento de interesse, se veio do anúncio)
       const novo = {
         clinic_id,
         nome: nomeLimpo || 'Lead WhatsApp',
         telefone: digitos,
         origem: origem || 'Brian IA',
         status: 'novo',
-        procedimento: 'Avaliação',
+        procedimento: procInteresse || 'Avaliação',
         created_at: new Date().toISOString(),
       };
       const ins = await fetch(`${SUPABASE_URL}/rest/v1/leads`, {
@@ -994,7 +1018,9 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
         // procura antes de criar). Usa o pushName como nome provisório.
         if (!fromMe) {
           try {
-            await brianAcharOuCriarLead(clinic_id, phone, contact_name || null, 'WhatsApp');
+            // extrai o procedimento da mensagem de anúncio ("Quero saber mais sobre X")
+            const procDaMsg = (type === 'text') ? extrairProcedimentoDaMsg(content) : null;
+            await brianAcharOuCriarLead(clinic_id, phone, contact_name || null, 'WhatsApp', procDaMsg);
           } catch (e) { console.log('[LEAD-AUTO] erro ao garantir lead:', e.message); }
         }
 
@@ -1100,6 +1126,22 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
                     textoResposta = String(textoResposta).replace(/\s*\[\[CASOS\|[^\]]+\]\]\s*/i, ' ').trim();
                   }
 
+                  // marcador PROC (interesse revelado na conversa → grava no lead)
+                  let procInteresseConversa = null;
+                  const mProc = String(textoResposta).match(/\[\[PROC\|([^\]]+)\]\]/i);
+                  if (mProc) {
+                    try {
+                      const campos = {};
+                      mProc[1].split('|').forEach(par => {
+                        const idx = par.indexOf('=');
+                        if (idx > 0) campos[par.slice(0, idx).trim().toLowerCase()] = par.slice(idx + 1).trim();
+                      });
+                      procInteresseConversa = campos.procedimento || null;
+                      console.log(`[BRIAN-PROC] 🎯 detectado | phone: ${phone} | procedimento: ${procInteresseConversa}`);
+                    } catch (e) { console.log('[BRIAN-PROC] erro ao ler marcador:', e.message); }
+                    textoResposta = String(textoResposta).replace(/\s*\[\[PROC\|[^\]]+\]\]\s*/i, ' ').trim();
+                  }
+
                   // 1) envia a resposta limpa do Brian (sem marcadores)
                   if (textoResposta) {
                     await responderPaciente(instanceName, clinic_id, phone, textoResposta, 'BRIAN_AUTO');
@@ -1132,6 +1174,14 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
                   // 1.5) envia os casos (antes/depois) se o Brian sinalizou
                   if (procCasos) {
                     await brianEnviarCasos(instanceName, clinic_id, phone, procCasos);
+                  }
+
+                  // 1.6) grava o procedimento de interesse revelado na conversa
+                  // (a própria brianAcharOuCriarLead atualiza se o atual for "Avaliação")
+                  if (procInteresseConversa) {
+                    try {
+                      await brianAcharOuCriarLead(clinic_id, phone, (campoLead && campoLead.nome) || null, 'WhatsApp', procInteresseConversa);
+                    } catch (e) { console.log('[BRIAN-PROC] erro ao gravar procedimento:', e.message); }
                   }
 
                   // 2) executa o agendamento (se houver) — cria lead + consulta + confirma
