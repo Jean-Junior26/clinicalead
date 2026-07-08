@@ -17,10 +17,17 @@
   }
 
   // pacotes de recarga (definidos com o Jean)
+  // Preços recalculados em 08/07/2026 com base no custo real medido
+  // (R$0,0424/mensagem, Haiku 4.5 com prompt-cache) + margem de 20%.
+  // Margem baixa de propósito: o Jean não quer lucrar em cima das
+  // mensagens de IA, o lucro do negócio vem do CRM. Os 20% cobrem só
+  // risco de oscilação de custo (câmbio, aumento de preço da Anthropic, etc).
+  // Reavaliar depois que o cache de 1h (subido em 08/07) acumular alguns
+  // dias de dados — o custo por mensagem deve cair e dá pra rever pra baixo.
   const PACOTES = [
-    { id: 'pequeno', nome: 'Pequeno', msgs: 1000, preco: 49.90 },
-    { id: 'medio',   nome: 'Médio',   msgs: 2500, preco: 99.90 },
-    { id: 'grande',  nome: 'Grande',  msgs: 4000, preco: 149.90 },
+    { id: 'pequeno', nome: 'Pequeno', msgs: 1000, preco: 52.95 },
+    { id: 'medio',   nome: 'Médio',   msgs: 2000, preco: 105.89 },
+    { id: 'grande',  nome: 'Grande',  msgs: 3000, preco: 158.84 },
   ];
 
   // thresholds de alerta
