@@ -38,6 +38,20 @@
   // câmbio USD→BRL pra exibir o custo real de IA em reais (ajuste quando quiser)
   const USD_BRL = 5.40;
   function fmtBRL(n) { return 'R$ ' + Number(n || 0).toFixed(2).replace('.', ','); }
+  function fmtBRL4(n) { return 'R$ ' + Number(n || 0).toFixed(4).replace('.', ','); } // mais precisão pro custo/msg
+
+  // filtro de período da seção "custo real de IA" (padrão: mês atual)
+  let FILTRO_CUSTO = { inicio: null, fim: null, periodo: 'mes' };
+  let MAPA_CLINICA_CACHE = {};
+
+  function periodoParaDatas(p) {
+    const hoje = new Date();
+    const y = hoje.getFullYear(), m = hoje.getMonth();
+    if (p === 'mes') return { inicio: new Date(y, m, 1), fim: new Date(y, m + 1, 0, 23, 59, 59) };
+    if (p === 'mes_passado') return { inicio: new Date(y, m - 1, 1), fim: new Date(y, m, 0, 23, 59, 59) };
+    if (p === '7dias') { const i = new Date(); i.setDate(i.getDate() - 7); return { inicio: i, fim: new Date() }; }
+    return null; // personalizado: usa FILTRO_CUSTO.inicio/fim já setados manualmente
+  }
 
   // calcula o saldo de uma linha brian_saldo
   function calcSaldo(s) {
@@ -177,6 +191,88 @@
     }
   };
 
+  // busca o custo por clínica num intervalo de datas (usado pelo painel + filtro)
+  async function buscarCustoPorClinica(inicio, fim) {
+    const database = getDb();
+    const custoPorClinica = {};
+    try {
+      let q = database.from('brian_uso').select('clinic_id, custo_usd, tokens_in, tokens_out, created_at');
+      if (inicio) q = q.gte('created_at', inicio.toISOString());
+      if (fim) q = q.lte('created_at', fim.toISOString());
+      const { data: usos } = await q;
+      (usos || []).forEach(u => {
+        const id = u.clinic_id;
+        if (!custoPorClinica[id]) custoPorClinica[id] = { msgs: 0, custoUsd: 0 };
+        // fallback pra linhas antigas sem custo_usd salvo (antes da correção)
+        const custo = (u.custo_usd != null && u.custo_usd > 0)
+          ? u.custo_usd
+          : ((u.tokens_in || 0) * (1 / 1e6) + (u.tokens_out || 0) * (5 / 1e6));
+        custoPorClinica[id].msgs++;
+        custoPorClinica[id].custoUsd += custo;
+      });
+    } catch (e) { console.error('[custo-brian]', e); }
+    return custoPorClinica;
+  }
+
+  // renderiza SÓ a seção de custo (chamado ao abrir o modal e ao trocar o filtro)
+  window.filtrarCustoBrian = async function (periodo) {
+    const cont = document.getElementById('custoSecaoContainer');
+    if (!cont) return;
+    FILTRO_CUSTO.periodo = periodo;
+
+    if (periodo === 'personalizado') {
+      const div = document.getElementById('custoPersonalizadoBox');
+      if (div) div.style.display = div.style.display === 'none' ? 'flex' : 'none';
+      return; // espera o usuário clicar em "Aplicar"
+    }
+
+    const datas = periodoParaDatas(periodo);
+    if (datas) { FILTRO_CUSTO.inicio = datas.inicio; FILTRO_CUSTO.fim = datas.fim; }
+
+    document.querySelectorAll('.custo-per-btn').forEach(b => {
+      b.style.cssText = b.dataset.per === periodo
+        ? 'background:var(--gold-pale,rgba(201,168,76,0.15));border-color:var(--gold-border,#C9A84C);color:var(--gold,#C9A84C);font-weight:600;'
+        : '';
+    });
+
+    cont.innerHTML = '<div style="text-align:center;padding:14px;color:var(--text-muted,#888);font-size:12px;">Carregando...</div>';
+    const custoPorClinica = await buscarCustoPorClinica(FILTRO_CUSTO.inicio, FILTRO_CUSTO.fim);
+    renderCustoSecao(custoPorClinica);
+  };
+
+  window.filtrarCustoBrianPersonalizado = async function () {
+    const ini = document.getElementById('custoDataIni')?.value;
+    const fim = document.getElementById('custoDataFim')?.value;
+    if (!ini || !fim) { if (typeof toast === 'function') toast('Escolha as duas datas', 'error'); return; }
+    FILTRO_CUSTO.inicio = new Date(ini + 'T00:00:00');
+    FILTRO_CUSTO.fim = new Date(fim + 'T23:59:59');
+    FILTRO_CUSTO.periodo = 'personalizado';
+    const cont = document.getElementById('custoSecaoContainer');
+    if (cont) cont.innerHTML = '<div style="text-align:center;padding:14px;color:var(--text-muted,#888);font-size:12px;">Carregando...</div>';
+    const custoPorClinica = await buscarCustoPorClinica(FILTRO_CUSTO.inicio, FILTRO_CUSTO.fim);
+    renderCustoSecao(custoPorClinica);
+  };
+
+  function renderCustoSecao(custoPorClinica) {
+    const cont = document.getElementById('custoSecaoContainer');
+    if (!cont) return;
+    const ids = Object.keys(custoPorClinica).sort((a, b) => custoPorClinica[b].custoUsd - custoPorClinica[a].custoUsd);
+    const totalBRL = ids.reduce((s, id) => s + custoPorClinica[id].custoUsd, 0) * USD_BRL;
+    const totalEl = document.getElementById('custoTotalLabel');
+    if (totalEl) totalEl.textContent = 'Total: ' + fmtBRL(totalBRL);
+    cont.innerHTML = ids.length
+      ? ids.map(id => {
+          const c = custoPorClinica[id];
+          const custoBRL = c.custoUsd * USD_BRL;
+          const custoPorMsg = c.msgs ? custoBRL / c.msgs : 0;
+          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:12px;border-radius:9px;background:var(--bg-base,#0A0A0B);margin-bottom:8px;border-left:3px solid var(--gold,#C9A84C);">
+            <div><b>${MAPA_CLINICA_CACHE[id] || id.slice(0, 8)}</b><div style="font-size:12px;color:var(--text-muted,#888);">${c.msgs} mensagens · ${fmtBRL4(custoPorMsg)}/msg</div></div>
+            <div style="font-weight:800;color:var(--gold,#C9A84C);font-family:var(--mono,monospace);">${fmtBRL(custoBRL)}</div>
+          </div>`;
+        }).join('')
+      : '<p style="text-align:center;color:var(--text-muted,#888);padding:14px;font-size:13px;">Nenhum consumo registrado nesse período.</p>';
+  }
+
   // ── PAINEL ADMIN: pedidos de recarga + clínicas com saldo baixo ──
   window.verSaldosAdmin = async function () {
     if (!ehAdminMaster()) return;
@@ -185,6 +281,7 @@
     try {
       const { data: clinicas } = await database.from('clinicas').select('id, nome');
       (clinicas || []).forEach(c => mapaClinica[c.id] = c.nome);
+      MAPA_CLINICA_CACHE = mapaClinica;
 
       // pedidos de recarga PENDENTES
       const { data: peds } = await database.from('recargas_pedidos')
@@ -201,24 +298,9 @@
       });
       linhas.sort((a, b) => b.pctUsado - a.pctUsado);
 
-      // ── CUSTO REAL EM R$ POR CLÍNICA (mês atual, direto do log de uso) ──
-      // Lê brian_uso.custo_usd (já calculado certinho pela Edge Function,
-      // incluindo tokens de cache) — soma por clínica, só do mês corrente.
-      const agora = new Date();
-      const inicioMes = new Date(agora.getFullYear(), agora.getMonth(), 1).toISOString();
-      const { data: usos } = await database.from('brian_uso')
-        .select('clinic_id, custo_usd, tokens_in, tokens_out, created_at')
-        .gte('created_at', inicioMes);
-      (usos || []).forEach(u => {
-        const id = u.clinic_id;
-        if (!custoPorClinica[id]) custoPorClinica[id] = { msgs: 0, custoUsd: 0 };
-        // fallback pra linhas antigas sem custo_usd salvo (antes da correção)
-        const custo = (u.custo_usd != null && u.custo_usd > 0)
-          ? u.custo_usd
-          : ((u.tokens_in || 0) * (1 / 1e6) + (u.tokens_out || 0) * (5 / 1e6));
-        custoPorClinica[id].msgs++;
-        custoPorClinica[id].custoUsd += custo;
-      });
+      // ── CUSTO REAL EM R$ POR CLÍNICA (padrão: mês atual) ──
+      FILTRO_CUSTO = { periodo: 'mes', ...periodoParaDatas('mes') };
+      custoPorClinica = await buscarCustoPorClinica(FILTRO_CUSTO.inicio, FILTRO_CUSTO.fim);
     } catch (e) { console.error('[saldo-admin]', e); }
 
     let modal = document.getElementById('modalSaldosAdmin');
@@ -253,22 +335,22 @@
         }).join('')
       : '<p style="text-align:center;color:var(--text-muted,#888);padding:14px;font-size:13px;">✅ Nenhuma clínica com saldo baixo.</p>';
 
-    // SEÇÃO 3: custo real de IA por clínica (mês atual) — em tempo real
+    // SEÇÃO 3: custo real de IA por clínica (com filtro de período)
     const idsCusto = Object.keys(custoPorClinica).sort(
       (a, b) => custoPorClinica[b].custoUsd - custoPorClinica[a].custoUsd
     );
-    const totalCustoMesBRL = idsCusto.reduce((s, id) => s + custoPorClinica[id].custoUsd, 0) * USD_BRL;
-    const corpoCusto = idsCusto.length
+    const totalCustoBRL = idsCusto.reduce((s, id) => s + custoPorClinica[id].custoUsd, 0) * USD_BRL;
+    const corpoCustoInicial = idsCusto.length
       ? idsCusto.map(id => {
           const c = custoPorClinica[id];
           const custoBRL = c.custoUsd * USD_BRL;
           const custoPorMsg = c.msgs ? custoBRL / c.msgs : 0;
           return `<div style="display:flex;justify-content:space-between;align-items:center;padding:12px;border-radius:9px;background:var(--bg-base,#0A0A0B);margin-bottom:8px;border-left:3px solid var(--gold,#C9A84C);">
-            <div><b>${mapaClinica[id] || id.slice(0, 8)}</b><div style="font-size:12px;color:var(--text-muted,#888);">${c.msgs} mensagens · ${fmtBRL(custoPorMsg)}/msg</div></div>
+            <div><b>${mapaClinica[id] || id.slice(0, 8)}</b><div style="font-size:12px;color:var(--text-muted,#888);">${c.msgs} mensagens · ${fmtBRL4(custoPorMsg)}/msg</div></div>
             <div style="font-weight:800;color:var(--gold,#C9A84C);font-family:var(--mono,monospace);">${fmtBRL(custoBRL)}</div>
           </div>`;
         }).join('')
-      : '<p style="text-align:center;color:var(--text-muted,#888);padding:14px;font-size:13px;">Nenhum consumo registrado este mês ainda.</p>';
+      : '<p style="text-align:center;color:var(--text-muted,#888);padding:14px;font-size:13px;">Nenhum consumo registrado nesse período.</p>';
 
     modal.innerHTML = `
       <div style="background:var(--bg-surface,#141414);border:1px solid var(--gold-border,#333);border-radius:16px;padding:26px;max-width:560px;width:100%;max-height:90vh;overflow:auto;">
@@ -280,12 +362,25 @@
         ${corpoPedidos}
         <div style="font-size:14px;font-weight:700;color:var(--gold,#C9A84C);margin:20px 0 10px;">⚠️ Clínicas com saldo baixo</div>
         ${corpoSaldos}
-        <div style="display:flex;align-items:center;justify-content:space-between;margin:20px 0 10px;">
-          <div style="font-size:14px;font-weight:700;color:var(--gold,#C9A84C);">📊 Custo real de IA — mês atual</div>
-          <div style="font-size:13px;font-weight:700;color:var(--text-secondary,#C8C2AE);">Total: ${fmtBRL(totalCustoMesBRL)}</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin:20px 0 10px;flex-wrap:wrap;gap:8px;">
+          <div style="font-size:14px;font-weight:700;color:var(--gold,#C9A84C);">📊 Custo real de IA</div>
+          <div id="custoTotalLabel" style="font-size:13px;font-weight:700;color:var(--text-secondary,#C8C2AE);">Total: ${fmtBRL(totalCustoBRL)}</div>
         </div>
-        <div style="font-size:11px;color:var(--text-muted,#888);margin-bottom:10px;">Atualizado em tempo real, direto do log de uso (inclui tokens de cache). Câmbio R$ ${USD_BRL.toFixed(2)}.</div>
-        ${corpoCusto}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
+          <button class="btn btn-sm custo-per-btn" data-per="mes" onclick="filtrarCustoBrian('mes')" style="background:var(--gold-pale,rgba(201,168,76,0.15));border-color:var(--gold-border,#C9A84C);color:var(--gold,#C9A84C);font-weight:600;">Este mês</button>
+          <button class="btn btn-sm custo-per-btn" data-per="mes_passado" onclick="filtrarCustoBrian('mes_passado')">Mês passado</button>
+          <button class="btn btn-sm custo-per-btn" data-per="7dias" onclick="filtrarCustoBrian('7dias')">Últimos 7 dias</button>
+          <button class="btn btn-sm custo-per-btn" data-per="personalizado" onclick="filtrarCustoBrian('personalizado')"><i class="ti ti-calendar"></i> Personalizado</button>
+        </div>
+        <div id="custoPersonalizadoBox" style="display:none;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;background:var(--bg-elevated,#1a1a1a);padding:8px 10px;border-radius:8px;">
+          <span style="font-size:12px;color:var(--text-secondary,#C8C2AE);">De</span>
+          <input type="date" id="custoDataIni" style="font-size:12px;padding:5px 8px;border-radius:6px;border:1px solid #333;background:var(--bg-base,#0A0A0B);color:#fff;"/>
+          <span style="font-size:12px;color:var(--text-secondary,#C8C2AE);">até</span>
+          <input type="date" id="custoDataFim" style="font-size:12px;padding:5px 8px;border-radius:6px;border:1px solid #333;background:var(--bg-base,#0A0A0B);color:#fff;"/>
+          <button class="btn btn-sm btn-primary" onclick="filtrarCustoBrianPersonalizado()">Aplicar</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted,#888);margin-bottom:10px;">Direto do log de uso (inclui tokens de cache). Câmbio R$ ${USD_BRL.toFixed(2)}.</div>
+        <div id="custoSecaoContainer">${corpoCustoInicial}</div>
       </div>`;
     document.body.appendChild(modal);
     modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
