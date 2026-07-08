@@ -1205,6 +1205,43 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
 
                   // 2) executa o agendamento (se houver) — cria lead + consulta + confirma
                   if (campoAgendar && campoAgendar.data && campoAgendar.hora) {
+                    // ── TRAVA ANTI-DATA-ERRADA ──
+                    // O modelo às vezes escreve a data errada no marcador AGENDAR
+                    // (ex: paciente pede "amanhã" e o Brian grava uma quinta-feira
+                    // de outra semana). Aqui o SERVIDOR recalcula "hoje"/"amanhã"
+                    // de verdade (não confia no modelo) e confere contra as ÚLTIMAS
+                    // mensagens da conversa (não só a que disparou esta resposta,
+                    // já que a palavra "amanhã" pode ter sido dita 1-2 mensagens
+                    // antes, ex: paciente só respondeu "9:30" depois). Se detectar
+                    // menção a "hoje"/"amanhã" e a data do marcador não bater,
+                    // corrige automaticamente ANTES de gravar no banco.
+                    try {
+                      const fmtBRcheck = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' });
+                      const hojeISOcheck = fmtBRcheck.format(new Date());
+                      const baseBRTcheck = new Date(`${hojeISOcheck}T12:00:00-03:00`);
+                      const amanhaISOcheck = new Date(baseBRTcheck.getTime() + 24 * 3600 * 1000).toISOString().split('T')[0];
+
+                      const sufixoCheck = String(phone).replace(/\D/g, '').slice(-8);
+                      const janelaCheck = new Date(Date.now() - 30 * 60 * 1000).toISOString(); // últimos 30min
+                      const histR = await fetch(
+                        `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixoCheck}&created_at=gte.${encodeURIComponent(janelaCheck)}&select=content&order=created_at.desc&limit=6`,
+                        { headers: sbHeaders }
+                      );
+                      const histA = histR.ok ? await histR.json() : [];
+                      const textoRecente = (histA || []).map(m => String(m.content || '')).join(' ').toLowerCase();
+
+                      const mencionaAmanha = /\bamanh[ãa]\b/.test(textoRecente);
+                      const mencionaHoje = /\bhoje\b/.test(textoRecente);
+
+                      if (mencionaAmanha && campoAgendar.data !== amanhaISOcheck) {
+                        console.log(`[BRIAN-AGENDAR] ⚠️ CORREÇÃO ANTI-DATA-ERRADA: conversa menciona "amanhã" mas marcador gravou ${campoAgendar.data} — corrigindo pra ${amanhaISOcheck}`);
+                        campoAgendar.data = amanhaISOcheck;
+                      } else if (mencionaHoje && !mencionaAmanha && campoAgendar.data !== hojeISOcheck) {
+                        console.log(`[BRIAN-AGENDAR] ⚠️ CORREÇÃO ANTI-DATA-ERRADA: conversa menciona "hoje" mas marcador gravou ${campoAgendar.data} — corrigindo pra ${hojeISOcheck}`);
+                        campoAgendar.data = hojeISOcheck;
+                      }
+                    } catch (e) { console.log('[BRIAN-AGENDAR] erro na checagem anti-data-errada (segue sem corrigir):', e.message); }
+
                     const lead = await brianAcharOuCriarLead(clinic_id, phone, campoAgendar.nome || (campoLead && campoLead.nome));
                     if (lead && lead.id) {
                       // resolve o dentista pelo direcionamento (nome vindo no marcador) ou padrão da clínica
