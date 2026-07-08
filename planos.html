@@ -83,15 +83,15 @@
 
 <div class="periodo-tabs">
   <button class="periodo-btn active" onclick="setPeriodo('mensal')">Mensal</button>
+  <button class="periodo-btn" onclick="setPeriodo('trimestral')">Trimestral <span class="desconto">10% off</span></button>
   <button class="periodo-btn" onclick="setPeriodo('semestral')">Semestral <span class="desconto">15% off</span></button>
-  <button class="periodo-btn" onclick="setPeriodo('anual')">Anual <span class="desconto">25% off</span></button>
 </div>
 
 <div class="plans">
   <div class="plan-card" id="card-basico">
     <div class="plan-name">Básico</div>
     <div class="plan-desc">Tudo que sua clínica precisa + IA</div>
-    <div class="plan-price"><span class="price-value" id="price-basico">R$ 159,90</span><span class="price-period">/mês</span></div>
+    <div class="plan-price"><span class="price-value" id="price-basico">R$ 174,90</span><span class="price-period">/mês</span></div>
     <div class="price-total" id="total-basico"></div>
     <ul class="plan-features">
       <li>CRM completo + automações</li>
@@ -108,13 +108,13 @@
     <div class="popular-badge">⭐ Mais popular</div>
     <div class="plan-name">Premium</div>
     <div class="plan-desc">Para clínicas com mais movimento</div>
-    <div class="plan-price"><span class="price-value" id="price-premium">R$ 209,90</span><span class="price-period">/mês</span></div>
+    <div class="plan-price"><span class="price-value" id="price-premium">R$ 249,90</span><span class="price-period">/mês</span></div>
     <div class="price-total" id="total-premium"></div>
     <ul class="plan-features">
       <li>CRM completo + automações</li>
       <li>Multi-dentista e follow-up</li>
       <li>🤖 Brian IA no WhatsApp</li>
-      <li><strong>3.000 mensagens de IA/mês</strong></li>
+      <li><strong>2.000 mensagens de IA/mês</strong></li>
       <li>1 número de WhatsApp incluso</li>
       <li class="addon-hint">+ WhatsApp extra: R$ 39,90/mês</li>
     </ul>
@@ -124,13 +124,13 @@
   <div class="plan-card" id="card-platinum">
     <div class="plan-name">Platinum</div>
     <div class="plan-desc">Para clínicas que querem o máximo</div>
-    <div class="plan-price"><span class="price-value" id="price-platinum">R$ 269,90</span><span class="price-period">/mês</span></div>
+    <div class="plan-price"><span class="price-value" id="price-platinum">R$ 319,90</span><span class="price-period">/mês</span></div>
     <div class="price-total" id="total-platinum"></div>
     <ul class="plan-features">
       <li>CRM completo + automações</li>
       <li>Multi-dentista e follow-up</li>
       <li>🤖 Brian IA no WhatsApp</li>
-      <li><strong>5.000 mensagens de IA/mês</strong></li>
+      <li><strong>3.000 mensagens de IA/mês</strong></li>
       <li>1 número de WhatsApp incluso</li>
       <li class="addon-hint">+ WhatsApp extra: R$ 39,90/mês</li>
       <li>Prioridade no suporte</li>
@@ -157,7 +157,7 @@
   </details>
   <details class="faq-item">
     <summary>Como escolho o plano certo?</summary>
-    <p>Os planos se diferenciam pela quantidade de mensagens de IA que o Brian responde por mês (1.000, 3.000 ou 5.000). Quanto mais movimento de pacientes no WhatsApp, mais mensagens você precisa. Todos os planos incluem o CRM completo, automações e o Brian IA — a diferença é só o volume de mensagens.</p>
+    <p>Os planos se diferenciam pela quantidade de mensagens de IA que o Brian responde por mês (1.000, 2.000 ou 3.000). Quanto mais movimento de pacientes no WhatsApp, mais mensagens você precisa. Todos os planos incluem o CRM completo, automações e o Brian IA — a diferença é só o volume de mensagens.</p>
   </details>
   <details class="faq-item">
     <summary>E se eu precisar de mais de um número de WhatsApp?</summary>
@@ -179,15 +179,15 @@ const { createClient } = supabase;
 const db = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const precos = {
-  basico:   { mensal: 159.90, semestral: 135.91, anual: 119.93 },
-  premium:  { mensal: 209.90, semestral: 178.41, anual: 157.43 },
-  platinum: { mensal: 269.90, semestral: 229.41, anual: 202.42 },
+  basico:   { mensal: 174.90, trimestral: 157.41, semestral: 148.66 },
+  premium:  { mensal: 249.90, trimestral: 224.91, semestral: 212.41 },
+  platinum: { mensal: 319.90, trimestral: 287.91, semestral: 271.91 },
 };
 
 const totais = {
-  basico:   { mensal: '', semestral: 'R$ 815,49 cobrado a cada 6 meses', anual: 'R$ 1.439,10 cobrado anualmente' },
-  premium:  { mensal: '', semestral: 'R$ 1.070,49 cobrado a cada 6 meses', anual: 'R$ 1.889,10 cobrado anualmente' },
-  platinum: { mensal: '', semestral: 'R$ 1.376,49 cobrado a cada 6 meses', anual: 'R$ 2.429,10 cobrado anualmente' },
+  basico:   { mensal: '', trimestral: 'R$ 472,23 cobrado a cada 3 meses', semestral: 'R$ 891,96 cobrado a cada 6 meses' },
+  premium:  { mensal: '', trimestral: 'R$ 674,73 cobrado a cada 3 meses', semestral: 'R$ 1.274,46 cobrado a cada 6 meses' },
+  platinum: { mensal: '', trimestral: 'R$ 863,73 cobrado a cada 3 meses', semestral: 'R$ 1.631,46 cobrado a cada 6 meses' },
 };
 
 let periodoAtual = 'mensal';
@@ -265,7 +265,7 @@ function marcarPlanoAtual(plano) {
 function setPeriodo(p) {
   periodoAtual = p;
   document.querySelectorAll('.periodo-btn').forEach((btn, i) => {
-    btn.classList.toggle('active', ['mensal','semestral','anual'][i] === p);
+    btn.classList.toggle('active', ['mensal','trimestral','semestral'][i] === p);
   });
   ['basico','premium','platinum'].forEach(plano => {
     document.getElementById('price-' + plano).textContent = 'R$ ' + precos[plano][p].toFixed(2).replace('.',',');
