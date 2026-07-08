@@ -21,7 +21,7 @@
       ov.innerHTML = `
         <div class="modal" style="max-width:820px;width:96vw;">
           <div class="modal-header">
-            <h3><i class="ti ti-scale" style="margin-right:8px;color:var(--gold);"></i>Claude vs GPT-4.1 mini (teste sombra)</h3>
+            <h3><i class="ti ti-scale" style="margin-right:8px;color:var(--gold);"></i>Claude vs outra IA (teste sombra)</h3>
             <button class="btn btn-ghost btn-icon" onclick="closeModal('modalSombra')"><i class="ti ti-x"></i></button>
           </div>
           <div class="modal-body" id="sombraBody" style="max-height:74vh;overflow-y:auto;"></div>
@@ -59,7 +59,7 @@
           <div style="font-size:16px;font-weight:700;">R$ ${custoTotalClaude.toFixed(3).replace('.', ',')}</div>
         </div>
         <div style="flex:1;background:var(--bg-card,#1C1C20);border-radius:10px;padding:10px 14px;">
-          <div style="font-size:11px;color:var(--text-secondary);">Custo GPT (${linhas.length} msgs)</div>
+          <div style="font-size:11px;color:var(--text-secondary);">Custo IA testada (${linhas.length} msgs)</div>
           <div style="font-size:16px;font-weight:700;color:var(--gold,#C9A84C);">R$ ${custoTotalGPT.toFixed(3).replace('.', ',')}</div>
         </div>
       </div>
@@ -72,7 +72,7 @@
               <div style="font-size:13px;">${(l.resposta_claude || '—')}</div>
             </div>
             <div style="flex:1;min-width:220px;padding:8px 10px;background:var(--bg-base,#0A0A0B);border-radius:8px;border-left:3px solid var(--gold,#C9A84C);">
-              <div style="font-size:10px;color:var(--gold,#C9A84C);font-weight:700;text-transform:uppercase;margin-bottom:4px;">GPT-4.1 mini (teste, não enviado)</div>
+              <div style="font-size:10px;color:var(--gold,#C9A84C);font-weight:700;text-transform:uppercase;margin-bottom:4px;">${l.modelo_sombra || 'Outra IA'} (teste, não enviado)</div>
               <div style="font-size:13px;">${(l.resposta_openai || '—')}</div>
             </div>
           </div>
