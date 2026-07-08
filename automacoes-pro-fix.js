@@ -27,6 +27,7 @@
   ];
   const ACOES = [
     { v: 'mensagem',      l: 'enviar uma mensagem no WhatsApp' },
+    { v: 'mensagem_ia',   l: '✨ enviar mensagem com IA (Brian retoma a conversa)' },
     { v: 'tarefa',        l: 'criar uma tarefa para a equipe' },
     { v: 'mudar_status',  l: 'mudar o status do lead' },
   ];
@@ -269,6 +270,12 @@
               💡 <b>Anti-repetição:</b> escreva <b>2 a 4 versões</b> da mensagem separadas por uma linha contendo só três traços (<b>---</b>).
               A cada envio, o sistema <b>sorteia uma versão</b> — cada lead recebe uma mensagem diferente (mais humano e mais seguro contra bloqueio do WhatsApp).
             </div>
+            <div id="apHintIA" style="display:none;font-size:11px;margin-top:6px;background:rgba(120,90,220,0.10);border:1px solid rgba(140,110,240,0.45);border-radius:8px;padding:8px 10px;line-height:1.55;color:var(--text,inherit);">
+              ✨ <b>Follow-up com IA:</b> pra leads <b>quentes</b>, o Brian lê a conversa e gera uma retomada <b>personalizada</b> (cita o procedimento, a dúvida que ficou no ar e até oferece horários reais). Consome <b>1 mensagem do saldo Brian</b> por envio.<br>
+              🛡️ <b>Proteções automáticas:</b> só leads engajados (2+ respostas, conversa recente, interesse claro) · máx <b>2 por lead</b> · limite diário por clínica · nunca usa a reserva de saldo do atendimento ao vivo.<br>
+              📝 A mensagem acima é o <b>plano B</b>: leads mornos (ou sem saldo/limite) recebem ela como template normal — o follow-up nunca deixa de sair.
+              <span id="apHintIABrian"></span>
+            </div>
             <label class="form-label" style="font-size:12px;color:var(--text-muted);margin-top:12px;display:block;">Imagem (opcional)</label>
             <input type="text" class="form-input" id="apImagemUrl" placeholder="https://... (link público da imagem)" style="width:100%;" value="${r.imagem_url || ''}"/>
             <div style="display:flex;gap:8px;margin-top:6px;align-items:center;">
@@ -334,7 +341,27 @@
     // mensagem vs status conforme ação
     const blocoMsg = document.getElementById('apBlocoMensagem');
     const blocoStatus = document.getElementById('apBlocoStatus');
-    if (blocoMsg) blocoMsg.style.display = (acao === 'mensagem' || acao === 'tarefa') ? 'block' : 'none';
+    if (blocoMsg) blocoMsg.style.display = (acao === 'mensagem' || acao === 'mensagem_ia' || acao === 'tarefa') ? 'block' : 'none';
+    // hint do follow-up IA (só quando a ação é mensagem_ia) + cadeado se a clínica não tem Brian
+    const hintIA = document.getElementById('apHintIA');
+    if (hintIA) {
+      hintIA.style.display = (acao === 'mensagem_ia') ? 'block' : 'none';
+      if (acao === 'mensagem_ia') {
+        (async () => {
+          try {
+            if (window.__apBrianOK === undefined) {
+              const clinic = currentClinic();
+              const { data: bc } = await db.from('brian_config').select('brian_liberado').eq('clinic_id', clinic.id).maybeSingle();
+              window.__apBrianOK = !!(bc && bc.brian_liberado === true);
+            }
+            const span = document.getElementById('apHintIABrian');
+            if (span) span.innerHTML = window.__apBrianOK
+              ? '<br>✅ <b>Brian ativo nesta clínica</b> — a IA vai gerar as retomadas.'
+              : '<br>🔒 <b>Esta clínica não tem o Brian IA ativo</b> — a regra funciona, mas todos recebem o template (plano B). Ative o Brian pra liberar as retomadas personalizadas.';
+          } catch (e) {}
+        })();
+      }
+    }
     if (blocoStatus) blocoStatus.style.display = (acao === 'mudar_status') ? 'block' : 'none';
   };
 
@@ -365,8 +392,8 @@
       espera_valor = usaEspera(evento) ? (parseInt(document.getElementById('apEsperaValor').value) || 0) : 0;
       espera_unidade = document.getElementById('apEsperaUnidade')?.value || 'horas';
     }
-    const mensagem = (acao === 'mensagem' || acao === 'tarefa') ? (document.getElementById('apMensagem').value || '').trim() : null;
-    const imagem_url = (acao === 'mensagem') ? ((document.getElementById('apImagemUrl')?.value || '').trim() || null) : null;
+    const mensagem = (acao === 'mensagem' || acao === 'mensagem_ia' || acao === 'tarefa') ? (document.getElementById('apMensagem').value || '').trim() : null;
+    const imagem_url = (acao === 'mensagem' || acao === 'mensagem_ia') ? ((document.getElementById('apImagemUrl')?.value || '').trim() || null) : null;
     // condição por procedimento (só no follow-up de dias sem resposta)
     const condProcTxt = (evento === 'dias_sem_resposta') ? ((document.getElementById('apCondProc')?.value || '').trim()) : '';
     const condicao = condProcTxt ? { procedimento: condProcTxt } : null;
@@ -374,7 +401,7 @@
     const ehGlobalCheck = document.getElementById('apGlobal');
     const global = ehGlobalCheck ? ehGlobalCheck.checked : false;
 
-    if ((acao === 'mensagem' || acao === 'tarefa') && !mensagem) { setErro('Escreva a mensagem.'); return; }
+    if ((acao === 'mensagem' || acao === 'mensagem_ia' || acao === 'tarefa') && !mensagem) { setErro(acao === 'mensagem_ia' ? 'Escreva a mensagem plano B (usada quando a IA não roda).' : 'Escreva a mensagem.'); return; }
 
     const dados = {
       nome, evento, espera_valor, espera_unidade, acao, mensagem, nova_status,
