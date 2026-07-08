@@ -104,7 +104,26 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
       const modo = cfg.auto_modo || (cfg.auto_so_fora_horario === false ? 'sempre' : 'fora');
       if (modo !== 'sempre') {
         const dentro = dentroDoHorario(cfg.horario_funcionamento);
-        if (dentro) return motivo(false, 'dentro do horário de atendimento (modo Cauteloso: humano assume)');
+        if (dentro) {
+          // ── EXCEÇÃO: CONVERSA ASSUMIDA PELO BRIAN (resgate do vácuo) ──
+          // Se a última mensagem da CLÍNICA nesta conversa foi do próprio Brian
+          // (BRIAN_AUTO) nas últimas 6h, ele já assumiu este atendimento (a
+          // equipe não respondeu a tempo) e CONTINUA respondendo dentro do
+          // horário — até um humano entrar (a Trava 5 abaixo devolve pra equipe
+          // assim que alguém da clínica responder manualmente).
+          let brianAssumiu = false;
+          try {
+            const seisHoras = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+            const ultR = await fetch(
+              `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixo}&from_me=eq.true&created_at=gte.${seisHoras}&select=contact_name&order=created_at.desc&limit=1`,
+              { headers: sbHeaders }
+            );
+            const uArrR = ultR.ok ? await ultR.json() : [];
+            brianAssumiu = !!(uArrR[0] && uArrR[0].contact_name === 'BRIAN_AUTO');
+          } catch (e) { /* na dúvida, comportamento padrão (recua) */ }
+          if (!brianAssumiu) return motivo(false, 'dentro do horário de atendimento (modo Cauteloso: humano assume)');
+          console.log(`[BRIAN-RESGATE] conversa assumida pelo Brian — continua respondendo dentro do horário | ...${sufixo}`);
+        }
       }
 
       // ── Trava 5: humano respondeu recentemente? (recua) ──
