@@ -35,6 +35,10 @@
   const ALERTA_AMARELO = 80; // %
   const ALERTA_VERMELHO = 90; // %
 
+  // câmbio USD→BRL pra exibir o custo real de IA em reais (ajuste quando quiser)
+  const USD_BRL = 5.40;
+  function fmtBRL(n) { return 'R$ ' + Number(n || 0).toFixed(2).replace('.', ','); }
+
   // calcula o saldo de uma linha brian_saldo
   function calcSaldo(s) {
     if (!s) return null;
@@ -177,7 +181,7 @@
   window.verSaldosAdmin = async function () {
     if (!ehAdminMaster()) return;
     const database = getDb();
-    let linhas = [], pedidos = [], mapaClinica = {};
+    let linhas = [], pedidos = [], mapaClinica = {}, custoPorClinica = {};
     try {
       const { data: clinicas } = await database.from('clinicas').select('id, nome');
       (clinicas || []).forEach(c => mapaClinica[c.id] = c.nome);
@@ -196,6 +200,25 @@
         }
       });
       linhas.sort((a, b) => b.pctUsado - a.pctUsado);
+
+      // ── CUSTO REAL EM R$ POR CLÍNICA (mês atual, direto do log de uso) ──
+      // Lê brian_uso.custo_usd (já calculado certinho pela Edge Function,
+      // incluindo tokens de cache) — soma por clínica, só do mês corrente.
+      const agora = new Date();
+      const inicioMes = new Date(agora.getFullYear(), agora.getMonth(), 1).toISOString();
+      const { data: usos } = await database.from('brian_uso')
+        .select('clinic_id, custo_usd, tokens_in, tokens_out, created_at')
+        .gte('created_at', inicioMes);
+      (usos || []).forEach(u => {
+        const id = u.clinic_id;
+        if (!custoPorClinica[id]) custoPorClinica[id] = { msgs: 0, custoUsd: 0 };
+        // fallback pra linhas antigas sem custo_usd salvo (antes da correção)
+        const custo = (u.custo_usd != null && u.custo_usd > 0)
+          ? u.custo_usd
+          : ((u.tokens_in || 0) * (1 / 1e6) + (u.tokens_out || 0) * (5 / 1e6));
+        custoPorClinica[id].msgs++;
+        custoPorClinica[id].custoUsd += custo;
+      });
     } catch (e) { console.error('[saldo-admin]', e); }
 
     let modal = document.getElementById('modalSaldosAdmin');
@@ -230,6 +253,23 @@
         }).join('')
       : '<p style="text-align:center;color:var(--text-muted,#888);padding:14px;font-size:13px;">✅ Nenhuma clínica com saldo baixo.</p>';
 
+    // SEÇÃO 3: custo real de IA por clínica (mês atual) — em tempo real
+    const idsCusto = Object.keys(custoPorClinica).sort(
+      (a, b) => custoPorClinica[b].custoUsd - custoPorClinica[a].custoUsd
+    );
+    const totalCustoMesBRL = idsCusto.reduce((s, id) => s + custoPorClinica[id].custoUsd, 0) * USD_BRL;
+    const corpoCusto = idsCusto.length
+      ? idsCusto.map(id => {
+          const c = custoPorClinica[id];
+          const custoBRL = c.custoUsd * USD_BRL;
+          const custoPorMsg = c.msgs ? custoBRL / c.msgs : 0;
+          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:12px;border-radius:9px;background:var(--bg-base,#0A0A0B);margin-bottom:8px;border-left:3px solid var(--gold,#C9A84C);">
+            <div><b>${mapaClinica[id] || id.slice(0, 8)}</b><div style="font-size:12px;color:var(--text-muted,#888);">${c.msgs} mensagens · ${fmtBRL(custoPorMsg)}/msg</div></div>
+            <div style="font-weight:800;color:var(--gold,#C9A84C);font-family:var(--mono,monospace);">${fmtBRL(custoBRL)}</div>
+          </div>`;
+        }).join('')
+      : '<p style="text-align:center;color:var(--text-muted,#888);padding:14px;font-size:13px;">Nenhum consumo registrado este mês ainda.</p>';
+
     modal.innerHTML = `
       <div style="background:var(--bg-surface,#141414);border:1px solid var(--gold-border,#333);border-radius:16px;padding:26px;max-width:560px;width:100%;max-height:90vh;overflow:auto;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
@@ -240,6 +280,12 @@
         ${corpoPedidos}
         <div style="font-size:14px;font-weight:700;color:var(--gold,#C9A84C);margin:20px 0 10px;">⚠️ Clínicas com saldo baixo</div>
         ${corpoSaldos}
+        <div style="display:flex;align-items:center;justify-content:space-between;margin:20px 0 10px;">
+          <div style="font-size:14px;font-weight:700;color:var(--gold,#C9A84C);">📊 Custo real de IA — mês atual</div>
+          <div style="font-size:13px;font-weight:700;color:var(--text-secondary,#C8C2AE);">Total: ${fmtBRL(totalCustoMesBRL)}</div>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted,#888);margin-bottom:10px;">Atualizado em tempo real, direto do log de uso (inclui tokens de cache). Câmbio R$ ${USD_BRL.toFixed(2)}.</div>
+        ${corpoCusto}
       </div>`;
     document.body.appendChild(modal);
     modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
