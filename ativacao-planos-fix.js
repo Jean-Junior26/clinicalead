@@ -17,11 +17,17 @@
     return r === 'admin' || r === 'administrador';
   }
 
-  // catálogo de planos (msgs + preço cheio de referência)
+  // catálogo de planos CRM completo (msgs + preço cheio de referência)
   const PLANOS = {
-    basico:   { nome: 'Básico',   msgs: 1000, preco: 159.90 },
-    premium:  { nome: 'Premium',  msgs: 3000, preco: 209.90 },
-    platinum: { nome: 'Platinum', msgs: 5000, preco: 269.90 },
+    basico:   { nome: 'Básico',   msgs: 1000, preco: 174.90 },
+    premium:  { nome: 'Premium',  msgs: 2000, preco: 249.90 },
+    platinum: { nome: 'Platinum', msgs: 3000, preco: 319.90 },
+  };
+  // catálogo Brian Solo (só a IA de atendimento, sem CRM completo)
+  const PLANOS_SOLO = {
+    basico:   { nome: 'Solo Básico',   msgs: 1000, preco: 119.90 },
+    premium:  { nome: 'Solo Premium',  msgs: 2000, preco: 199.90 },
+    platinum: { nome: 'Solo Platinum', msgs: 3000, preco: 249.90 },
   };
   const WHATSAPP_EXTRA = 39.90;
 
@@ -55,11 +61,17 @@
           <option value="">Selecione a clínica…</option>${opcoesClinica}
         </select>
 
+        <label style="display:block;font-size:13px;color:var(--text-secondary,#8A8570);margin-bottom:6px;">Tipo de produto</label>
+        <select id="atvTipoProduto" class="form-select" style="width:100%;margin-bottom:16px;padding:9px;border-radius:8px;background:var(--bg-base,#0A0A0B);border:1px solid var(--gold-border,#333);color:var(--text-primary,#F0EAD6);">
+          <option value="crm_completo">CRM completo</option>
+          <option value="brian_solo">🤖 Brian Solo (só a IA de atendimento)</option>
+        </select>
+
         <label style="display:block;font-size:13px;color:var(--text-secondary,#8A8570);margin-bottom:6px;">Plano</label>
         <select id="atvPlano" class="form-select" style="width:100%;margin-bottom:16px;padding:9px;border-radius:8px;background:var(--bg-base,#0A0A0B);border:1px solid var(--gold-border,#333);color:var(--text-primary,#F0EAD6);">
-          <option value="basico">Básico — 1.000 msgs — R$ 159,90</option>
-          <option value="premium" selected>Premium — 3.000 msgs — R$ 209,90</option>
-          <option value="platinum">Platinum — 5.000 msgs — R$ 269,90</option>
+          <option value="basico">Básico — 1.000 msgs — R$ 174,90</option>
+          <option value="premium" selected>Premium — 2.000 msgs — R$ 249,90</option>
+          <option value="platinum">Platinum — 3.000 msgs — R$ 319,90</option>
         </select>
 
         <div style="display:flex;gap:12px;margin-bottom:16px;">
@@ -83,9 +95,19 @@
     document.body.appendChild(modal);
     modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
 
-    // recalcula o valor sugerido quando muda plano ou WhatsApp
+    // recalcula o valor sugerido quando muda plano, tipo de produto ou WhatsApp
+    const catalogoAtivo = () => document.getElementById('atvTipoProduto').value === 'brian_solo' ? PLANOS_SOLO : PLANOS;
+    const atualizarOpcoesPlano = () => {
+      const cat = catalogoAtivo();
+      const sel = document.getElementById('atvPlano');
+      const atual = sel.value || 'premium';
+      sel.innerHTML = Object.entries(cat).map(([id, p]) =>
+        `<option value="${id}" ${id === atual ? 'selected' : ''}>${p.nome} — ${p.msgs.toLocaleString('pt-BR')} msgs — R$ ${p.preco.toFixed(2).replace('.', ',')}</option>`
+      ).join('');
+    };
     const recalc = () => {
-      const plano = PLANOS[document.getElementById('atvPlano').value];
+      const cat = catalogoAtivo();
+      const plano = cat[document.getElementById('atvPlano').value];
       const whats = parseInt(document.getElementById('atvWhats').value) || 0;
       const sugerido = plano.preco + whats * WHATSAPP_EXTRA;
       const campoValor = document.getElementById('atvValor');
@@ -93,6 +115,7 @@
       const resumo = document.getElementById('atvResumo');
       resumo.innerHTML = `Preço cheio: R$ ${plano.preco.toFixed(2).replace('.', ',')}${whats > 0 ? ` + ${whats} WhatsApp (R$ ${(whats*WHATSAPP_EXTRA).toFixed(2).replace('.', ',')})` : ''} = <b>R$ ${sugerido.toFixed(2).replace('.', ',')}</b>. Edite o valor acima se for dar desconto.`;
     };
+    document.getElementById('atvTipoProduto').onchange = () => { atualizarOpcoesPlano(); recalc(); };
     document.getElementById('atvPlano').onchange = recalc;
     document.getElementById('atvWhats').oninput = recalc;
     recalc();
@@ -102,22 +125,27 @@
     if (!ehAdminMaster()) return;
     const database = getDb();
     const clinicId = document.getElementById('atvClinica').value;
+    const tipoProduto = document.getElementById('atvTipoProduto').value;
     const planoId = document.getElementById('atvPlano').value;
     const whats = parseInt(document.getElementById('atvWhats').value) || 0;
     const dia = parseInt(document.getElementById('atvDia').value) || new Date().getDate();
     const valor = parseFloat(document.getElementById('atvValor').value) || 0;
-    const plano = PLANOS[planoId];
+    const plano = (tipoProduto === 'brian_solo' ? PLANOS_SOLO : PLANOS)[planoId];
 
     if (!clinicId) { if (typeof toast === 'function') toast('Selecione a clínica', 'error'); return; }
     if (dia < 1 || dia > 31) { if (typeof toast === 'function') toast('Dia de renovação inválido', 'error'); return; }
 
     const resumoConfirm = `Ativar ${plano.nome} (${plano.msgs.toLocaleString('pt-BR')} msgs) para esta clínica?\n\n`
+      + `Tipo: ${tipoProduto === 'brian_solo' ? 'Brian Solo (só IA)' : 'CRM completo'}\n`
       + `WhatsApp adicional: ${whats}\n`
       + `Valor cobrado: R$ ${valor.toFixed(2).replace('.', ',')}\n`
       + `Renova todo dia ${dia}`;
     if (!confirm(resumoConfirm)) return;
 
     try {
+      // grava o tipo de produto na clínica (controla o que aparece no menu dela)
+      await database.from('clinicas').update({ tipo_produto: tipoProduto }).eq('id', clinicId);
+
       // verifica se já existe saldo pra essa clínica
       const { data: existente } = await database.from('brian_saldo')
         .select('clinic_id, usado_mes, extra_comprado, extra_usado')
