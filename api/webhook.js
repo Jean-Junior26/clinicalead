@@ -1086,12 +1086,37 @@ const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae00
                 } catch (e) { /* se a checagem falhar, segue e responde normal */ }
 
                 console.log(`[BRIAN-ENVIO] 🤖 gerando resposta para ${phone}...`);
-                const respBrian = await fetch(`${SUPABASE_URL}/functions/v1/brian`, {
+                let respBrian = await fetch(`${SUPABASE_URL}/functions/v1/brian`, {
                   method: 'POST',
                   headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' },
                   body: JSON.stringify({ action: 'responder_auto', clinic_id, phone, ultima_msg: content }),
                 });
-                const dataBrian = respBrian.ok ? await respBrian.json() : null;
+                let dataBrian = respBrian.ok ? await respBrian.json() : null;
+
+                // ── RETRY (1x) — antes, se a IA falhasse (ex: limite de taxa
+                // excedido no free tier, erro momentâneo de rede), o sistema
+                // simplesmente NÃO respondia nada, silenciosamente, sem log
+                // nem aviso. Agora tenta de novo 1 vez após 2s, e se falhar
+                // de novo, registra um log de erro bem visível pra investigar.
+                if (!dataBrian || !dataBrian.ok) {
+                  const motivoFalha1 = dataBrian?.erro || `HTTP ${respBrian.status}`;
+                  console.log(`[BRIAN-ERRO] ⚠️ falhou na 1ª tentativa pra ${phone} (clínica ${clinic_id}): ${motivoFalha1} — tentando de novo em 2s...`);
+                  await new Promise(r => setTimeout(r, 2000));
+                  try {
+                    respBrian = await fetch(`${SUPABASE_URL}/functions/v1/brian`, {
+                      method: 'POST',
+                      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'responder_auto', clinic_id, phone, ultima_msg: content }),
+                    });
+                    dataBrian = respBrian.ok ? await respBrian.json() : null;
+                  } catch (e) { console.log(`[BRIAN-ERRO] retry também falhou (exceção): ${e.message}`); }
+
+                  if (!dataBrian || !dataBrian.ok) {
+                    const motivoFalha2 = dataBrian?.erro || `HTTP ${respBrian.status}`;
+                    console.log(`[BRIAN-ERRO] 🔴 falhou DE NOVO pra ${phone} (clínica ${clinic_id}): ${motivoFalha2} — paciente ficará sem resposta automática nesta mensagem. Verificar manualmente.`);
+                  }
+                }
+
                 let textoResposta = dataBrian && dataBrian.ok ? dataBrian.sugestao : null;
 
                 if (textoResposta && instanceName) {
