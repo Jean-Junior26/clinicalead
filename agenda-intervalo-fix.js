@@ -137,17 +137,27 @@
         let template = null;
         if (autoConf) template = autoConf.ativo ? autoConf.mensagem : null;
         else if (typeof AUTOMACOES_DEFAULTS !== 'undefined') template = AUTOMACOES_DEFAULTS.find(a => a.tipo === 'confirmacao')?.msg || null;
-        if (template) {
-          const dataFormatada = new Date(data + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
-          const horaTexto = horaFim ? `${hora} às ${horaFim}` : hora;
-          const msg = template
-            .replaceAll('{nome}', lead.nome || '').replaceAll('{clinica}', clinic.nome || clinic.name || '')
-            .replaceAll('{data}', dataFormatada).replaceAll('{hora}', horaTexto)
-            .replaceAll('{procedimento}', procedimento || lead.procedimento || 'sua avaliação');
-          await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg);
-          toast('Confirmação enviada por WhatsApp! ✓');
+        // ── GARANTIA: se não achou nenhuma regra configurada (nem específica da
+        // clínica, nem padrão do sistema), usa uma mensagem fixa de confirmação.
+        // Antes, sem regra 'confirmacao' cadastrada, a mensagem simplesmente
+        // NUNCA era enviada — silenciosamente, sem log nem aviso. Isso afetava
+        // TODO agendamento feito por essa tela (não só encaixe), sempre que a
+        // clínica não tinha essa automação específica configurada.
+        if (!template) {
+          template = 'Olá, {nome}! 🎉 Sua consulta está *confirmada*!\n\n📅 *Data:* {data}\n⏰ *Horário:* {hora}\n\nQualquer dúvida, é só chamar aqui! Te esperamos 😊';
         }
-      } catch (e) {}
+        const dataFormatada = new Date(data + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+        const horaTexto = horaFim ? `${hora} às ${horaFim}` : hora;
+        const msg = template
+          .replaceAll('{nome}', lead.nome || '').replaceAll('{clinica}', clinic.nome || clinic.name || '')
+          .replaceAll('{data}', dataFormatada).replaceAll('{hora}', horaTexto)
+          .replaceAll('{procedimento}', procedimento || lead.procedimento || 'sua avaliação');
+        await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg);
+        toast('Confirmação enviada por WhatsApp! ✓');
+      } catch (e) {
+        console.error('[agenda-intervalo] falha ao enviar confirmação:', e.message);
+        if (typeof toast === 'function') toast('Consulta salva, mas a confirmação por WhatsApp falhou — avise o paciente manualmente.', 'error');
+      }
     }
   };
 
