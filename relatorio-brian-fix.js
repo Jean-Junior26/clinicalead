@@ -199,13 +199,22 @@
     const aplicarEscopo = (q) => clinicIds ? q.in('clinic_id', clinicIds) : q;
 
     try {
-      // leads captados pelo Brian (origem Brian IA)
-      let qLeads = database.from('leads')
-        .select('id', { count: 'exact', head: true })
-        .eq('origem', 'Brian IA').gte('created_at', desde).lte('created_at', ateInc);
-      qLeads = aplicarEscopo(qLeads);
-      const { count: cLeads } = await qLeads;
-      dadosOut.leads = cLeads || 0;
+      // ── LEADS CAPTADOS PELO BRIAN ──
+      // ANTES: filtrava leads.origem = 'Brian IA' — mas essa coluna é setada
+      // por uma rotina que roda ANTES do Brian entrar em ação (garante lead
+      // pra toda mensagem recebida, mesmo com Brian desligado), então quase
+      // todo lead nascia com origem='WhatsApp' e o Brian nunca atualizava
+      // isso depois. Métrica ficava praticamente zerada.
+      // AGORA: conta números de telefone ÚNICOS que o Brian efetivamente
+      // mandou mensagem no período (mesma fonte usada em "mensagens
+      // respondidas" abaixo) — reflete o trabalho real do Brian.
+      let qLeadsBrian = database.from('mensagens')
+        .select('phone')
+        .eq('contact_name', 'BRIAN_AUTO').eq('from_me', true).gte('created_at', desde).lte('created_at', ateInc);
+      qLeadsBrian = aplicarEscopo(qLeadsBrian);
+      const { data: msgsBrianLeads } = await qLeadsBrian;
+      const telefonesUnicos = new Set((msgsBrianLeads || []).map(m => m.phone));
+      dadosOut.leads = telefonesUnicos.size;
 
       // consultas agendadas pelo Brian (observacoes marca isso)
       let qCons = database.from('consultas')
