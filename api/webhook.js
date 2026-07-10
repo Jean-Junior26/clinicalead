@@ -622,15 +622,19 @@ module.exports = async function handler(req, res) {
     } catch (e) { console.log('[BRIAN-CONFIRMA] erro:', e.message); }
   }
 
-  // ── Só vale a pena transcrever se o Brian tiver chance real de usar isso ──
-  // Evita gastar com transcrição em: mensagens enviadas PELA clínica (não
-  // faz sentido transcrever o próprio áudio da equipe), clínicas sem Brian
-  // liberado/ativo, conversas onde um HUMANO já está respondendo
-  // ativamente (nos últimos 30min), E — o mais importante — qualquer
-  // paciente que NÃO seja lead novo. Brian só qualifica lead novo (status
-  // 'novo' no Kanban); áudio de paciente do dia a dia (já em contato,
-  // agendado, ou já atendido) nunca é transcrito, o objetivo aqui é só
-  // pegar o lead que manda áudio no primeiro contato.
+  // ── Só vale a pena transcrever dentro da JANELA DE ATENDIMENTO DO BRIAN ──
+  // Evita gastar com transcrição em: mensagens enviadas PELA clínica,
+  // clínicas sem Brian liberado/ativo, e — o mais importante — qualquer
+  // conversa que não seja o Brian quem está conduzindo agora.
+  // Critério: ou NINGUÉM respondeu ainda (1º contato puro), ou a ÚLTIMA
+  // resposta da clínica foi do próprio Brian (conversa em andamento com
+  // ele). Assim que um HUMANO manda qualquer mensagem, some — mesmo que
+  // seja a 5ª mensagem da conversa, não só a 1ª (não depende do status do
+  // Kanban, que já muda de 'novo' pra 'contato' assim que o Brian responde
+  // a primeira vez — usar só o status cortava a transcrição no meio do
+  // próprio atendimento do Brian).
+  // Também exclui sempre quem já é paciente conquistado (compareceu/
+  // fechado) — esses nunca são transcritos, seja lá quem respondeu.
   async function deveTentarTranscrever(clinicId, phone, fromMe) {
     if (fromMe) return false;
     try {
@@ -644,26 +648,28 @@ module.exports = async function handler(req, res) {
 
       const sufixo = String(phone).replace(/\D/g, '').slice(-8);
 
-      // só lead NOVO (Kanban) — nunca paciente já em contato/agendado/atendido
+      // paciente já conquistado (compareceu/fechado) — nunca transcreve
       const leadResp = await fetch(
         `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinicId}&phone=ilike.*${sufixo}&select=status&limit=1`,
         { headers: sbHeaders }
       );
       const leadArr = leadResp.ok ? await leadResp.json() : [];
       const lead = leadArr[0];
-      if (!lead || lead.status !== 'novo') return false;
+      if (lead && ['compareceu', 'fechado'].includes(lead.status)) return false;
 
-      const janela = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-      const humResp = await fetch(
-        `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinicId}&phone=ilike.*${sufixo}&from_me=eq.true&created_at=gte.${janela}&select=contact_name&limit=5`,
+      // quem respondeu por último nesta conversa? (se ninguém respondeu
+      // ainda, arr fica vazio — trata como "janela do Brian" também, é o
+      // caso do 1º contato puro)
+      const ultimaRespResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinicId}&phone=ilike.*${sufixo}&from_me=eq.true&select=contact_name&order=created_at.desc&limit=1`,
         { headers: sbHeaders }
       );
-      const humArr = humResp.ok ? await humResp.json() : [];
-      const humanoAtivo = humArr.some(m => m.contact_name !== 'BRIAN_AUTO');
-      if (humanoAtivo) return false;
+      const ultimaRespArr = ultimaRespResp.ok ? await ultimaRespResp.json() : [];
+      const ultimaResp = ultimaRespArr[0];
+      if (ultimaResp && ultimaResp.contact_name !== 'BRIAN_AUTO') return false; // humano já assumiu essa conversa
 
       return true;
-    } catch (e) { return false; } // na dúvida, NÃO transcreve (evita gasto indevido em paciente comum)
+    } catch (e) { return false; } // na dúvida, NÃO transcreve (evita gasto indevido)
   }
 
   // ── Baixa mídia descriptografada do Evolution e salva no Storage
