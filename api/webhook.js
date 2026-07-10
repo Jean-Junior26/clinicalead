@@ -623,18 +623,22 @@ module.exports = async function handler(req, res) {
   }
 
   // ── Só vale a pena transcrever dentro da JANELA DE ATENDIMENTO DO BRIAN ──
-  // Evita gastar com transcrição em: mensagens enviadas PELA clínica,
-  // clínicas sem Brian liberado/ativo, e — o mais importante — qualquer
-  // conversa que não seja o Brian quem está conduzindo agora.
-  // Critério: ou NINGUÉM respondeu ainda (1º contato puro), ou a ÚLTIMA
-  // resposta da clínica foi do próprio Brian (conversa em andamento com
-  // ele). Assim que um HUMANO manda qualquer mensagem, some — mesmo que
-  // seja a 5ª mensagem da conversa, não só a 1ª (não depende do status do
-  // Kanban, que já muda de 'novo' pra 'contato' assim que o Brian responde
-  // a primeira vez — usar só o status cortava a transcrição no meio do
-  // próprio atendimento do Brian).
-  // Também exclui sempre quem já é paciente conquistado (compareceu/
-  // fechado) — esses nunca são transcritos, seja lá quem respondeu.
+  // IMPORTANTE: não dá pra confiar no status do Kanban ('compareceu'/
+  // 'fechado') pra saber se já é paciente — muitas clínicas usam o
+  // ClinicaLead só pela IA e nunca mexem no Kanban manualmente, então o
+  // card fica preso em 'novo'/'contato' pra sempre, mesmo anos depois.
+  // Em vez disso, usa sinais que são gerados AUTOMATICAMENTE, sem
+  // depender de ninguém arrastar card nenhum:
+  //   1) já existe alguma CONSULTA no passado pra esse telefone? Se sim,
+  //      a pessoa já foi atendida fisicamente pelo menos uma vez — não é
+  //      mais "lead novo chegando", é paciente com histórico real.
+  //   2) o lead é recente (criado há poucos dias)? Lead muito antigo sem
+  //      consulta nenhuma provavelmente esfriou — não vale mais gastar
+  //      transcrevendo áudio dele.
+  //   3) quem respondeu por último foi o Brian (ou ninguém ainda)? Se um
+  //      humano já assumiu a conversa, para.
+  const DIAS_LEAD_RECENTE = 3;
+
   async function deveTentarTranscrever(clinicId, phone, fromMe) {
     if (fromMe) return false;
     try {
@@ -648,18 +652,33 @@ module.exports = async function handler(req, res) {
 
       const sufixo = String(phone).replace(/\D/g, '').slice(-8);
 
-      // paciente já conquistado (compareceu/fechado) — nunca transcreve
       const leadResp = await fetch(
-        `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinicId}&phone=ilike.*${sufixo}&select=status&limit=1`,
+        `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinicId}&phone=ilike.*${sufixo}&select=id,created_at&limit=1`,
         { headers: sbHeaders }
       );
       const leadArr = leadResp.ok ? await leadResp.json() : [];
       const lead = leadArr[0];
-      if (lead && ['compareceu', 'fechado'].includes(lead.status)) return false;
 
-      // quem respondeu por último nesta conversa? (se ninguém respondeu
-      // ainda, arr fica vazio — trata como "janela do Brian" também, é o
-      // caso do 1º contato puro)
+      // lead muito antigo (esfriou) — não transcreve mais
+      if (lead && lead.created_at) {
+        const diasDesdeCriacao = (Date.now() - new Date(lead.created_at).getTime()) / (1000 * 60 * 60 * 24);
+        if (diasDesdeCriacao > DIAS_LEAD_RECENTE) return false;
+      }
+
+      // já teve consulta no passado (já foi atendido fisicamente alguma vez)?
+      // é histórico real de paciente, não depende de status manual do Kanban
+      if (lead) {
+        const hojeISO = new Date().toISOString().split('T')[0];
+        const consultaResp = await fetch(
+          `${SUPABASE_URL}/rest/v1/consultas?clinic_id=eq.${clinicId}&lead_id=eq.${lead.id}&data=lt.${hojeISO}&status=neq.cancelado&select=id&limit=1`,
+          { headers: sbHeaders }
+        );
+        const consultaArr = consultaResp.ok ? await consultaResp.json() : [];
+        if (consultaArr.length > 0) return false;
+      }
+
+      // quem respondeu por último nesta conversa? (vazio = ninguém ainda,
+      // conta como "janela do Brian" também — é o 1º contato puro)
       const ultimaRespResp = await fetch(
         `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinicId}&phone=ilike.*${sufixo}&from_me=eq.true&select=contact_name&order=created_at.desc&limit=1`,
         { headers: sbHeaders }
