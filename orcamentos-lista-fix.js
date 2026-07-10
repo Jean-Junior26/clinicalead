@@ -9,7 +9,25 @@
 // Filtros por estado + cards de resumo. Clicar abre o orçamento.
 // ============================================================
 
-let ORCLISTA = { todos: [], filtro: 'todos', periodo: 'tudo', inicio: null, fim: null };
+let ORCLISTA = { todos: [], filtro: 'todos', periodo: 'tudo', inicio: null, fim: null, busca: '' };
+
+// tira acento pra busca funcionar digitando com ou sem acentuação
+function orcNormalizarTexto(s) {
+  return (s || '').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+// chamado a cada letra digitada no campo de busca — preserva o foco e a
+// posição do cursor no input, já que o render reconstrói o HTML inteiro
+function orcSetBusca(v) {
+  ORCLISTA.busca = v;
+  const focado = document.activeElement && document.activeElement.id === 'orcBusca';
+  const cursor = focado ? document.activeElement.selectionStart : null;
+  renderOrcamentosPage();
+  if (focado) {
+    const el = document.getElementById('orcBusca');
+    if (el) { el.focus(); el.setSelectionRange(cursor, cursor); }
+  }
+}
 
 // ── Período por data de CRIAÇÃO do orçamento ─────────────────
 function orcListaIsoLocal(d) {
@@ -125,7 +143,13 @@ async function renderOrcamentosPage() {
   baseData.forEach(o => { resumo[o._estado] = (resumo[o._estado] || 0) + 1; });
 
   // aplica filtro de ESTADO
-  const filtrados = ORCLISTA.filtro === 'todos' ? baseData : baseData.filter(o => o._estado === ORCLISTA.filtro);
+  const filtradosPorEstado = ORCLISTA.filtro === 'todos' ? baseData : baseData.filter(o => o._estado === ORCLISTA.filtro);
+
+  // aplica BUSCA POR NOME (sem acento, sem case-sensitive)
+  const buscaNorm = orcNormalizarTexto(ORCLISTA.busca);
+  const filtrados = buscaNorm
+    ? filtradosPorEstado.filter(o => orcNormalizarTexto(o._lead?.nome).includes(buscaNorm))
+    : filtradosPorEstado;
 
   // botões de filtro de estado
   const botoes = [{ k: 'todos', label: 'Todos', n: baseData.length }]
@@ -187,8 +211,15 @@ async function renderOrcamentosPage() {
     <div class="page-header" style="margin-bottom:16px;">
       <div class="page-header-left">
         <h2>Orçamentos</h2>
-        <p>${baseData.length} orçamento${baseData.length !== 1 ? 's' : ''}${ORCLISTA.inicio ? ' no período' : ' no total'}</p>
+        <p>${filtrados.length} orçamento${filtrados.length !== 1 ? 's' : ''}${buscaNorm ? ` encontrado${filtrados.length !== 1 ? 's' : ''} pra "${ORCLISTA.busca}"` : (ORCLISTA.inicio ? ' no período' : ' no total')}</p>
       </div>
+    </div>
+    <div style="position:relative;margin-bottom:14px;max-width:360px;">
+      <i class="ti ti-search" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:15px;"></i>
+      <input type="text" id="orcBusca" class="form-input" placeholder="Buscar por nome do paciente..."
+        value="${ORCLISTA.busca || ''}" oninput="orcSetBusca(this.value)"
+        style="width:100%;padding:9px 12px 9px 36px;font-size:13px;"/>
+      ${ORCLISTA.busca ? `<button onclick="orcSetBusca('')" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;padding:2px 6px;">×</button>` : ''}
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">
       <span style="font-size:11px;color:var(--text-muted);text-transform:uppercase;margin-right:4px;">Criados em:</span>
