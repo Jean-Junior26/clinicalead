@@ -100,10 +100,14 @@ module.exports = async function handler(req, res) {
         const convArr = convResp.ok ? await convResp.json() : [];
         if (convArr[0] && convArr[0].auto_desligado === true) continue;
 
-        // ── SÓ RESGATA PRIMEIRO CONTATO (status 'novo') ──
-        // Se o lead já avançou no funil (contato/agendado) ou já é
-        // paciente (compareceu/fechado), a conversa é conduzida pela
-        // equipe — não gasta mensagem de IA com isso.
+        // ── SÓ RESGATA PRIMEIRO CONTATO DE VERDADE ──
+        // Dupla checagem, pra não depender só do status do Kanban (que
+        // pode estar desatualizado se alguém esqueceu de mover o card):
+        // 1) status do lead precisa ser 'novo'
+        // 2) NUNCA pode ter existido NENHUMA mensagem da clínica (humano
+        //    OU Brian) nessa conversa, em qualquer época — se já houve
+        //    qualquer resposta antes (mesmo há semanas), não é mais
+        //    "primeiro contato" e o resgate não se aplica.
         const sufixoBusca = String(phone).replace(/\D/g, '').slice(-8);
         const leadResp = await fetch(
           `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${cfg.clinic_id}&phone=ilike.*${sufixoBusca}&select=id,status&limit=1`,
@@ -112,6 +116,13 @@ module.exports = async function handler(req, res) {
         const leadArr = leadResp.ok ? await leadResp.json() : [];
         const lead = leadArr[0];
         if (!lead || !STATUS_LEAD_ELEGIVEL.includes(lead.status)) { resultado.puladosForaDoEscopo++; continue; }
+
+        const jaRespondeuResp = await fetch(
+          `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${cfg.clinic_id}&phone=ilike.*${sufixoBusca}&from_me=eq.true&select=id&limit=1`,
+          { headers: sbHeaders }
+        );
+        const jaRespondeuArr = jaRespondeuResp.ok ? await jaRespondeuResp.json() : [];
+        if (jaRespondeuArr.length > 0) { resultado.puladosForaDoEscopo++; continue; } // já existiu resposta alguma vez — não é 1º contato
 
         try {
           const brResp = await fetch(`${SUPABASE_URL}/functions/v1/brian`, {
