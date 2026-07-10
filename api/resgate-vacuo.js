@@ -28,6 +28,12 @@ module.exports = async function handler(req, res) {
 
   const LIMIAR_MINUTOS = 15; // tempo sem resposta humana pra considerar "vácuo"
   const JANELA_MAX_HORAS = 6; // não ressuscita conversa mais velha que isso
+  // Brian só resgata o PRIMEIRO CONTATO de um lead novo (ex: "Olá, quero
+  // saber sobre X" vindo de anúncio) — não durante o funil inteiro. Uma
+  // vez que a equipe (ou o próprio Brian) já iniciou o contato e o lead
+  // avançou pra 'contato'/'agendado', o resgate automático não se aplica
+  // mais: a partir daí, é a equipe quem conduz.
+  const STATUS_LEAD_ELEGIVEL = ['novo'];
 
   function dentroDoHorario(horario) {
     try {
@@ -42,7 +48,7 @@ module.exports = async function handler(req, res) {
     } catch (e) { return false; }
   }
 
-  const resultado = { verificadas: 0, resgatadas: 0, erros: [] };
+  const resultado = { verificadas: 0, resgatadas: 0, puladosForaDoEscopo: 0, erros: [] };
 
   try {
     // 1) clínicas com Brian liberado + automático ligado
@@ -93,6 +99,19 @@ module.exports = async function handler(req, res) {
         );
         const convArr = convResp.ok ? await convResp.json() : [];
         if (convArr[0] && convArr[0].auto_desligado === true) continue;
+
+        // ── SÓ RESGATA PRIMEIRO CONTATO (status 'novo') ──
+        // Se o lead já avançou no funil (contato/agendado) ou já é
+        // paciente (compareceu/fechado), a conversa é conduzida pela
+        // equipe — não gasta mensagem de IA com isso.
+        const sufixoBusca = String(phone).replace(/\D/g, '').slice(-8);
+        const leadResp = await fetch(
+          `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${cfg.clinic_id}&phone=ilike.*${sufixoBusca}&select=id,status&limit=1`,
+          { headers: sbHeaders }
+        );
+        const leadArr = leadResp.ok ? await leadResp.json() : [];
+        const lead = leadArr[0];
+        if (!lead || !STATUS_LEAD_ELEGIVEL.includes(lead.status)) { resultado.puladosForaDoEscopo++; continue; }
 
         try {
           const brResp = await fetch(`${SUPABASE_URL}/functions/v1/brian`, {
