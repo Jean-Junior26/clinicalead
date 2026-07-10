@@ -622,6 +622,37 @@ module.exports = async function handler(req, res) {
     } catch (e) { console.log('[BRIAN-CONFIRMA] erro:', e.message); }
   }
 
+  // ── Só vale a pena transcrever se o Brian tiver chance real de usar isso ──
+  // Evita gastar com transcrição em: mensagens enviadas PELA clínica (não
+  // faz sentido transcrever o próprio áudio da equipe), clínicas sem Brian
+  // liberado/ativo, e conversas onde um HUMANO já está respondendo
+  // ativamente (nos últimos 30min — mesma janela usada na Trava 5) — nesses
+  // casos o Brian não vai processar essa mensagem de qualquer forma.
+  async function deveTentarTranscrever(clinicId, phone, fromMe) {
+    if (fromMe) return false;
+    try {
+      const cfgResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/brian_config?clinic_id=eq.${clinicId}&select=brian_liberado,auto_ativo&limit=1`,
+        { headers: sbHeaders }
+      );
+      const cfgArr = cfgResp.ok ? await cfgResp.json() : [];
+      const cfg = cfgArr[0];
+      if (!cfg || cfg.brian_liberado !== true || cfg.auto_ativo !== true) return false;
+
+      const sufixo = String(phone).replace(/\D/g, '').slice(-8);
+      const janela = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+      const humResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinicId}&phone=ilike.*${sufixo}&from_me=eq.true&created_at=gte.${janela}&select=contact_name&limit=5`,
+        { headers: sbHeaders }
+      );
+      const humArr = humResp.ok ? await humResp.json() : [];
+      const humanoAtivo = humArr.some(m => m.contact_name !== 'BRIAN_AUTO');
+      if (humanoAtivo) return false;
+
+      return true;
+    } catch (e) { return true; } // na dúvida (erro na checagem), tenta transcrever
+  }
+
   // ── Baixa mídia descriptografada do Evolution e salva no Storage
   async function baixarEsalvarMidia(msgCompleta, instanceName, phone, tipo, nomeOriginal) {
     try {
@@ -675,6 +706,50 @@ module.exports = async function handler(req, res) {
       const finalUrl = `${SUPABASE_URL}/storage/v1/object/public/${cfg.bucket}/${fileName}`;
       return finalUrl;
     } catch (e) {
+      return null;
+    }
+  }
+
+  // ── Transcreve áudio via Whisper (OpenAI) — assim o Brian consegue
+  // "entender" o que o paciente falou, em vez de só saber "mandou um
+  // áudio". Custo baixíssimo (~R$0,01-0,02 por áudio). Se a chave não
+  // estiver configurada ou a transcrição falhar, retorna null — quem
+  // chama trata o fallback (mantém o texto genérico "🎵 Áudio").
+  async function transcreverAudioWhisper(msgCompleta, instanceName) {
+    const OPENAI_KEY = process.env.OPENAI_API_KEY;
+    if (!OPENAI_KEY) return null;
+    try {
+      const r = await fetch(`${EVO_URL}/chat/getBase64FromMediaMessage/${instanceName}`, {
+        method: 'POST',
+        headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msgCompleta, convertToMp4: false }),
+      });
+      if (!r.ok) return null;
+      const data = await r.json();
+      const base64 = data.base64;
+      if (!base64) return null;
+
+      const binary = Buffer.from(base64, 'base64');
+      const blob = new Blob([binary], { type: 'audio/ogg' });
+      const form = new FormData();
+      form.append('file', blob, 'audio.ogg');
+      form.append('model', 'whisper-1');
+      form.append('language', 'pt'); // acelera e melhora precisão (já sabemos que é português)
+
+      const whisperResp = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${OPENAI_KEY}` },
+        body: form,
+      });
+      if (!whisperResp.ok) {
+        console.log('[TRANSCRICAO] Whisper retornou erro:', whisperResp.status);
+        return null;
+      }
+      const whisperData = await whisperResp.json();
+      const texto = (whisperData.text || '').trim();
+      return texto || null;
+    } catch (e) {
+      console.log('[TRANSCRICAO] falhou:', e.message);
       return null;
     }
   }
@@ -988,6 +1063,13 @@ module.exports = async function handler(req, res) {
         } else if (m.audioMessage) {
           content = '🎵 Áudio'; type = 'audio';
           if (message_id && instanceName) media_url = await baixarEsalvarMidia(msg, instanceName, phone, 'audio');
+          // transcreve via Whisper SÓ se valer a pena (Brian ativo nesta
+          // clínica e nenhum humano respondendo ativamente agora) — evita
+          // gastar transcrevendo áudio de conversa que já é 100% humana
+          if (await deveTentarTranscrever(clinic_id, phone, fromMe)) {
+            const transcricao = await transcreverAudioWhisper(msg, instanceName);
+            if (transcricao) content = transcricao;
+          }
         } else if (m.videoMessage) {
           content = m.videoMessage?.caption || '🎥 Vídeo'; type = 'video';
           if (message_id && instanceName) media_url = await baixarEsalvarMidia(msg, instanceName, phone, 'video');
