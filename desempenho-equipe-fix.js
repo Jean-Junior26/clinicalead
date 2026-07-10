@@ -130,6 +130,7 @@ async function renderDesempenhoEquipe() {
     const fechadoPorResp = {};       // valor PAGO atribuído a quem fechou
     const comissaoResp = {};         // comissão total por pessoa
     const fixoJaContado = {};        // controla o fixo (1x por orçamento+pessoa+papel)
+    const detalhesResp = {};         // breakdown: nome -> [{leadId, papel, valorPago, comissaoGerada, data, orcamentoId}]
 
     (pagamentos || []).forEach(pag => {
       const orc = orcInfo[pag.orcamento_id];
@@ -147,15 +148,23 @@ async function renderDesempenhoEquipe() {
         fechadoPorResp[fechador] = (fechadoPorResp[fechador] || 0) + valorPago;
         const rF = regras[fechador];
         if (rF) {
+          let comissaoGerada = 0;
           if (rF.com_fechar_tipo === 'percentual') {
-            comissaoResp[fechador] = (comissaoResp[fechador] || 0) + baseComissao * Number(rF.com_fechar_valor || 0) / 100;
+            comissaoGerada = baseComissao * Number(rF.com_fechar_valor || 0) / 100;
+            comissaoResp[fechador] = (comissaoResp[fechador] || 0) + comissaoGerada;
           } else if (rF.com_fechar_tipo === 'fixo') {
             // fixo: conta 1x por orçamento (no primeiro pagamento dele)
             const chave = 'F_' + pag.orcamento_id + '_' + fechador;
             if (!fixoJaContado[chave]) {
-              comissaoResp[fechador] = (comissaoResp[fechador] || 0) + Number(rF.com_fechar_valor || 0);
+              comissaoGerada = Number(rF.com_fechar_valor || 0);
+              comissaoResp[fechador] = (comissaoResp[fechador] || 0) + comissaoGerada;
               fixoJaContado[chave] = true;
             }
+          }
+          if (comissaoGerada > 0 || rF.com_fechar_tipo === 'percentual') {
+            (detalhesResp[fechador] = detalhesResp[fechador] || []).push({
+              leadId: orc.lead_id, papel: 'Fechou', valorPago, comissaoGerada, data: pag.data, orcamentoId: pag.orcamento_id,
+            });
           }
         }
       }
@@ -165,14 +174,22 @@ async function renderDesempenhoEquipe() {
       if (ag && ag.nome) {
         const rA = regras[ag.nome];
         if (rA) {
+          let comissaoGerada = 0;
           if (rA.com_agendar_tipo === 'percentual') {
-            comissaoResp[ag.nome] = (comissaoResp[ag.nome] || 0) + baseComissao * Number(rA.com_agendar_valor || 0) / 100;
+            comissaoGerada = baseComissao * Number(rA.com_agendar_valor || 0) / 100;
+            comissaoResp[ag.nome] = (comissaoResp[ag.nome] || 0) + comissaoGerada;
           } else if (rA.com_agendar_tipo === 'fixo') {
             const chave = 'A_' + pag.orcamento_id + '_' + ag.nome;
             if (!fixoJaContado[chave]) {
-              comissaoResp[ag.nome] = (comissaoResp[ag.nome] || 0) + Number(rA.com_agendar_valor || 0);
+              comissaoGerada = Number(rA.com_agendar_valor || 0);
+              comissaoResp[ag.nome] = (comissaoResp[ag.nome] || 0) + comissaoGerada;
               fixoJaContado[chave] = true;
             }
+          }
+          if (comissaoGerada > 0 || rA.com_agendar_tipo === 'percentual') {
+            (detalhesResp[ag.nome] = detalhesResp[ag.nome] || []).push({
+              leadId: orc.lead_id, papel: 'Agendou', valorPago, comissaoGerada, data: pag.data, orcamentoId: pag.orcamento_id,
+            });
           }
         }
       }
@@ -198,7 +215,12 @@ async function renderDesempenhoEquipe() {
         const rC = regras[nome];
         if (!rC) return;
         if (rC.com_comparecer_tipo === 'fixo') {
-          comissaoResp[nome] = (comissaoResp[nome] || 0) + Number(rC.com_comparecer_valor || 0);
+          const valor = Number(rC.com_comparecer_valor || 0);
+          comissaoResp[nome] = (comissaoResp[nome] || 0) + valor;
+          (detalhesResp[nome] = detalhesResp[nome] || []).push({
+            leadId: null, leadNomeDireto: null, consultaId: c.id, papel: 'Compareceu (avaliação)',
+            valorPago: null, comissaoGerada: valor, data: c.data, orcamentoId: null,
+          });
         } else if (rC.com_comparecer_tipo === 'percentual') {
           // percentual de comparecimento não tem "valor pago" — usa 0 como base
           // (mantido por consistência da UI; o uso esperado é 'fixo')
@@ -216,21 +238,71 @@ async function renderDesempenhoEquipe() {
       return;
     }
 
+    // busca nome dos pacientes envolvidos (pra mostrar no breakdown ao expandir)
+    const todosLeadIds = [...new Set(Object.values(detalhesResp).flat().map(d => d.leadId).filter(Boolean))];
+    const nomeLeadMap = {};
+    if (todosLeadIds.length) {
+      try {
+        const { data: leadsInfo } = await db.from('leads').select('id, nome').in('id', todosLeadIds);
+        (leadsInfo || []).forEach(l => { nomeLeadMap[l.id] = l.nome || 'Sem nome'; });
+      } catch (e) { /* segue sem nome, mostra "—" */ }
+    }
+    // busca nome do paciente de comparecimentos (via consulta -> lead)
+    const consultaIds = [...new Set(Object.values(detalhesResp).flat().filter(d => d.consultaId).map(d => d.consultaId))];
+    if (consultaIds.length) {
+      try {
+        const { data: consultasInfo } = await db.from('consultas').select('id, lead_id').in('id', consultaIds);
+        const consultaLeadMap = {};
+        (consultasInfo || []).forEach(c => { consultaLeadMap[c.id] = c.lead_id; });
+        const leadIdsComparec = [...new Set(Object.values(consultaLeadMap).filter(Boolean))];
+        if (leadIdsComparec.length) {
+          const { data: leadsComparec } = await db.from('leads').select('id, nome').in('id', leadIdsComparec);
+          (leadsComparec || []).forEach(l => { nomeLeadMap[l.id] = l.nome || 'Sem nome'; });
+        }
+        Object.values(detalhesResp).flat().forEach(d => {
+          if (d.consultaId && consultaLeadMap[d.consultaId]) d.leadId = consultaLeadMap[d.consultaId];
+        });
+      } catch (e) { /* segue sem nome */ }
+    }
+
     // Ordena por comissão (maior primeiro)
     const ordenados = [...todos].sort((a, b) => (comissaoResp[b] || 0) - (comissaoResp[a] || 0));
 
-    cont.querySelector('#desempCards').innerHTML = ordenados.map(nome => {
+    cont.querySelector('#desempCards').innerHTML = ordenados.map((nome, idx) => {
       const agend = agendPorResp[nome] || 0;
       const fechado = fechadoPorResp[nome] || 0;
       const comissao = comissaoResp[nome] || 0;
+      const detalhes = (detalhesResp[nome] || []).sort((a, b) => (b.data || '').localeCompare(a.data || ''));
+      const cardId = 'desempCard' + idx;
+
+      // ⚠️ ALERTA: comissão maior que o valor recebido é matematicamente
+      // suspeito (comissão nunca deveria superar 100% do que a clínica
+      // recebeu) — quase sempre sinal de erro de digitação na % cadastrada
+      // em "Responsáveis" (ex: 2605 em vez de 26,05).
+      const suspeito = fechado > 0 && comissao > fechado;
+      const avisoSuspeito = suspeito
+        ? `<div style="margin-top:10px;padding:8px 10px;background:rgba(192,98,74,0.12);border:1px solid var(--coral,#C0624A);border-radius:8px;font-size:11px;color:var(--coral,#C0624A);">⚠️ Comissão maior que o valor recebido — confira a % cadastrada pra ${nome} em Colaboradores/Responsáveis (provável erro de digitação, ex: 2605 em vez de 26,05).</div>`
+        : '';
+
+      const linhasDetalhe = detalhes.length ? detalhes.map(d => `
+        <tr style="border-bottom:1px solid var(--border-subtle,rgba(255,255,255,0.05));">
+          <td style="padding:7px 6px;font-size:12px;">${d.leadId ? (nomeLeadMap[d.leadId] || 'Paciente') : '—'}</td>
+          <td style="padding:7px 6px;font-size:11px;color:var(--text-muted);">${d.papel}</td>
+          <td style="padding:7px 6px;font-size:11px;color:var(--text-muted);">${d.data ? new Date(d.data + 'T12:00').toLocaleDateString('pt-BR') : '—'}</td>
+          <td style="padding:7px 6px;font-size:12px;text-align:right;color:var(--text-secondary);">${d.valorPago != null ? fmt(d.valorPago) : '—'}</td>
+          <td style="padding:7px 6px;font-size:12px;text-align:right;color:var(--gold);font-weight:600;">${fmt(d.comissaoGerada)}</td>
+        </tr>`).join('')
+        : '<tr><td colspan="5" style="padding:14px;text-align:center;color:var(--text-muted);font-size:12px;">Sem detalhamento disponível pra esse período.</td></tr>';
+
       return `
         <div class="card" style="padding:16px;margin-bottom:12px;">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;cursor:pointer;" onclick="document.getElementById('${cardId}').style.display = document.getElementById('${cardId}').style.display === 'none' ? 'block' : 'none'; document.getElementById('${cardId}icon').classList.toggle('ti-chevron-down'); document.getElementById('${cardId}icon').classList.toggle('ti-chevron-up');">
             <div style="display:flex;align-items:center;gap:10px;">
               <div style="width:38px;height:38px;border-radius:50%;background:var(--gold-pale);display:flex;align-items:center;justify-content:center;color:var(--gold);font-weight:700;">
                 ${nome.charAt(0).toUpperCase()}
               </div>
               <strong style="font-size:15px;">${nome}</strong>
+              <i id="${cardId}icon" class="ti ti-chevron-down" style="color:var(--text-muted);font-size:14px;"></i>
             </div>
             <div style="display:flex;gap:20px;flex-wrap:wrap;">
               <div style="text-align:center;">
@@ -242,10 +314,25 @@ async function renderDesempenhoEquipe() {
                 <div style="font-size:19px;font-weight:700;color:var(--text-secondary);font-family:var(--mono);">${fmt(fechado)}</div>
               </div>
               <div style="text-align:center;">
-                <div style="font-size:11px;color:var(--gold);text-transform:uppercase;font-weight:600;">Comissão</div>
-                <div style="font-size:19px;font-weight:700;color:var(--gold);font-family:var(--mono);">${fmt(comissao)}</div>
+                <div style="font-size:11px;color:var(--gold);text-transform:uppercase;font-weight:600;">Comissão ${suspeito ? '⚠️' : ''}</div>
+                <div style="font-size:19px;font-weight:700;color:${suspeito ? 'var(--coral,#C0624A)' : 'var(--gold)'};font-family:var(--mono);">${fmt(comissao)}</div>
               </div>
             </div>
+          </div>
+          ${avisoSuspeito}
+          <div id="${cardId}" style="display:none;margin-top:14px;padding-top:14px;border-top:1px dashed var(--border-subtle,rgba(255,255,255,0.08));">
+            <table style="width:100%;border-collapse:collapse;">
+              <thead>
+                <tr style="text-align:left;border-bottom:1px solid var(--border,rgba(201,168,76,0.15));">
+                  <th style="padding:6px;font-size:10px;color:var(--text-muted);text-transform:uppercase;">Paciente</th>
+                  <th style="padding:6px;font-size:10px;color:var(--text-muted);text-transform:uppercase;">Papel</th>
+                  <th style="padding:6px;font-size:10px;color:var(--text-muted);text-transform:uppercase;">Data</th>
+                  <th style="padding:6px;font-size:10px;color:var(--text-muted);text-transform:uppercase;text-align:right;">Valor pago</th>
+                  <th style="padding:6px;font-size:10px;color:var(--text-muted);text-transform:uppercase;text-align:right;">Comissão</th>
+                </tr>
+              </thead>
+              <tbody>${linhasDetalhe}</tbody>
+            </table>
           </div>
         </div>`;
     }).join('');
