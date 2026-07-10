@@ -625,9 +625,12 @@ module.exports = async function handler(req, res) {
   // ── Só vale a pena transcrever se o Brian tiver chance real de usar isso ──
   // Evita gastar com transcrição em: mensagens enviadas PELA clínica (não
   // faz sentido transcrever o próprio áudio da equipe), clínicas sem Brian
-  // liberado/ativo, e conversas onde um HUMANO já está respondendo
-  // ativamente (nos últimos 30min — mesma janela usada na Trava 5) — nesses
-  // casos o Brian não vai processar essa mensagem de qualquer forma.
+  // liberado/ativo, conversas onde um HUMANO já está respondendo
+  // ativamente (nos últimos 30min), E — o mais importante — qualquer
+  // paciente que NÃO seja lead novo. Brian só qualifica lead novo (status
+  // 'novo' no Kanban); áudio de paciente do dia a dia (já em contato,
+  // agendado, ou já atendido) nunca é transcrito, o objetivo aqui é só
+  // pegar o lead que manda áudio no primeiro contato.
   async function deveTentarTranscrever(clinicId, phone, fromMe) {
     if (fromMe) return false;
     try {
@@ -640,6 +643,16 @@ module.exports = async function handler(req, res) {
       if (!cfg || cfg.brian_liberado !== true || cfg.auto_ativo !== true) return false;
 
       const sufixo = String(phone).replace(/\D/g, '').slice(-8);
+
+      // só lead NOVO (Kanban) — nunca paciente já em contato/agendado/atendido
+      const leadResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinicId}&phone=ilike.*${sufixo}&select=status&limit=1`,
+        { headers: sbHeaders }
+      );
+      const leadArr = leadResp.ok ? await leadResp.json() : [];
+      const lead = leadArr[0];
+      if (!lead || lead.status !== 'novo') return false;
+
       const janela = new Date(Date.now() - 30 * 60 * 1000).toISOString();
       const humResp = await fetch(
         `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinicId}&phone=ilike.*${sufixo}&from_me=eq.true&created_at=gte.${janela}&select=contact_name&limit=5`,
@@ -650,7 +663,7 @@ module.exports = async function handler(req, res) {
       if (humanoAtivo) return false;
 
       return true;
-    } catch (e) { return true; } // na dúvida (erro na checagem), tenta transcrever
+    } catch (e) { return false; } // na dúvida, NÃO transcreve (evita gasto indevido em paciente comum)
   }
 
   // ── Baixa mídia descriptografada do Evolution e salva no Storage
