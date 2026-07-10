@@ -1257,7 +1257,7 @@ function currentLeads() {
 function fmtCurrency(v) {
   if (!v) return 'R$ 0';
   if (v >= 1000) return 'R$ ' + (v/1000).toFixed(1).replace('.0','') + 'k';
-  return 'R$ ' + Number(v).toLocaleString('pt-BR');
+  return 'R$ ' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function fmtDate(d) {
