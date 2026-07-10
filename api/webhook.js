@@ -3,10 +3,10 @@ module.exports = async function handler(req, res) {
 
   const SUPABASE_URL = process.env.SUPABASE_URL || 'https://zcwntpkiispbhjjgidih.supabase.co';
   const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
-  const EVO_URL = 'https://evolution-api-production-62cb.up.railway.app';
-const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae000';
+  const EVO_URL = process.env.EVOLUTION_API_URL || 'https://evolution-api-production-62cb.up.railway.app';
+  const EVO_KEY = process.env.EVOLUTION_API_KEY;
 
-  if (!SUPABASE_KEY) return res.status(500).json({ error: 'Configuração ausente' });
+  if (!SUPABASE_KEY || !EVO_KEY) return res.status(500).json({ error: 'Configuração ausente (SUPABASE_SERVICE_KEY / EVOLUTION_API_KEY nas env vars da Vercel)' });
 
   const sbHeaders = {
     apikey: SUPABASE_KEY,
