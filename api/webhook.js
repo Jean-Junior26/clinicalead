@@ -1120,6 +1120,34 @@ module.exports = async function handler(req, res) {
         const fromMe = key?.fromMe ?? false;
         if (!jid || jid.includes('status@broadcast') || jid.includes('@g.us')) continue;
         const phone = jid.replace('@s.whatsapp.net', '').replace('@c.us', '');
+
+        // ── TRAVA DE NÚMEROS PERMITIDOS (clínicas de teste) ──
+        // Se a clínica tiver telefones_permitidos configurado, qualquer
+        // mensagem de um número FORA dessa lista é ignorada por completo
+        // pra fins de automação (não vira lead, Brian não responde, nunca
+        // entra na régua de follow-up) — protege contatos pessoais reais
+        // que por acaso mandem mensagem pro mesmo número usado em teste.
+        if (!fromMe && clinic_id) {
+          let deveBloquear = false;
+          try {
+            const cfgPermResp = await fetch(
+              `${SUPABASE_URL}/rest/v1/brian_config?clinic_id=eq.${clinic_id}&select=telefones_permitidos&limit=1`,
+              { headers: sbHeaders }
+            );
+            const cfgPermArr = cfgPermResp.ok ? await cfgPermResp.json() : [];
+            const listaPermitida = cfgPermArr[0]?.telefones_permitidos;
+            if (Array.isArray(listaPermitida) && listaPermitida.length > 0) {
+              const sufixoMsg = phone.replace(/\D/g, '').slice(-8);
+              const permitido = listaPermitida.some(p => String(p).replace(/\D/g, '').slice(-8) === sufixoMsg);
+              if (!permitido) deveBloquear = true;
+            }
+          } catch (e) { console.log('[TRAVA-TESTE] erro na checagem (seguindo normalmente):', e.message); }
+          if (deveBloquear) {
+            console.log(`[TRAVA-TESTE] 🔒 número ${phone} fora da lista permitida da clínica ${clinic_id} — ignorado`);
+            continue;
+          }
+        }
+
         const contact_name = fromMe ? null : (msg?.pushName || null);
         const message_id = key?.id || null;
         const created_at = msg?.messageTimestamp
