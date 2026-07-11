@@ -790,6 +790,7 @@ module.exports = async function handler(req, res) {
     rinoplastia: PREFIXO_PRECISO + "Naturally refine and reshape the nose to be more balanced and proportional to the face." + SUFIXO_PRESERVAR,
     harmonizacao_facial: PREFIXO_PRECISO + "Apply VERY subtle, minimal facial harmonization — a slightly more defined jawline and slightly more balanced facial proportions. This must be a small, believable refinement, not a transformation. The person must remain clearly, unmistakably recognizable as the exact same individual — same eyes, same nose, same mouth, same overall facial identity. If in doubt, apply LESS change, not more." + SUFIXO_PRESERVAR,
     preenchimento_labial: PREFIXO_PRECISO + "Add natural, proportional fuller volume to the lips, subtle and balanced with the rest of the face." + SUFIXO_PRESERVAR,
+    toxina_botulinica: PREFIXO_PRECISO + "Very subtly smooth and soften fine lines and wrinkles on the forehead and around the eyes, as if from botulinum toxin treatment — natural, relaxed expression, not frozen or overly smoothed. This must be a small, believable refinement. If in doubt, apply LESS change, not more." + SUFIXO_PRESERVAR,
   };
 
   // ── Gera a simulação visual do sorriso (edição de imagem via IA) ──
@@ -1829,12 +1830,13 @@ const PROMPTS_SIMULACAO = {
   rinoplastia: "Naturally refine and reshape the nose to be more balanced and proportional to the face",
   harmonizacao_facial: "Apply VERY subtle, minimal facial harmonization — a slightly more defined jawline and slightly more balanced facial proportions. This must be a small, believable refinement, not a transformation. The person must remain clearly, unmistakably recognizable as the exact same individual — same eyes, same nose, same mouth, same overall facial identity. If in doubt, apply LESS change, not more",
   preenchimento_labial: "Add natural, proportional fuller volume to the lips, subtle and balanced with the rest of the face",
+  toxina_botulinica: "Very subtly smooth and soften fine lines and wrinkles on the forehead and around the eyes, as if from botulinum toxin treatment — natural, relaxed expression, not frozen or overly smoothed. This must be a small, believable refinement. If in doubt, apply LESS change, not more",
 };
 
 const LABELS_SIMULACAO = {
   clareamento: 'Clareamento', alinhamento: 'Alinhamento', lentes: 'Lentes em resina',
   protese: 'Prótese/Implante', gengivoplastia: 'Gengivoplastia', otomodelacao: 'Otomodelação',
-  rinoplastia: 'Rinoplastia', harmonizacao_facial: 'Harmonização facial', preenchimento_labial: 'Preenchimento labial',
+  rinoplastia: 'Rinoplastia', harmonizacao_facial: 'Harmonização facial', preenchimento_labial: 'Preenchimento labial', toxina_botulinica: 'Toxina botulínica',
 };
 
 function montarPromptCombinado(tipos) {
@@ -1992,6 +1994,7 @@ const REGIOES_POR_TIPO = {
   clareamento: 'mouth and teeth', alinhamento: 'mouth and teeth', lentes: 'mouth and teeth',
   protese: 'mouth and teeth', gengivoplastia: 'mouth, teeth and gums',
   preenchimento_labial: 'lips and mouth',
+  toxina_botulinica: 'forehead and area around the eyes',
   otomodelacao: 'ears', rinoplastia: 'nose',
   harmonizacao_facial: 'jawline and lower face (chin to cheeks)',
 };
