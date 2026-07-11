@@ -772,6 +772,7 @@ module.exports = async function handler(req, res) {
       const form = new FormData();
       form.append('file', blob, 'audio.ogg');
       form.append('model', 'whisper-1');
+      form.append('response_format', 'verbose_json'); // pra receber no_speech_prob por trecho
       form.append('language', 'pt'); // acelera e melhora precisão (já sabemos que é português)
 
       const whisperResp = await fetch('https://api.openai.com/v1/audio/transcriptions', {
@@ -785,6 +786,22 @@ module.exports = async function handler(req, res) {
       }
       const whisperData = await whisperResp.json();
       const texto = (whisperData.text || '').trim();
+
+      // ── FILTRO ANTI-MÚSICA/RUÍDO/TV ──
+      // O Whisper "transcreve" qualquer coisa, inclusive letra de música,
+      // som de TV, ou ruído de fundo — o que faria o Brian responder a
+      // algo que a pessoa nunca disse de verdade. O campo no_speech_prob
+      // (por trecho) indica a chance de aquele trecho NÃO ser fala real.
+      // Se a média ficar alta, descarta a transcrição inteira (cai no
+      // fallback "🎵 Áudio" — Brian não é acionado pra esse áudio).
+      const segmentos = whisperData.segments || [];
+      if (segmentos.length > 0) {
+        const mediaNoSpeech = segmentos.reduce((s, seg) => s + (seg.no_speech_prob || 0), 0) / segmentos.length;
+        if (mediaNoSpeech > 0.5) {
+          console.log(`[TRANSCRICAO] descartada — provável não-fala (música/ruído/TV), no_speech_prob médio: ${mediaNoSpeech.toFixed(2)}`);
+          return null;
+        }
+      }
       return texto || null;
     } catch (e) {
       console.log('[TRANSCRICAO] falhou:', e.message);
