@@ -1422,12 +1422,10 @@ module.exports = async function handler(req, res) {
                     console.log(`[BRIAN-VOZ] 🎤 forçado por espelhamento (paciente mandou áudio) | phone: ${phone}`);
                   }
 
-                  // 1) envia a resposta limpa do Brian (sem marcadores)
+                  // 1) decide como responder: em ÁUDIO (se temVoz e deu certo) ou em TEXTO
                   if (textoResposta) {
-                    await responderPaciente(instanceName, clinic_id, phone, textoResposta, 'BRIAN_AUTO');
-                    console.log(`[BRIAN-ENVIO] ✅ respondeu ${phone}: "${String(textoResposta).slice(0, 60)}"`);
+                    let audioEnviadoComSucesso = false;
 
-                    // ── RESPOSTA EM ÁUDIO (se o Brian marcou [[VOZ]] e a clínica tem voz configurada) ──
                     if (temVoz) {
                       try {
                         const vozCfgResp = await fetch(
@@ -1439,34 +1437,49 @@ module.exports = async function handler(req, res) {
                         if (vozEscolhida) {
                           const audioBase64 = await gerarAudioTTS(textoResposta, vozEscolhida);
                           if (audioBase64) {
-                            await enviarAudioWhatsApp(instanceName, phone, audioBase64);
-                            console.log(`[BRIAN-VOZ] 🔊 áudio enviado pra ${phone} (voz: ${vozEscolhida})`);
-                            // salva no histórico + storage, pra tocar depois no inbox
-                            try {
-                              const cleanPhoneVoz = String(phone).replace(/\D/g, '');
-                              const numberVoz = cleanPhoneVoz.startsWith('55') ? cleanPhoneVoz : '55' + cleanPhoneVoz;
-                              const nomeArquivo = `tts_${numberVoz}_${Date.now()}.mp3`;
-                              const upload = await fetch(`${SUPABASE_URL}/storage/v1/object/audios/${nomeArquivo}`, {
-                                method: 'POST',
-                                headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'audio/mpeg' },
-                                body: Buffer.from(audioBase64, 'base64'),
-                              });
-                              const mediaUrlTts = upload.ok ? `${SUPABASE_URL}/storage/v1/object/public/audios/${nomeArquivo}` : null;
-                              await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
-                                method: 'POST',
-                                headers: { ...sbHeaders, Prefer: 'return=minimal' },
-                                body: JSON.stringify({
-                                  clinic_id, phone: numberVoz, contact_name: 'BRIAN_AUTO',
-                                  content: textoResposta, type: 'audio', from_me: true, media_url: mediaUrlTts,
-                                  created_at: new Date().toISOString(),
-                                }),
-                              });
-                            } catch (e) { console.log('[BRIAN-VOZ] erro ao salvar histórico:', e.message); }
+                            const envioOk = await enviarAudioWhatsApp(instanceName, phone, audioBase64);
+                            if (envioOk) {
+                              audioEnviadoComSucesso = true;
+                              console.log(`[BRIAN-VOZ] 🔊 respondeu ${phone} SÓ EM ÁUDIO (voz: ${vozEscolhida}): "${String(textoResposta).slice(0, 60)}"`);
+                              // salva no histórico + storage, pra tocar depois no inbox
+                              try {
+                                const cleanPhoneVoz = String(phone).replace(/\D/g, '');
+                                const numberVoz = cleanPhoneVoz.startsWith('55') ? cleanPhoneVoz : '55' + cleanPhoneVoz;
+                                const nomeArquivo = `tts_${numberVoz}_${Date.now()}.mp3`;
+                                const upload = await fetch(`${SUPABASE_URL}/storage/v1/object/audios/${nomeArquivo}`, {
+                                  method: 'POST',
+                                  headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'audio/mpeg' },
+                                  body: Buffer.from(audioBase64, 'base64'),
+                                });
+                                const mediaUrlTts = upload.ok ? `${SUPABASE_URL}/storage/v1/object/public/audios/${nomeArquivo}` : null;
+                                await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
+                                  method: 'POST',
+                                  headers: { ...sbHeaders, Prefer: 'return=minimal' },
+                                  body: JSON.stringify({
+                                    clinic_id, phone: numberVoz, contact_name: 'BRIAN_AUTO',
+                                    content: textoResposta, type: 'audio', from_me: true, media_url: mediaUrlTts,
+                                    created_at: new Date().toISOString(),
+                                  }),
+                                });
+                              } catch (e) { console.log('[BRIAN-VOZ] erro ao salvar histórico:', e.message); }
+                            } else {
+                              console.log(`[BRIAN-VOZ] falha ao ENVIAR o áudio pelo WhatsApp — caindo pro texto`);
+                            }
+                          } else {
+                            console.log(`[BRIAN-VOZ] falha ao GERAR o áudio — caindo pro texto`);
                           }
                         } else {
                           console.log(`[BRIAN-VOZ] clínica ${clinic_id} sem voz_tts configurada — pulando áudio`);
                         }
                       } catch (e) { console.log('[BRIAN-VOZ] falhou:', e.message); }
+                    }
+
+                    // 2) só manda em TEXTO se não mandou em áudio (evita duplicar a mesma
+                    // mensagem nos dois formatos) — se temVoz era false, ou se a voz
+                    // falhou por qualquer motivo, o texto garante a resposta de qualquer jeito
+                    if (!audioEnviadoComSucesso) {
+                      await responderPaciente(instanceName, clinic_id, phone, textoResposta, 'BRIAN_AUTO');
+                      console.log(`[BRIAN-ENVIO] ✅ respondeu ${phone} em texto: "${String(textoResposta).slice(0, 60)}"`);
                     }
 
                     // ── GARANTE O LEAD CEDO (pra follow-up reaquecer quem some sem dar o nome) ──
