@@ -793,6 +793,18 @@ module.exports = async function handler(req, res) {
   // áudio". Custo baixíssimo (~R$0,01-0,02 por áudio). Se a chave não
   // estiver configurada ou a transcrição falhar, retorna null — quem
   // chama trata o fallback (mantém o texto genérico "🎵 Áudio").
+  // ── Registra um evento de diagnóstico (visível no console da conversa) ──
+  // Best-effort: nunca trava o fluxo principal se der erro.
+  async function logDebug(clinicId, phone, evento, status, detalhes) {
+    try {
+      await fetch(`${SUPABASE_URL}/rest/v1/brian_debug_log`, {
+        method: 'POST',
+        headers: { ...sbHeaders, Prefer: 'return=minimal' },
+        body: JSON.stringify({ clinic_id: clinicId, phone, evento, status, detalhes, created_at: new Date().toISOString() }),
+      });
+    } catch (e) { /* log é best-effort, não bloqueia nada */ }
+  }
+
   async function transcreverAudioWhisper(msgCompleta, instanceName) {
     const OPENAI_KEY = process.env.OPENAI_API_KEY;
     if (!OPENAI_KEY) return null;
@@ -1193,8 +1205,15 @@ module.exports = async function handler(req, res) {
           const valiaAPenaTranscrever = await deveTentarTranscrever(clinic_id, phone, fromMe);
           if (valiaAPenaTranscrever) {
             const transcricao = await transcreverAudioWhisper(msg, instanceName);
-            if (transcricao) content = transcricao;
-            else transcricaoFalhou = true; // tentou mas não conseguiu (música/ruído/erro)
+            if (transcricao) {
+              content = transcricao;
+              await logDebug(clinic_id, phone, 'transcricao', 'sucesso', transcricao.slice(0, 200));
+            } else {
+              transcricaoFalhou = true; // tentou mas não conseguiu (música/ruído/erro)
+              await logDebug(clinic_id, phone, 'transcricao', 'falhou', 'Whisper não retornou texto (música/ruído/TV ou erro na API — ver logs do Vercel pra detalhe exato)');
+            }
+          } else {
+            await logDebug(clinic_id, phone, 'transcricao', 'pulado', 'Fora do escopo do Brian (paciente já conquistado, lead antigo, humano ativo, ou Brian desligado nesta clínica)');
           }
         } else if (m.videoMessage) {
           content = m.videoMessage?.caption || '🎥 Vídeo'; type = 'video';
@@ -1276,6 +1295,7 @@ module.exports = async function handler(req, res) {
           try {
             const decisao = await brianDecide(clinic_id, phone, content, instanceName, fromMe, false);
             console.log(`[BRIAN-DECISAO] ${decisao.responder ? '✅ RESPONDERIA' : '⛔ não responde'} | ${phone} | motivo: ${decisao.razao} | msg: "${String(content).slice(0, 40)}"`);
+            await logDebug(clinic_id, phone, 'decisao_resposta', decisao.responder ? 'sucesso' : 'pulado', decisao.razao);
 
             if (decisao.responder) {
               // ── TRAVA DE TESTE: só envia pra números autorizados (modo rollout controlado) ──
@@ -1444,6 +1464,9 @@ module.exports = async function handler(req, res) {
                     temVoz = true;
                     console.log(`[BRIAN-VOZ] 🎤 forçado por espelhamento (paciente mandou áudio) | phone: ${phone}`);
                   }
+
+                  await logDebug(clinic_id, phone, 'voz', temVoz ? 'sucesso' : 'pulado',
+                    temVoz ? 'Voz será usada nesta resposta' : 'Resposta em texto (nenhum gatilho de voz disparou, ou voz desligada nesta clínica)');
 
                   // 3) OPT-OUT — se a pessoa já disse, em qualquer mensagem anterior
                   // desta conversa (ou nesta mesma), que não quer/não pode ouvir
