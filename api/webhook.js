@@ -748,6 +748,40 @@ module.exports = async function handler(req, res) {
     }
   }
 
+  // ── Gera áudio de voz de verdade a partir do texto (OpenAI TTS) ──
+  // Usado quando o Brian marca [[VOZ]] em momentos estratégicos. Voz
+  // 'nova' (feminina) ou 'onyx' (masculina), configurada por clínica em
+  // brian_config.voz_tts. Custo muito baixo (~US$15/milhão de caracteres,
+  // uma resposta curta de 1-2 frases custa frações de centavo).
+  async function gerarAudioTTS(texto, voz) {
+    const OPENAI_KEY = process.env.OPENAI_API_KEY;
+    if (!OPENAI_KEY || !texto || !voz) return null;
+    try {
+      const resp = await fetch('https://api.openai.com/v1/audio/speech', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'tts-1', voice: voz, input: texto, response_format: 'mp3' }),
+      });
+      if (!resp.ok) { console.log('[TTS] erro ao gerar áudio:', resp.status); return null; }
+      const buffer = await resp.arrayBuffer();
+      return Buffer.from(buffer).toString('base64');
+    } catch (e) { console.log('[TTS] falhou:', e.message); return null; }
+  }
+
+  // ── Envia o áudio gerado como nota de voz de verdade pelo WhatsApp ──
+  async function enviarAudioWhatsApp(instanceName, phone, audioBase64) {
+    try {
+      const cleanPhone = String(phone).replace(/\D/g, '');
+      const number = cleanPhone.startsWith('55') ? cleanPhone : '55' + cleanPhone;
+      const resp = await fetch(`${EVO_URL}/message/sendWhatsAppAudio/${instanceName}`, {
+        method: 'POST',
+        headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ number, audio: audioBase64, encoding: true }),
+      });
+      return resp.ok ? await resp.json() : null;
+    } catch (e) { console.log('[TTS-ENVIO] falhou:', e.message); return null; }
+  }
+
   // ── Transcreve áudio via Whisper (OpenAI) — assim o Brian consegue
   // "entender" o que o paciente falou, em vez de só saber "mandou um
   // áudio". Custo baixíssimo (~R$0,01-0,02 por áudio). Se a chave não
@@ -1329,10 +1363,60 @@ module.exports = async function handler(req, res) {
                     textoResposta = String(textoResposta).replace(/\s*\[\[PROC\|[^\]]+\]\]\s*/i, ' ').trim();
                   }
 
+                  // marcador VOZ (responde também em áudio, em momento estratégico)
+                  let temVoz = false;
+                  if (/\[\[VOZ\]\]/i.test(String(textoResposta))) {
+                    temVoz = true;
+                    console.log(`[BRIAN-VOZ] 🎤 detectado | phone: ${phone}`);
+                    textoResposta = String(textoResposta).replace(/\s*\[\[VOZ\]\]\s*/i, ' ').trim();
+                  }
+
                   // 1) envia a resposta limpa do Brian (sem marcadores)
                   if (textoResposta) {
                     await responderPaciente(instanceName, clinic_id, phone, textoResposta, 'BRIAN_AUTO');
                     console.log(`[BRIAN-ENVIO] ✅ respondeu ${phone}: "${String(textoResposta).slice(0, 60)}"`);
+
+                    // ── RESPOSTA EM ÁUDIO (se o Brian marcou [[VOZ]] e a clínica tem voz configurada) ──
+                    if (temVoz) {
+                      try {
+                        const vozCfgResp = await fetch(
+                          `${SUPABASE_URL}/rest/v1/brian_config?clinic_id=eq.${clinic_id}&select=voz_tts&limit=1`,
+                          { headers: sbHeaders }
+                        );
+                        const vozCfgArr = vozCfgResp.ok ? await vozCfgResp.json() : [];
+                        const vozEscolhida = vozCfgArr[0]?.voz_tts;
+                        if (vozEscolhida) {
+                          const audioBase64 = await gerarAudioTTS(textoResposta, vozEscolhida);
+                          if (audioBase64) {
+                            await enviarAudioWhatsApp(instanceName, phone, audioBase64);
+                            console.log(`[BRIAN-VOZ] 🔊 áudio enviado pra ${phone} (voz: ${vozEscolhida})`);
+                            // salva no histórico + storage, pra tocar depois no inbox
+                            try {
+                              const cleanPhoneVoz = String(phone).replace(/\D/g, '');
+                              const numberVoz = cleanPhoneVoz.startsWith('55') ? cleanPhoneVoz : '55' + cleanPhoneVoz;
+                              const nomeArquivo = `tts_${numberVoz}_${Date.now()}.mp3`;
+                              const upload = await fetch(`${SUPABASE_URL}/storage/v1/object/audios/${nomeArquivo}`, {
+                                method: 'POST',
+                                headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'audio/mpeg' },
+                                body: Buffer.from(audioBase64, 'base64'),
+                              });
+                              const mediaUrlTts = upload.ok ? `${SUPABASE_URL}/storage/v1/object/public/audios/${nomeArquivo}` : null;
+                              await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
+                                method: 'POST',
+                                headers: { ...sbHeaders, Prefer: 'return=minimal' },
+                                body: JSON.stringify({
+                                  clinic_id, phone: numberVoz, contact_name: 'BRIAN_AUTO',
+                                  content: textoResposta, type: 'audio', from_me: true, media_url: mediaUrlTts,
+                                  created_at: new Date().toISOString(),
+                                }),
+                              });
+                            } catch (e) { console.log('[BRIAN-VOZ] erro ao salvar histórico:', e.message); }
+                          }
+                        } else {
+                          console.log(`[BRIAN-VOZ] clínica ${clinic_id} sem voz_tts configurada — pulando áudio`);
+                        }
+                      } catch (e) { console.log('[BRIAN-VOZ] falhou:', e.message); }
+                    }
 
                     // ── GARANTE O LEAD CEDO (pra follow-up reaquecer quem some sem dar o nome) ──
                     // Se a pessoa demonstrou interesse (o Brian respondeu), ela já vira lead,
