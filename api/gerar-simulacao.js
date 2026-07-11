@@ -1,21 +1,37 @@
 // ============================================================
-// CLINICALEAD — Simulação de sorriso/face MANUAL (disparada pela equipe)
-// Endpoint chamado pelo botão no painel do CRM — mesma lógica de
-// geração que o Brian usa automaticamente, só que acionada por um
-// clique da equipe, escolhendo o tipo na hora.
+// CLINICALEAD — Simulação de sorriso/face MANUAL (página dedicada)
+// Chamado pela página "Simulações" do CRM. Aceita foto por UPLOAD
+// direto (base64) e MÚLTIPLOS tipos combinados numa única imagem
+// (ex: clareamento + preenchimento labial ao mesmo tempo).
+// Enviar pra um paciente é opcional (se vier phone+instance_name).
 // ============================================================
 
 const PROMPTS_SIMULACAO = {
-  clareamento: "Whiten and brighten only the teeth in this photo, removing yellow/stains, natural and realistic result (not overly white or glowing). Keep the face, lips, gums, skin tone, expression and lighting completely unchanged.",
-  alinhamento: "Straighten and align the teeth in this photo naturally, as if orthodontic treatment was completed — even spacing, natural positioning. Keep the face, lips, gums, skin tone, expression and lighting completely unchanged.",
-  lentes: "Apply a natural cosmetic veneer look to the teeth in this photo — even shape, bright natural white color, slightly refined edges, realistic enamel texture. Keep the face, lips, gums, skin tone, expression and lighting completely unchanged.",
-  protese: "Fill in the visible gaps from missing teeth in this photo with natural-looking replacement teeth that match the color, size and alignment of the surrounding teeth, creating a complete and natural smile. Keep the face, lips, gums, skin tone, expression and lighting completely unchanged.",
-  gengivoplastia: "Adjust the gum line in this photo to be more even and proportional, naturally reducing an excessive/uneven gum show ('gummy smile'). Keep the face, lips, teeth color, skin tone, expression and lighting completely unchanged except for the gum line shape.",
-  otomodelacao: "Naturally reshape the ears in this photo to sit closer to the head, correcting protruding ears (non-surgical ear harmonization result). Keep the face, hair, skin tone, expression and lighting completely unchanged except for the ear shape and position.",
-  rinoplastia: "Naturally refine and reshape the nose in this photo to be more balanced and proportional to the face. Keep the eyes, lips, mouth, skin tone, expression and lighting completely unchanged except for the nose shape.",
-  harmonizacao_facial: "Apply subtle, natural facial harmonization to this photo — slightly more defined jawline and balanced facial proportions. Keep skin tone, expression, hair, eyes and lighting natural and unchanged except for the subtle facial contour.",
-  preenchimento_labial: "Add natural, proportional fuller volume to the lips in this photo, subtle and balanced with the rest of the face. Keep the face, teeth, skin tone, expression and lighting completely unchanged except for the lip volume.",
+  clareamento: "Whiten and brighten the teeth naturally, removing yellow/stains (not overly white or glowing)",
+  alinhamento: "Straighten and align the teeth naturally, as if orthodontic treatment was completed — even spacing, natural positioning",
+  lentes: "Apply a natural cosmetic veneer look to the teeth — even shape, bright natural white color, slightly refined edges, realistic enamel texture",
+  protese: "Fill in the visible gaps from missing teeth with natural-looking replacement teeth that match the color, size and alignment of the surrounding teeth, creating a complete and natural smile",
+  gengivoplastia: "Adjust the gum line to be more even and proportional, naturally reducing an excessive/uneven gum show ('gummy smile')",
+  otomodelacao: "Naturally reshape the ears to sit closer to the head, correcting protruding ears (non-surgical ear harmonization result)",
+  rinoplastia: "Naturally refine and reshape the nose to be more balanced and proportional to the face",
+  harmonizacao_facial: "Apply subtle, natural facial harmonization — slightly more defined jawline and balanced facial proportions",
+  preenchimento_labial: "Add natural, proportional fuller volume to the lips, subtle and balanced with the rest of the face",
 };
+
+const LABELS_SIMULACAO = {
+  clareamento: 'Clareamento', alinhamento: 'Alinhamento', lentes: 'Lentes em resina',
+  protese: 'Prótese/Implante', gengivoplastia: 'Gengivoplastia', otomodelacao: 'Otomodelação',
+  rinoplastia: 'Rinoplastia', harmonizacao_facial: 'Harmonização facial', preenchimento_labial: 'Preenchimento labial',
+};
+
+// junta várias transformações numa instrução só e coerente, com UMA
+// regra final de preservação (evita empilhar edições separadas)
+function montarPromptCombinado(tipos) {
+  const partes = tipos.map(t => PROMPTS_SIMULACAO[t]).filter(Boolean);
+  if (!partes.length) return null;
+  const transformacoes = partes.join('. Also, ');
+  return `${transformacoes}. Apply all these changes together naturally and cohesively, as a single realistic photo. Keep the face, skin tone, expression, hair, background and lighting completely unchanged except for the specific changes described above.`;
+}
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, erro: 'Método não permitido' });
@@ -26,36 +42,37 @@ module.exports = async function handler(req, res) {
   const EVO_KEY = process.env.EVOLUTION_API_KEY;
   const OPENAI_KEY = process.env.OPENAI_API_KEY;
 
-  if (!SUPABASE_KEY || !EVO_KEY || !OPENAI_KEY) {
+  if (!SUPABASE_KEY || !OPENAI_KEY) {
     return res.status(500).json({ ok: false, erro: 'Configuração ausente nas env vars da Vercel' });
   }
 
   const sbHeaders = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' };
 
-  const { clinic_id, phone, tipo, instance_name } = req.body || {};
-  if (!clinic_id || !phone || !tipo || !instance_name) {
-    return res.status(400).json({ ok: false, erro: 'Faltam parâmetros: clinic_id, phone, tipo, instance_name' });
+  // aceita: tipos (array, 1+), E foto_base64 (upload direto) OU foto_url (de uma conversa existente)
+  const { clinic_id, tipos, foto_base64, foto_url, phone, instance_name } = req.body || {};
+  if (!Array.isArray(tipos) || !tipos.length) {
+    return res.status(400).json({ ok: false, erro: 'Selecione ao menos 1 tipo de simulação' });
   }
-  const prompt = PROMPTS_SIMULACAO[tipo];
-  if (!prompt) return res.status(400).json({ ok: false, erro: `Tipo inválido: ${tipo}` });
+  const prompt = montarPromptCombinado(tipos);
+  if (!prompt) return res.status(400).json({ ok: false, erro: 'Tipo(s) inválido(s)' });
+  if (!foto_base64 && !foto_url) {
+    return res.status(400).json({ ok: false, erro: 'Envie uma foto (upload ou de uma conversa)' });
+  }
 
   try {
-    // busca a última FOTO que o paciente mandou nesta conversa
-    const sufixo = String(phone).replace(/\D/g, '').slice(-8);
-    const fotoResp = await fetch(
-      `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixo}&from_me=eq.false&type=eq.image&select=media_url&order=created_at.desc&limit=1`,
-      { headers: sbHeaders }
-    );
-    const fotoArr = fotoResp.ok ? await fotoResp.json() : [];
-    const fotoUrl = fotoArr[0]?.media_url;
-    if (!fotoUrl) return res.status(404).json({ ok: false, erro: 'Nenhuma foto recente encontrada nesta conversa' });
-
-    // gera a simulação
-    const fotoFetch = await fetch(fotoUrl);
-    if (!fotoFetch.ok) return res.status(500).json({ ok: false, erro: 'Falha ao baixar a foto original' });
-    const fotoBuffer = await fotoFetch.arrayBuffer();
+    // pega os bytes da foto — de upload direto ou baixando de uma URL existente
+    let fotoBuffer;
+    if (foto_base64) {
+      const base64Limpo = foto_base64.replace(/^data:image\/\w+;base64,/, '');
+      fotoBuffer = Buffer.from(base64Limpo, 'base64');
+    } else {
+      const fotoFetch = await fetch(foto_url);
+      if (!fotoFetch.ok) return res.status(500).json({ ok: false, erro: 'Falha ao baixar a foto original' });
+      fotoBuffer = Buffer.from(await fotoFetch.arrayBuffer());
+    }
     const fotoBlob = new Blob([fotoBuffer], { type: 'image/jpeg' });
 
+    // gera a simulação (combinada, se mais de 1 tipo)
     const form = new FormData();
     form.append('model', 'gpt-image-1');
     form.append('image[]', fotoBlob, 'foto.jpg');
@@ -73,10 +90,9 @@ module.exports = async function handler(req, res) {
     const imgBase64 = editData?.data?.[0]?.b64_json;
     if (!imgBase64) return res.status(500).json({ ok: false, erro: 'API não retornou imagem' });
 
-    // upload no storage
-    const cleanPhone = String(phone).replace(/\D/g, '');
-    const number = cleanPhone.startsWith('55') ? cleanPhone : '55' + cleanPhone;
-    const nomeArquivo = `sim_manual_${tipo}_${number}_${Date.now()}.png`;
+    // upload no storage (sempre, pra poder mostrar/reenviar depois)
+    const tiposStr = tipos.join('-');
+    const nomeArquivo = `sim_${tiposStr}_${Date.now()}.png`;
     const upload = await fetch(`${SUPABASE_URL}/storage/v1/object/midias/${nomeArquivo}`, {
       method: 'POST',
       headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'image/png' },
@@ -85,26 +101,34 @@ module.exports = async function handler(req, res) {
     if (!upload.ok) return res.status(500).json({ ok: false, erro: 'Falha ao salvar imagem gerada' });
     const mediaUrl = `${SUPABASE_URL}/storage/v1/object/public/midias/${nomeArquivo}`;
 
-    // envia com a legenda de aviso SEMPRE garantida
-    const legenda = '✨ Isso é só uma *simulação ilustrativa* pra você ter uma ideia — o resultado real é sempre definido na sua avaliação com a dentista, viu? 💙';
-    await fetch(`${EVO_URL}/message/sendMedia/${instance_name}`, {
-      method: 'POST',
-      headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ number, mediatype: 'image', media: mediaUrl, caption: legenda }),
-    });
+    const nomesLegiveis = tipos.map(t => LABELS_SIMULACAO[t] || t).join(' + ');
+    const legenda = `✨ Simulação: *${nomesLegiveis}*\n\nIsso é só uma *simulação ilustrativa* pra você ter uma ideia — o resultado real é sempre definido na sua avaliação com a dentista, viu? 💙`;
 
-    // loga no histórico
-    await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
-      method: 'POST',
-      headers: { ...sbHeaders, Prefer: 'return=minimal' },
-      body: JSON.stringify({
-        clinic_id, phone: number, contact_name: 'EQUIPE',
-        content: legenda, type: 'image', from_me: true, media_url: mediaUrl,
-        created_at: new Date().toISOString(),
-      }),
-    });
+    // enviar pro paciente é OPCIONAL — só se vieram phone + instance_name
+    let enviado = false;
+    if (phone && instance_name && EVO_KEY) {
+      const cleanPhone = String(phone).replace(/\D/g, '');
+      const number = cleanPhone.startsWith('55') ? cleanPhone : '55' + cleanPhone;
+      await fetch(`${EVO_URL}/message/sendMedia/${instance_name}`, {
+        method: 'POST',
+        headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ number, mediatype: 'image', media: mediaUrl, caption: legenda }),
+      });
+      if (clinic_id) {
+        await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
+          method: 'POST',
+          headers: { ...sbHeaders, Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            clinic_id, phone: number, contact_name: 'EQUIPE',
+            content: legenda, type: 'image', from_me: true, media_url: mediaUrl,
+            created_at: new Date().toISOString(),
+          }),
+        });
+      }
+      enviado = true;
+    }
 
-    return res.status(200).json({ ok: true, media_url: mediaUrl });
+    return res.status(200).json({ ok: true, media_url: mediaUrl, legenda, enviado });
   } catch (e) {
     return res.status(500).json({ ok: false, erro: e.message });
   }
