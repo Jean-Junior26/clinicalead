@@ -788,7 +788,7 @@ module.exports = async function handler(req, res) {
     gengivoplastia: PREFIXO_PRECISO + "Adjust the gum line to be more even and proportional, naturally reducing an excessive/uneven gum show ('gummy smile')." + SUFIXO_PRESERVAR,
     otomodelacao: PREFIXO_PRECISO + "Naturally reshape the ears to sit closer to the head, correcting protruding ears (non-surgical ear harmonization result)." + SUFIXO_PRESERVAR,
     rinoplastia: PREFIXO_PRECISO + "Naturally refine and reshape the nose to be more balanced and proportional to the face." + SUFIXO_PRESERVAR,
-    harmonizacao_facial: PREFIXO_PRECISO + "Apply subtle, natural facial harmonization — slightly more defined jawline and balanced facial proportions." + SUFIXO_PRESERVAR,
+    harmonizacao_facial: PREFIXO_PRECISO + "Apply VERY subtle, minimal facial harmonization — a slightly more defined jawline and slightly more balanced facial proportions. This must be a small, believable refinement, not a transformation. The person must remain clearly, unmistakably recognizable as the exact same individual — same eyes, same nose, same mouth, same overall facial identity. If in doubt, apply LESS change, not more." + SUFIXO_PRESERVAR,
     preenchimento_labial: PREFIXO_PRECISO + "Add natural, proportional fuller volume to the lips, subtle and balanced with the rest of the face." + SUFIXO_PRESERVAR,
   };
 
@@ -1827,7 +1827,7 @@ const PROMPTS_SIMULACAO = {
   gengivoplastia: "Adjust the gum line to be more even and proportional, naturally reducing an excessive/uneven gum show ('gummy smile')",
   otomodelacao: "Naturally reshape the ears to sit closer to the head, correcting protruding ears (non-surgical ear harmonization result)",
   rinoplastia: "Naturally refine and reshape the nose to be more balanced and proportional to the face",
-  harmonizacao_facial: "Apply subtle, natural facial harmonization — slightly more defined jawline and balanced facial proportions",
+  harmonizacao_facial: "Apply VERY subtle, minimal facial harmonization — a slightly more defined jawline and slightly more balanced facial proportions. This must be a small, believable refinement, not a transformation. The person must remain clearly, unmistakably recognizable as the exact same individual — same eyes, same nose, same mouth, same overall facial identity. If in doubt, apply LESS change, not more",
   preenchimento_labial: "Add natural, proportional fuller volume to the lips, subtle and balanced with the rest of the face",
 };
 
