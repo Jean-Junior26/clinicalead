@@ -1172,6 +1172,7 @@ module.exports = async function handler(req, res) {
         }
 
         let content = '';
+        let transcricaoFalhou = false; // true quando tentamos transcrever mas não deu certo (música/ruído/erro)
         let type = 'text';
         let media_url = null;
         const m = msg?.message || {};
@@ -1189,9 +1190,11 @@ module.exports = async function handler(req, res) {
           // transcreve via Whisper SÓ se valer a pena (Brian ativo nesta
           // clínica e nenhum humano respondendo ativamente agora) — evita
           // gastar transcrevendo áudio de conversa que já é 100% humana
-          if (await deveTentarTranscrever(clinic_id, phone, fromMe)) {
+          const valiaAPenaTranscrever = await deveTentarTranscrever(clinic_id, phone, fromMe);
+          if (valiaAPenaTranscrever) {
             const transcricao = await transcreverAudioWhisper(msg, instanceName);
             if (transcricao) content = transcricao;
+            else transcricaoFalhou = true; // tentou mas não conseguiu (música/ruído/erro)
           }
         } else if (m.videoMessage) {
           content = m.videoMessage?.caption || '🎥 Vídeo'; type = 'video';
@@ -1255,6 +1258,20 @@ module.exports = async function handler(req, res) {
         // continua só logado, sem resposta automática (evita o Brian
         // responder "às cegas" sem saber o que a pessoa falou).
         const ehTextoUtilizavel = type === 'text' || (type === 'audio' && content && content.trim() !== '🎵 Áudio');
+
+        // ── ÁUDIO NÃO ENTENDIDO: avisa em vez de ficar em silêncio ──
+        // Se tentamos transcrever e não deu certo (parecia música, TV, ruído,
+        // ou o Whisper falhou), o Brian não tem o que responder de verdade —
+        // mas ainda assim vale avisar a pessoa, em vez de simplesmente sumir.
+        if (!fromMe && transcricaoFalhou && instanceName) {
+          try {
+            await responderPaciente(instanceName, clinic_id, phone,
+              'Oii! Não consegui entender esse áudio direito 😅 pode tentar gravar de novo, ou me escrever? Assim eu te ajudo certinho!',
+              'BRIAN_AUTO');
+            console.log(`[BRIAN-VOZ] 🔇 avisou que não entendeu o áudio | phone: ${phone}`);
+          } catch (e) { console.log('[BRIAN-VOZ] erro ao avisar falha de transcrição:', e.message); }
+        }
+
         if (!fromMe && ehTextoUtilizavel) {
           try {
             const decisao = await brianDecide(clinic_id, phone, content, instanceName, fromMe, false);
