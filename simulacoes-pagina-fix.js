@@ -41,6 +41,7 @@
       <p style="font-size:12px;color:var(--text-muted,#888);margin-bottom:18px;">Sobe uma foto, escolhe 1 ou mais procedimentos (pode combinar), e gera a prévia visual.</p>
 
       <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;">1. Foto</label>
+      <p style="font-size:11px;color:var(--text-muted,#888);margin:0 0 8px;">💡 Dica: lugar bem iluminado e rosto de frente, mais pertinho da câmera — dá um resultado bem melhor.</p>
       <input type="file" id="simFotoInput" accept="image/*" style="width:100%;margin-bottom:8px;color:var(--text-secondary,#C8C2AE);"/>
       <div id="simFotoPreview" style="margin-bottom:16px;"></div>
 
