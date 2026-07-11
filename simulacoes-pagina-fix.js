@@ -117,6 +117,38 @@
     });
   }
 
+  // ── Helpers de imagem (Canvas) ──
+  function carregarImagem(src) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = src;
+    });
+  }
+
+  function recortarRegiao(img, x, y, width, height) {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext('2d').drawImage(img, x, y, width, height, 0, 0, width, height);
+    return canvas.toDataURL('image/png');
+  }
+
+  async function colarDeVolta(fotoOriginalBase64, regiaoEditadaUrl, x, y, width, height) {
+    const [imgOriginal, imgEditada] = await Promise.all([
+      carregarImagem(fotoOriginalBase64), carregarImagem(regiaoEditadaUrl),
+    ]);
+    const canvas = document.createElement('canvas');
+    canvas.width = imgOriginal.naturalWidth;
+    canvas.height = imgOriginal.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(imgOriginal, 0, 0);
+    ctx.drawImage(imgEditada, x, y, width, height);
+    return canvas.toDataURL('image/png');
+  }
+
   window.gerarSimulacaoPagina = async function () {
     const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
     const tiposMarcados = Array.from(document.querySelectorAll('.simTipoCheck:checked')).map(c => c.value);
@@ -127,21 +159,45 @@
     if (!tiposMarcados.length) { status.textContent = '⚠️ Marque pelo menos 1 procedimento'; status.style.color = 'var(--coral,#C0624A)'; return; }
 
     btn.disabled = true;
-    btn.textContent = 'Gerando... (até 30s)';
+    btn.textContent = 'Localizando região...';
     status.textContent = '';
 
     try {
+      const imgOriginal = await carregarImagem(fotoBase64Atual);
+      const largura = imgOriginal.naturalWidth;
+      const altura = imgOriginal.naturalHeight;
+
+      // 1) tenta detectar a região certa (boca, nariz, orelha...) via IA de visão
+      let regiao = null;
+      try {
+        const respRegiao = await fetch('/api/webhook', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'detectar_regiao', foto_base64: fotoBase64Atual, tipos: tiposMarcados, largura, altura }),
+        });
+        const dataRegiao = await respRegiao.json();
+        if (dataRegiao.ok) regiao = dataRegiao;
+      } catch (_e) { /* segue sem região — cai no modo antigo (foto inteira) */ }
+
+      // 2) monta a imagem que vai pra edição: recorte da região (se achou) ou a foto inteira (fallback)
+      const fotoParaEditar = regiao ? recortarRegiao(imgOriginal, regiao.x, regiao.y, regiao.width, regiao.height) : fotoBase64Atual;
+
+      btn.textContent = 'Gerando... (até 30s)';
       const resp = await fetch('/api/webhook', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'gerar_simulacao', clinic_id: clinic?.id, tipos: tiposMarcados, foto_base64: fotoBase64Atual }),
+        body: JSON.stringify({ action: 'gerar_simulacao', clinic_id: clinic?.id, tipos: tiposMarcados, foto_base64: fotoParaEditar }),
       });
       const data = await resp.json();
       if (data.ok) {
-        await montarAntesDepois(fotoBase64Atual, data.media_url);
+        // 3) se recortou, cola o resultado de volta na foto original; senão usa o resultado direto
+        const fotoFinal = regiao
+          ? await colarDeVolta(fotoBase64Atual, data.media_url, regiao.x, regiao.y, regiao.width, regiao.height)
+          : data.media_url;
+        await montarAntesDepois(fotoBase64Atual, fotoFinal);
         document.getElementById('simResultadoArea').style.display = 'block';
-        document.getElementById('simResultadoArea').dataset.mediaUrl = data.media_url;
-        status.textContent = '✅ Gerado com sucesso!';
+        document.getElementById('simResultadoArea').dataset.mediaUrl = fotoFinal;
+        status.textContent = regiao ? '✅ Gerado com sucesso! (edição localizada)' : '✅ Gerado com sucesso!';
         status.style.color = 'var(--gold,#C9A84C)';
       } else {
         status.textContent = '❌ ' + (data.erro || 'Falha ao gerar');
