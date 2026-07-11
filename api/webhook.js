@@ -760,7 +760,13 @@ module.exports = async function handler(req, res) {
       const resp = await fetch('https://api.openai.com/v1/audio/speech', {
         method: 'POST',
         headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'tts-1', voice: voz, input: texto, response_format: 'mp3' }),
+        body: JSON.stringify({
+          model: 'gpt-4o-mini-tts', // modelo mais novo, aceita instrução de tom (menos robótico)
+          voice: voz,
+          input: texto,
+          instructions: 'Fale em português do Brasil, de forma calorosa, gentil e natural — como uma pessoa brasileira simpática conversando por WhatsApp, nunca como um robô ou locutor formal. Ritmo tranquilo, tom acolhedor, com leve entonação emotiva quando o texto pedir (acolhimento, alegria).',
+          response_format: 'mp3',
+        }),
       });
       if (!resp.ok) { console.log('[TTS] erro ao gerar áudio:', resp.status); return null; }
       const buffer = await resp.arrayBuffer();
@@ -1420,6 +1426,28 @@ module.exports = async function handler(req, res) {
                   if (!temVoz && type === 'audio' && content && content.trim() !== '🎵 Áudio') {
                     temVoz = true;
                     console.log(`[BRIAN-VOZ] 🎤 forçado por espelhamento (paciente mandou áudio) | phone: ${phone}`);
+                  }
+
+                  // 3) OPT-OUT — se a pessoa já disse, em qualquer mensagem anterior
+                  // desta conversa (ou nesta mesma), que não quer/não pode ouvir
+                  // áudio, isso SUPRIME a voz — não importa qual gatilho disparou.
+                  if (temVoz) {
+                    try {
+                      const sufixoOptOut = String(phone).replace(/\D/g, '').slice(-8);
+                      const optOutResp = await fetch(
+                        `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixoOptOut}&from_me=eq.false&select=content&order=created_at.desc&limit=20`,
+                        { headers: sbHeaders }
+                      );
+                      const optOutArr = optOutResp.ok ? await optOutResp.json() : [];
+                      const normalizar = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                      const frasesOptOut = ['nao posso ouvir', 'nao consigo ouvir', 'prefiro texto', 'sem audio',
+                        'nao gosto de audio', 'nao curto audio', 'manda por texto', 'so texto', 'sem voz', 'nao manda audio'];
+                      const jaPediuTexto = optOutArr.some(m => frasesOptOut.some(f => normalizar(m.content).includes(f)));
+                      if (jaPediuTexto) {
+                        temVoz = false;
+                        console.log(`[BRIAN-VOZ] 🚫 opt-out detectado — suprimindo voz | phone: ${phone}`);
+                      }
+                    } catch (e) { console.log('[BRIAN-VOZ] erro checando opt-out (seguindo com voz):', e.message); }
                   }
 
                   // 1) decide como responder: em ÁUDIO (se temVoz e deu certo) ou em TEXTO
