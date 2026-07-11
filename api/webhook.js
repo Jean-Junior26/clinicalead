@@ -1395,8 +1395,31 @@ module.exports = async function handler(req, res) {
                   let temVoz = false;
                   if (/\[\[VOZ\]\]/i.test(String(textoResposta))) {
                     temVoz = true;
-                    console.log(`[BRIAN-VOZ] 🎤 detectado | phone: ${phone}`);
+                    console.log(`[BRIAN-VOZ] 🎤 detectado (marcador do modelo) | phone: ${phone}`);
                     textoResposta = String(textoResposta).replace(/\s*\[\[VOZ\]\]\s*/i, ' ').trim();
+                  }
+
+                  // ── GATILHOS DETERMINÍSTICOS DE VOZ (garantidos por código) ──
+                  // O marcador [[VOZ]] depende do Claude "lembrar" de incluir, o
+                  // que testamos e nem sempre acontece. Os dois gatilhos abaixo
+                  // NÃO dependem do modelo — são busca de padrão simples, sempre
+                  // funcionam.
+
+                  // 1) medo/trauma na mensagem do paciente
+                  if (!temVoz) {
+                    const contentNorm = String(content || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                    const palavrasMedo = ['medo', 'trauma', 'pavor', 'apavorad', 'traumatizad', 'com muito nervos'];
+                    if (palavrasMedo.some(p => contentNorm.includes(p))) {
+                      temVoz = true;
+                      console.log(`[BRIAN-VOZ] 🎤 forçado por palavra-chave de medo/trauma | phone: ${phone}`);
+                    }
+                  }
+
+                  // 2) paciente mandou ÁUDIO nesta mensagem (transcrito com sucesso)
+                  // → responde em voz também, espelhando o canal dela automaticamente
+                  if (!temVoz && type === 'audio' && content && content.trim() !== '🎵 Áudio') {
+                    temVoz = true;
+                    console.log(`[BRIAN-VOZ] 🎤 forçado por espelhamento (paciente mandou áudio) | phone: ${phone}`);
                   }
 
                   // 1) envia a resposta limpa do Brian (sem marcadores)
