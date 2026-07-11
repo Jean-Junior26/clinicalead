@@ -1158,13 +1158,19 @@ module.exports = async function handler(req, res) {
         if (!fromMe) {
           try {
             // extrai o procedimento da mensagem de anúncio ("Quero saber mais sobre X")
-            const procDaMsg = (type === 'text') ? extrairProcedimentoDaMsg(content) : null;
+            const procDaMsg = (type === 'text' || (type === 'audio' && content && content.trim() !== '🎵 Áudio')) ? extrairProcedimentoDaMsg(content) : null;
             await brianAcharOuCriarLead(clinic_id, phone, contact_name || null, 'WhatsApp', procDaMsg);
           } catch (e) { console.log('[LEAD-AUTO] erro ao garantir lead:', e.message); }
         }
 
         // ── BRIAN 2.3.b — decide e, se aprovado + número de teste, RESPONDE ──
-        if (!fromMe && type === 'text') {
+        // Antes só disparava pra type==='text'. Agora também dispara pra
+        // ÁUDIO TRANSCRITO (quando a transcrição funcionou de verdade —
+        // content diferente do placeholder genérico). Áudio sem transcrição
+        // continua só logado, sem resposta automática (evita o Brian
+        // responder "às cegas" sem saber o que a pessoa falou).
+        const ehTextoUtilizavel = type === 'text' || (type === 'audio' && content && content.trim() !== '🎵 Áudio');
+        if (!fromMe && ehTextoUtilizavel) {
           try {
             const decisao = await brianDecide(clinic_id, phone, content, instanceName, fromMe, false);
             console.log(`[BRIAN-DECISAO] ${decisao.responder ? '✅ RESPONDERIA' : '⛔ não responde'} | ${phone} | motivo: ${decisao.razao} | msg: "${String(content).slice(0, 40)}"`);
