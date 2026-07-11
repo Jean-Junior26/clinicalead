@@ -2814,9 +2814,13 @@ if (tipo === 'image') {
         : `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;"><span style="font-size:24px;">🖼️</span><span style="font-size:12px;opacity:0.8;">Imagem indisponível</span></div>`;
     } else if (tipo === 'audio') {
       const audioSrc = m.media_url || '';
+      const temTranscricao = m.content && m.content.trim() && m.content.trim() !== '🎵 Áudio';
+      const legenda = temTranscricao
+        ? `<div style="font-size:12px;margin-top:4px;font-style:italic;opacity:0.85;">🎤 "${String(m.content).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}"</div>`
+        : '';
       bubbleContent = audioSrc
-        ? `<audio controls style="max-width:220px;height:36px;"><source src="${audioSrc}"></audio>`
-        : `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;"><span style="font-size:24px;">🎵</span><span style="font-size:12px;opacity:0.8;">Áudio</span></div>`;
+        ? `<audio controls style="max-width:220px;height:36px;"><source src="${audioSrc}"></audio>${legenda}`
+        : `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;"><span style="font-size:24px;">🎵</span><span style="font-size:12px;opacity:0.8;">Áudio</span></div>${legenda}`;
     } else if (tipo === 'video') {
       const vidSrc = m.media_url || '';
       bubbleContent = vidSrc
