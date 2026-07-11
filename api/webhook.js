@@ -753,6 +753,52 @@ module.exports = async function handler(req, res) {
   // 'nova' (feminina) ou 'onyx' (masculina), configurada por clínica em
   // brian_config.voz_tts. Custo muito baixo (~US$15/milhão de caracteres,
   // uma resposta curta de 1-2 frases custa frações de centavo).
+  // ── Prompts de edição por tipo de simulação — sempre preservando o
+  // resto da foto (rosto, lábios, gengiva, luz) intacto, só mexendo nos
+  // dentes. Pedido de forma bem específica pra reduzir chance de artefato.
+  const PROMPTS_SIMULACAO = {
+    clareamento: "Whiten and brighten only the teeth in this photo, removing yellow/stains, natural and realistic result (not overly white or glowing). Keep the face, lips, gums, skin tone, expression and lighting completely unchanged.",
+    alinhamento: "Straighten and align the teeth in this photo naturally, as if orthodontic treatment was completed — even spacing, natural positioning. Keep the face, lips, gums, skin tone, expression and lighting completely unchanged.",
+    lentes: "Apply a natural cosmetic veneer look to the teeth in this photo — even shape, bright natural white color, slightly refined edges, realistic enamel texture. Keep the face, lips, gums, skin tone, expression and lighting completely unchanged.",
+    protese: "Fill in the visible gaps from missing teeth in this photo with natural-looking replacement teeth that match the color, size and alignment of the surrounding teeth, creating a complete and natural smile. Keep the face, lips, gums, skin tone, expression and lighting completely unchanged.",
+    gengivoplastia: "Adjust the gum line in this photo to be more even and proportional, naturally reducing an excessive/uneven gum show ('gummy smile'). Keep the face, lips, teeth color, skin tone, expression and lighting completely unchanged except for the gum line shape.",
+    otomodelacao: "Naturally reshape the ears in this photo to sit closer to the head, correcting protruding ears (non-surgical ear harmonization result). Keep the face, hair, skin tone, expression and lighting completely unchanged except for the ear shape and position.",
+    rinoplastia: "Naturally refine and reshape the nose in this photo to be more balanced and proportional to the face. Keep the eyes, lips, mouth, skin tone, expression and lighting completely unchanged except for the nose shape.",
+    harmonizacao_facial: "Apply subtle, natural facial harmonization to this photo — slightly more defined jawline and balanced facial proportions. Keep skin tone, expression, hair, eyes and lighting natural and unchanged except for the subtle facial contour.",
+    preenchimento_labial: "Add natural, proportional fuller volume to the lips in this photo, subtle and balanced with the rest of the face. Keep the face, teeth, skin tone, expression and lighting completely unchanged except for the lip volume.",
+  };
+
+  // ── Gera a simulação visual do sorriso (edição de imagem via IA) ──
+  // Recebe a URL da foto que o paciente mandou + o tipo de transformação,
+  // devolve o base64 da imagem editada, ou null se falhar por qualquer motivo.
+  async function gerarSimulacaoSorriso(fotoUrl, tipo) {
+    const OPENAI_KEY = process.env.OPENAI_API_KEY;
+    const prompt = PROMPTS_SIMULACAO[tipo];
+    if (!OPENAI_KEY || !fotoUrl || !prompt) return null;
+    try {
+      const fotoResp = await fetch(fotoUrl);
+      if (!fotoResp.ok) return null;
+      const fotoBuffer = await fotoResp.arrayBuffer();
+      const fotoBlob = new Blob([fotoBuffer], { type: 'image/jpeg' });
+
+      const form = new FormData();
+      form.append('model', 'gpt-image-1');
+      form.append('image[]', fotoBlob, 'sorriso.jpg');
+      form.append('prompt', prompt);
+      form.append('size', '1024x1024');
+      form.append('quality', 'low'); // suficiente pra preview de WhatsApp, mais barato
+
+      const resp = await fetch('https://api.openai.com/v1/images/edits', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${OPENAI_KEY}` },
+        body: form,
+      });
+      if (!resp.ok) { console.log('[SIMULACAO] erro na API:', resp.status); return null; }
+      const data = await resp.json();
+      return data?.data?.[0]?.b64_json || null;
+    } catch (e) { console.log('[SIMULACAO] falhou:', e.message); return null; }
+  }
+
   async function gerarAudioTTS(texto, voz) {
     const OPENAI_KEY = process.env.OPENAI_API_KEY;
     if (!OPENAI_KEY || !texto || !voz) return null;
@@ -1468,6 +1514,15 @@ module.exports = async function handler(req, res) {
                   await logDebug(clinic_id, phone, 'voz', temVoz ? 'sucesso' : 'pulado',
                     temVoz ? 'Voz será usada nesta resposta' : 'Resposta em texto (nenhum gatilho de voz disparou, ou voz desligada nesta clínica)');
 
+                  // marcador SIMULAR (simulação visual do sorriso)
+                  let simularTipo = null;
+                  const mSimular = String(textoResposta).match(/\[\[SIMULAR\|tipo=([a-z_]+)\]\]/i);
+                  if (mSimular) {
+                    simularTipo = mSimular[1].toLowerCase();
+                    console.log(`[BRIAN-SIMULACAO] 🖼️ detectado | tipo: ${simularTipo} | phone: ${phone}`);
+                    textoResposta = String(textoResposta).replace(/\s*\[\[SIMULAR\|tipo=[a-z_]+\]\]\s*/i, ' ').trim();
+                  }
+
                   // 3) OPT-OUT — se a pessoa já disse, em qualquer mensagem anterior
                   // desta conversa (ou nesta mesma), que não quer/não pode ouvir
                   // áudio, isso SUPRIME a voz — não importa qual gatilho disparou.
@@ -1548,6 +1603,71 @@ module.exports = async function handler(req, res) {
                     if (!audioEnviadoComSucesso) {
                       await responderPaciente(instanceName, clinic_id, phone, textoResposta, 'BRIAN_AUTO');
                       console.log(`[BRIAN-ENVIO] ✅ respondeu ${phone} em texto: "${String(textoResposta).slice(0, 60)}"`);
+                    }
+
+                    // ── SIMULAÇÃO VISUAL DO SORRISO (se o Brian marcou [[SIMULAR]]) ──
+                    if (simularTipo) {
+                      try {
+                        const simCfgResp = await fetch(
+                          `${SUPABASE_URL}/rest/v1/brian_config?clinic_id=eq.${clinic_id}&select=simulacao_sorriso&limit=1`,
+                          { headers: sbHeaders }
+                        );
+                        const simCfgArr = simCfgResp.ok ? await simCfgResp.json() : [];
+                        const simulacaoAtiva = simCfgArr[0]?.simulacao_sorriso === true;
+                        if (simulacaoAtiva) {
+                          // busca a última FOTO que o paciente mandou nesta conversa
+                          const sufixoSim = String(phone).replace(/\D/g, '').slice(-8);
+                          const fotoResp = await fetch(
+                            `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixoSim}&from_me=eq.false&type=eq.image&select=media_url&order=created_at.desc&limit=1`,
+                            { headers: sbHeaders }
+                          );
+                          const fotoArr = fotoResp.ok ? await fotoResp.json() : [];
+                          const fotoUrl = fotoArr[0]?.media_url;
+                          if (fotoUrl) {
+                            const imgBase64 = await gerarSimulacaoSorriso(fotoUrl, simularTipo);
+                            if (imgBase64) {
+                              const cleanPhoneSim = String(phone).replace(/\D/g, '');
+                              const numberSim = cleanPhoneSim.startsWith('55') ? cleanPhoneSim : '55' + cleanPhoneSim;
+                              const nomeArquivoSim = `sim_${simularTipo}_${numberSim}_${Date.now()}.png`;
+                              const uploadSim = await fetch(`${SUPABASE_URL}/storage/v1/object/midias/${nomeArquivoSim}`, {
+                                method: 'POST',
+                                headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'image/png' },
+                                body: Buffer.from(imgBase64, 'base64'),
+                              });
+                              const mediaUrlSim = uploadSim.ok ? `${SUPABASE_URL}/storage/v1/object/public/midias/${nomeArquivoSim}` : null;
+                              if (mediaUrlSim) {
+                                // ── LEGENDA SEMPRE COM O AVISO — garantido por código, não
+                                // depende do Brian lembrar de escrever isso.
+                                const legendaSim = '✨ Isso é só uma *simulação ilustrativa* pra você ter uma ideia — o resultado real é sempre definido na sua avaliação com a dentista, viu? 💙';
+                                await fetch(`${EVO_URL}/message/sendMedia/${instanceName}`, {
+                                  method: 'POST',
+                                  headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ number: numberSim, mediatype: 'image', media: mediaUrlSim, caption: legendaSim }),
+                                });
+                                await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
+                                  method: 'POST',
+                                  headers: { ...sbHeaders, Prefer: 'return=minimal' },
+                                  body: JSON.stringify({
+                                    clinic_id, phone: numberSim, contact_name: 'BRIAN_AUTO',
+                                    content: legendaSim, type: 'image', from_me: true, media_url: mediaUrlSim,
+                                    created_at: new Date().toISOString(),
+                                  }),
+                                });
+                                console.log(`[BRIAN-SIMULACAO] ✅ enviada (tipo: ${simularTipo}) | phone: ${phone}`);
+                                await logDebug(clinic_id, phone, 'simulacao', 'sucesso', `tipo: ${simularTipo}`);
+                              }
+                            } else {
+                              console.log(`[BRIAN-SIMULACAO] falhou ao gerar imagem | phone: ${phone}`);
+                              await logDebug(clinic_id, phone, 'simulacao', 'falhou', `tipo: ${simularTipo} — API não retornou imagem`);
+                            }
+                          } else {
+                            console.log(`[BRIAN-SIMULACAO] sem foto recente do paciente pra simular | phone: ${phone}`);
+                            await logDebug(clinic_id, phone, 'simulacao', 'pulado', 'Brian marcou SIMULAR mas não achou foto recente do paciente');
+                          }
+                        } else {
+                          await logDebug(clinic_id, phone, 'simulacao', 'pulado', `clínica ${clinic_id} sem simulacao_sorriso ativada`);
+                        }
+                      } catch (e) { console.log('[BRIAN-SIMULACAO] falhou:', e.message); }
                     }
 
                     // ── GARANTE O LEAD CEDO (pra follow-up reaquecer quem some sem dar o nome) ──
