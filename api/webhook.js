@@ -29,6 +29,13 @@ module.exports = async function handler(req, res) {
     return await handleEnviarImagemPronta(req, res, { SUPABASE_URL, SUPABASE_KEY, EVO_URL, EVO_KEY, sbHeaders });
   }
 
+  // ── DESVIO: detecta a região (boca, nariz, orelha...) na foto, via IA
+  // de visão — usado pra recortar só o pedaço certo antes de editar,
+  // evitando que a IA de imagem mexa no rosto inteiro.
+  if (req.body && req.body.action === 'detectar_regiao') {
+    return await handleDetectarRegiao(req, res);
+  }
+
   // ════════════════════════════════════════════════════════════
   // BRIAN 2.3.a — CÉREBRO DA DECISÃO (NÃO ENVIA NADA AINDA)
   // Checa as 7 travas e retorna se o Brian DEVERIA responder.
@@ -1968,6 +1975,75 @@ async function handleEnviarImagemPronta(req, res, cfg) {
     }
 
     return res.status(200).json({ ok: true, media_url: mediaUrl });
+  } catch (e) {
+    return res.status(500).json({ ok: false, erro: e.message });
+  }
+}
+
+// ============================================================
+// Detecta a região certa (boca, nariz, orelha, etc.) na foto usando
+// IA de visão — devolve um retângulo (x, y, largura, altura) em
+// pixels, com uma margem de segurança já aplicada, pronto pra recortar.
+// ============================================================
+
+// mapeia cada tipo de simulação pra descrição da região que a IA de
+// visão precisa localizar
+const REGIOES_POR_TIPO = {
+  clareamento: 'mouth and teeth', alinhamento: 'mouth and teeth', lentes: 'mouth and teeth',
+  protese: 'mouth and teeth', gengivoplastia: 'mouth, teeth and gums',
+  preenchimento_labial: 'lips and mouth',
+  otomodelacao: 'ears', rinoplastia: 'nose',
+  harmonizacao_facial: 'jawline and lower face (chin to cheeks)',
+};
+
+async function handleDetectarRegiao(req, res) {
+  const OPENAI_KEY = process.env.OPENAI_API_KEY;
+  if (!OPENAI_KEY) return res.status(500).json({ ok: false, erro: 'OPENAI_API_KEY ausente' });
+
+  const { foto_base64, tipos, largura, altura } = req.body || {};
+  if (!foto_base64 || !Array.isArray(tipos) || !tipos.length || !largura || !altura) {
+    return res.status(400).json({ ok: false, erro: 'Faltam parâmetros: foto_base64, tipos, largura, altura' });
+  }
+
+  const regioes = [...new Set(tipos.map(t => REGIOES_POR_TIPO[t]).filter(Boolean))];
+  if (!regioes.length) return res.status(400).json({ ok: false, erro: 'Tipo(s) sem região mapeada' });
+  const descricaoRegioes = regioes.join(', and, ');
+
+  try {
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: `This image is exactly ${largura}x${altura} pixels. Return ONLY a JSON object (no markdown, no explanation) with keys x, y, width, height representing the SMALLEST rectangle (in pixels, top-left origin) that fully contains ALL of these features together: ${descricaoRegioes}. Example: {"x":120,"y":340,"width":200,"height":150}` },
+            { type: 'image_url', image_url: { url: foto_base64 } },
+          ],
+        }],
+        max_tokens: 100,
+      }),
+    });
+    if (!resp.ok) return res.status(500).json({ ok: false, erro: `Falha na API de visão: ${resp.status}` });
+    const data = await resp.json();
+    const texto = data?.choices?.[0]?.message?.content || '';
+    const jsonLimpo = texto.replace(/```json|```/g, '').trim();
+    const bbox = JSON.parse(jsonLimpo);
+    if (typeof bbox.x !== 'number' || typeof bbox.y !== 'number' || typeof bbox.width !== 'number' || typeof bbox.height !== 'number') {
+      return res.status(500).json({ ok: false, erro: 'Resposta de visão em formato inesperado' });
+    }
+
+    // adiciona margem de 35% em volta (contexto pra IA de imagem editar
+    // com naturalidade, sem ficar um recorte seco/cortado feio)
+    const margemX = bbox.width * 0.35;
+    const margemY = bbox.height * 0.35;
+    const x = Math.max(0, Math.round(bbox.x - margemX));
+    const y = Math.max(0, Math.round(bbox.y - margemY));
+    const width = Math.min(largura - x, Math.round(bbox.width + margemX * 2));
+    const height = Math.min(altura - y, Math.round(bbox.height + margemY * 2));
+
+    return res.status(200).json({ ok: true, x, y, width, height });
   } catch (e) {
     return res.status(500).json({ ok: false, erro: e.message });
   }
