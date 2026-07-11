@@ -22,6 +22,13 @@ module.exports = async function handler(req, res) {
     return await handleGerarSimulacao(req, res, { SUPABASE_URL, SUPABASE_KEY, EVO_URL, EVO_KEY, sbHeaders });
   }
 
+  // ── DESVIO: envia uma imagem JÁ PRONTA (ex: a montagem antes/depois
+  // desenhada no canvas do navegador) — sem gerar nada novo na IA, só
+  // sobe e manda. Evita gastar uma chamada de IA extra ao reenviar.
+  if (req.body && req.body.action === 'enviar_imagem_pronta') {
+    return await handleEnviarImagemPronta(req, res, { SUPABASE_URL, SUPABASE_KEY, EVO_URL, EVO_KEY, sbHeaders });
+  }
+
   // ════════════════════════════════════════════════════════════
   // BRIAN 2.3.a — CÉREBRO DA DECISÃO (NÃO ENVIA NADA AINDA)
   // Checa as 7 travas e retorna se o Brian DEVERIA responder.
@@ -769,7 +776,7 @@ module.exports = async function handler(req, res) {
   const PROMPTS_SIMULACAO = {
     clareamento: PREFIXO_PRECISO + "Whiten and brighten only the teeth, removing yellow/stains, natural and realistic result (not overly white or glowing)." + SUFIXO_PRESERVAR,
     alinhamento: PREFIXO_PRECISO + "Straighten and align the teeth naturally, as if orthodontic treatment was completed — even spacing, natural positioning." + SUFIXO_PRESERVAR,
-    lentes: PREFIXO_PRECISO + "Perform a complete cosmetic dental veneer transformation (digital smile design) on the teeth: correct the size and proportions of the teeth to be ideal and harmonious with the face, refine the shape of each tooth to be symmetric and aesthetically pleasing, correct small misalignments and close small gaps between teeth, and remove visible imperfections like chips or irregular edges. Apply a bright, uniform, porcelain-white color — a dramatic 'Hollywood smile' look, noticeably whiter and more uniform than natural teeth. The result must look like a real, high-quality, PHOTOREALISTIC professional dental result — not an artificial filter, cartoon, or drawing. Keep realistic light reflection, subtle natural translucency at the tooth edges, and natural gum texture." + SUFIXO_PRESERVAR,
+    lentes: PREFIXO_PRECISO + "Perform a SUBTLE, moderate cosmetic dental veneer improvement on the teeth: slightly correct the size and proportions to be more harmonious, gently refine the shape of teeth that look uneven, softly correct small misalignments and gaps, and reduce (don't fully erase) small imperfections. Whiten the teeth to a bright, healthy, believable white — brighter than before but NOT glowing or extreme, still looking like real human teeth, not veneers advertisement. This must look like a small, believable, realistic improvement — as if you're seeing a slightly better version of these exact same teeth, not a different person's teeth. If in doubt, favor being MORE subtle rather than more dramatic." + SUFIXO_PRESERVAR,
     protese: PREFIXO_PRECISO + "Fill in the visible gaps from missing teeth with natural-looking replacement teeth that match the color, size and alignment of the surrounding teeth, creating a complete and natural smile." + SUFIXO_PRESERVAR,
     gengivoplastia: PREFIXO_PRECISO + "Adjust the gum line to be more even and proportional, naturally reducing an excessive/uneven gum show ('gummy smile')." + SUFIXO_PRESERVAR,
     otomodelacao: PREFIXO_PRECISO + "Naturally reshape the ears to sit closer to the head, correcting protruding ears (non-surgical ear harmonization result)." + SUFIXO_PRESERVAR,
@@ -1808,7 +1815,7 @@ module.exports = async function handler(req, res) {
 const PROMPTS_SIMULACAO = {
   clareamento: "Whiten and brighten the teeth naturally, removing yellow/stains (not overly white or glowing)",
   alinhamento: "Straighten and align the teeth naturally, as if orthodontic treatment was completed — even spacing, natural positioning",
-  lentes: "Perform a complete cosmetic dental veneer transformation (digital smile design) on the teeth: correct the size and proportions of the teeth to be ideal and harmonious with the face, refine the shape of each tooth to be symmetric and aesthetically pleasing, correct small misalignments and close small gaps between teeth, and remove visible imperfections like chips or irregular edges. Apply a bright, uniform, porcelain-white color — a dramatic 'Hollywood smile' look, noticeably whiter and more uniform than natural teeth. The result must look like a real, high-quality, PHOTOREALISTIC professional dental result — not an artificial filter, cartoon, or drawing. Keep realistic light reflection, subtle natural translucency at the tooth edges, and natural gum texture",
+  lentes: "Perform a SUBTLE, moderate cosmetic dental veneer improvement on the teeth: slightly correct the size and proportions to be more harmonious, gently refine the shape of teeth that look uneven, softly correct small misalignments and gaps, and reduce (don't fully erase) small imperfections. Whiten the teeth to a bright, healthy, believable white — brighter than before but NOT glowing or extreme, still looking like real human teeth, not veneers advertisement. This must look like a small, believable, realistic improvement — as if you're seeing a slightly better version of these exact same teeth, not a different person's teeth. If in doubt, favor being MORE subtle rather than more dramatic",
   protese: "Fill in the visible gaps from missing teeth with natural-looking replacement teeth that match the color, size and alignment of the surrounding teeth, creating a complete and natural smile",
   gengivoplastia: "Adjust the gum line to be more even and proportional, naturally reducing an excessive/uneven gum show ('gummy smile')",
   otomodelacao: "Naturally reshape the ears to sit closer to the head, correcting protruding ears (non-surgical ear harmonization result)",
@@ -1912,6 +1919,55 @@ async function handleGerarSimulacao(req, res, cfg) {
     }
 
     return res.status(200).json({ ok: true, media_url: mediaUrl, legenda, enviado });
+  } catch (e) {
+    return res.status(500).json({ ok: false, erro: e.message });
+  }
+}
+
+// ============================================================
+// Envia uma imagem JÁ PRONTA (ex: montagem antes/depois feita no
+// canvas do navegador) — só sobe e manda, sem chamar a IA de novo.
+// ============================================================
+async function handleEnviarImagemPronta(req, res, cfg) {
+  const { SUPABASE_URL, SUPABASE_KEY, EVO_URL, EVO_KEY, sbHeaders } = cfg;
+  const { clinic_id, imagem_base64, phone, instance_name, caption } = req.body || {};
+  if (!imagem_base64 || !phone || !instance_name) {
+    return res.status(400).json({ ok: false, erro: 'Faltam parâmetros: imagem_base64, phone, instance_name' });
+  }
+  try {
+    const base64Limpo = imagem_base64.replace(/^data:image\/\w+;base64,/, '');
+    const nomeArquivo = `sim_antesdepois_${Date.now()}.png`;
+    const upload = await fetch(`${SUPABASE_URL}/storage/v1/object/midias/${nomeArquivo}`, {
+      method: 'POST',
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'image/png' },
+      body: Buffer.from(base64Limpo, 'base64'),
+    });
+    if (!upload.ok) return res.status(500).json({ ok: false, erro: 'Falha ao salvar imagem' });
+    const mediaUrl = `${SUPABASE_URL}/storage/v1/object/public/midias/${nomeArquivo}`;
+
+    const legendaFinal = caption || '✨ Isso é só uma *simulação ilustrativa* — o resultado real é sempre definido na sua avaliação com a dentista, viu? 💙';
+    const cleanPhone = String(phone).replace(/\D/g, '');
+    const number = cleanPhone.startsWith('55') ? cleanPhone : '55' + cleanPhone;
+
+    await fetch(`${EVO_URL}/message/sendMedia/${instance_name}`, {
+      method: 'POST',
+      headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ number, mediatype: 'image', media: mediaUrl, caption: legendaFinal }),
+    });
+
+    if (clinic_id) {
+      await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
+        method: 'POST',
+        headers: { ...sbHeaders, Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          clinic_id, phone: number, contact_name: 'EQUIPE',
+          content: legendaFinal, type: 'image', from_me: true, media_url: mediaUrl,
+          created_at: new Date().toISOString(),
+        }),
+      });
+    }
+
+    return res.status(200).json({ ok: true, media_url: mediaUrl });
   } catch (e) {
     return res.status(500).json({ ok: false, erro: e.message });
   }
