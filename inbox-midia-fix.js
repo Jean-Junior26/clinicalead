@@ -17,7 +17,16 @@
     const u = m.media_url;
     if (!u) return '';
     if (m.type === 'audio') {
-      return `<audio controls preload="none" src="${u}" style="max-width:240px;height:42px;"></audio>`;
+      const player = `<audio controls preload="none" src="${u}" style="max-width:240px;height:42px;"></audio>`;
+      // se o conteúdo é a TRANSCRIÇÃO de verdade (não o placeholder genérico),
+      // mostra o texto como legenda abaixo do player — antes esse texto era
+      // apagado e substituído só pelo player, escondendo o que a pessoa falou.
+      const temTranscricao = m.content && m.content.trim() && m.content.trim() !== '🎵 Áudio';
+      if (temTranscricao) {
+        const textoEscapado = String(m.content).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        return `<div>${player}<div style="margin-top:6px;font-size:13px;opacity:0.85;font-style:italic;">🎤 "${textoEscapado}"</div></div>`;
+      }
+      return player;
     }
     if (m.type === 'sticker') {
       return `<img src="${u}" alt="figurinha" loading="lazy" style="width:120px;height:120px;object-fit:contain;">`;
