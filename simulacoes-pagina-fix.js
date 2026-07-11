@@ -92,10 +92,10 @@
     status.textContent = '';
 
     try {
-      const resp = await fetch('/api/gerar-simulacao', {
+      const resp = await fetch('/api/webhook', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clinic_id: clinic?.id, tipos: tiposMarcados, foto_base64: fotoBase64Atual }),
+        body: JSON.stringify({ action: 'gerar_simulacao', clinic_id: clinic?.id, tipos: tiposMarcados, foto_base64: fotoBase64Atual }),
       });
       const data = await resp.json();
       if (data.ok) {
@@ -128,11 +128,11 @@
     btn.disabled = true;
     btn.textContent = 'Enviando...';
     try {
-      const resp = await fetch('/api/gerar-simulacao', {
+      const resp = await fetch('/api/webhook', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          clinic_id: clinic.id, tipos: tiposMarcados, foto_base64: fotoBase64Atual,
+          action: 'gerar_simulacao', clinic_id: clinic.id, tipos: tiposMarcados, foto_base64: fotoBase64Atual,
           phone: telefone, instance_name: clinic.whatsapp_instance,
         }),
       });
