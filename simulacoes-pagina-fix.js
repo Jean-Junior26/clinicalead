@@ -56,8 +56,8 @@
       <div id="simStatusPagina" style="margin-top:10px;font-size:12px;text-align:center;color:var(--text-muted,#888);"></div>
 
       <div id="simResultadoArea" style="display:none;margin-top:18px;padding-top:18px;border-top:1px dashed var(--border-subtle,rgba(255,255,255,0.1));">
-        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:8px;">3. Resultado</label>
-        <img id="simResultadoImg" style="width:100%;border-radius:10px;margin-bottom:14px;"/>
+        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:8px;">3. Resultado (antes/depois)</label>
+        <canvas id="simResultadoCanvas" style="width:100%;border-radius:10px;margin-bottom:14px;"></canvas>
         <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;">Enviar pra um paciente (opcional)</label>
         <input type="text" id="simTelefoneInput" placeholder="Ex: 34999418861" style="width:100%;padding:10px;border-radius:8px;background:var(--bg-base,#0A0A0B);border:1px solid var(--gold-border,#333);color:var(--text-primary,#F0EAD6);margin-bottom:10px;"/>
         <button id="simEnviarBtn" onclick="enviarSimulacaoPagina()" style="width:100%;padding:11px;border-radius:10px;border:1px solid var(--gold,#C9A84C);background:transparent;color:var(--gold,#C9A84C);font-weight:700;font-size:13px;cursor:pointer;">Enviar por WhatsApp</button>
@@ -77,6 +77,45 @@
       reader.readAsDataURL(file);
     };
   };
+
+  // ── Monta uma montagem ANTES | DEPOIS lado a lado, com rótulos ──
+  // Torna qualquer imperfeição da IA muito mais aceitável, porque a
+  // pessoa vê exatamente o que mudou, comparando direto com a foto real.
+  function montarAntesDepois(antesBase64, depoisUrl) {
+    return new Promise((resolve) => {
+      const canvas = document.getElementById('simResultadoCanvas');
+      const ctx = canvas.getContext('2d');
+      const imgAntes = new Image();
+      const imgDepois = new Image();
+      imgDepois.crossOrigin = 'anonymous';
+      let carregadas = 0;
+      const aoCarregar = () => {
+        carregadas++;
+        if (carregadas < 2) return;
+        const alturaFinal = 500;
+        const larguraAntes = (imgAntes.width / imgAntes.height) * alturaFinal;
+        const larguraDepois = (imgDepois.width / imgDepois.height) * alturaFinal;
+        canvas.width = larguraAntes + larguraDepois + 4;
+        canvas.height = alturaFinal + 36;
+
+        ctx.fillStyle = '#0A0A0B';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(imgAntes, 0, 36, larguraAntes, alturaFinal);
+        ctx.drawImage(imgDepois, larguraAntes + 4, 36, larguraDepois, alturaFinal);
+
+        ctx.fillStyle = '#C9A84C';
+        ctx.font = 'bold 20px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('ANTES', larguraAntes / 2, 26);
+        ctx.fillText('DEPOIS (simulação)', larguraAntes + 4 + larguraDepois / 2, 26);
+        resolve();
+      };
+      imgAntes.onload = aoCarregar;
+      imgDepois.onload = aoCarregar;
+      imgAntes.src = antesBase64;
+      imgDepois.src = depoisUrl;
+    });
+  }
 
   window.gerarSimulacaoPagina = async function () {
     const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
@@ -99,7 +138,7 @@
       });
       const data = await resp.json();
       if (data.ok) {
-        document.getElementById('simResultadoImg').src = data.media_url;
+        await montarAntesDepois(fotoBase64Atual, data.media_url);
         document.getElementById('simResultadoArea').style.display = 'block';
         document.getElementById('simResultadoArea').dataset.mediaUrl = data.media_url;
         status.textContent = '✅ Gerado com sucesso!';
@@ -120,7 +159,6 @@
   window.enviarSimulacaoPagina = async function () {
     const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
     const telefone = (document.getElementById('simTelefoneInput').value || '').trim();
-    const tiposMarcados = Array.from(document.querySelectorAll('.simTipoCheck:checked')).map(c => c.value);
     const btn = document.getElementById('simEnviarBtn');
     if (!telefone) { if (typeof toast === 'function') toast('Digite um telefone', 'error'); return; }
     if (!clinic?.whatsapp_instance) { if (typeof toast === 'function') toast('Clínica sem WhatsApp conectado', 'error'); return; }
@@ -128,16 +166,21 @@
     btn.disabled = true;
     btn.textContent = 'Enviando...';
     try {
+      // usa a montagem antes/depois que já está desenhada no canvas —
+      // não gera de novo na IA, só sobe e manda
+      const canvas = document.getElementById('simResultadoCanvas');
+      const imagemBase64 = canvas.toDataURL('image/png');
+
       const resp = await fetch('/api/webhook', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action: 'gerar_simulacao', clinic_id: clinic.id, tipos: tiposMarcados, foto_base64: fotoBase64Atual,
+          action: 'enviar_imagem_pronta', clinic_id: clinic.id, imagem_base64: imagemBase64,
           phone: telefone, instance_name: clinic.whatsapp_instance,
         }),
       });
       const data = await resp.json();
-      if (data.ok && data.enviado) {
+      if (data.ok) {
         if (typeof toast === 'function') toast('Enviado! ✓', 'success');
       } else {
         if (typeof toast === 'function') toast(data.erro || 'Falha ao enviar', 'error');
