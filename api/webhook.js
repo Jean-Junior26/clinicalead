@@ -764,16 +764,18 @@ module.exports = async function handler(req, res) {
   // ── Prompts de edição por tipo de simulação — sempre preservando o
   // resto da foto (rosto, lábios, gengiva, luz) intacto, só mexendo nos
   // dentes. Pedido de forma bem específica pra reduzir chance de artefato.
+  const PREFIXO_PRECISO = "This is a precise, localized photo edit, not a new image. ";
+  const SUFIXO_PRESERVAR = " Apply ONLY this specific change. Do NOT change, regenerate, or reinterpret the person's facial identity, bone structure, face shape, eyes, eyebrows, skin tone, expression, hair, pose, background, or lighting (unless explicitly part of the change above). Everything else must remain pixel-for-pixel identical to the original photo.";
   const PROMPTS_SIMULACAO = {
-    clareamento: "Whiten and brighten only the teeth in this photo, removing yellow/stains, natural and realistic result (not overly white or glowing). Keep the face, lips, gums, skin tone, expression and lighting completely unchanged.",
-    alinhamento: "Straighten and align the teeth in this photo naturally, as if orthodontic treatment was completed — even spacing, natural positioning. Keep the face, lips, gums, skin tone, expression and lighting completely unchanged.",
-    lentes: "Apply a natural cosmetic veneer look to the teeth in this photo — even shape, bright natural white color, slightly refined edges, realistic enamel texture. Keep the face, lips, gums, skin tone, expression and lighting completely unchanged.",
-    protese: "Fill in the visible gaps from missing teeth in this photo with natural-looking replacement teeth that match the color, size and alignment of the surrounding teeth, creating a complete and natural smile. Keep the face, lips, gums, skin tone, expression and lighting completely unchanged.",
-    gengivoplastia: "Adjust the gum line in this photo to be more even and proportional, naturally reducing an excessive/uneven gum show ('gummy smile'). Keep the face, lips, teeth color, skin tone, expression and lighting completely unchanged except for the gum line shape.",
-    otomodelacao: "Naturally reshape the ears in this photo to sit closer to the head, correcting protruding ears (non-surgical ear harmonization result). Keep the face, hair, skin tone, expression and lighting completely unchanged except for the ear shape and position.",
-    rinoplastia: "Naturally refine and reshape the nose in this photo to be more balanced and proportional to the face. Keep the eyes, lips, mouth, skin tone, expression and lighting completely unchanged except for the nose shape.",
-    harmonizacao_facial: "Apply subtle, natural facial harmonization to this photo — slightly more defined jawline and balanced facial proportions. Keep skin tone, expression, hair, eyes and lighting natural and unchanged except for the subtle facial contour.",
-    preenchimento_labial: "Add natural, proportional fuller volume to the lips in this photo, subtle and balanced with the rest of the face. Keep the face, teeth, skin tone, expression and lighting completely unchanged except for the lip volume.",
+    clareamento: PREFIXO_PRECISO + "Whiten and brighten only the teeth, removing yellow/stains, natural and realistic result (not overly white or glowing)." + SUFIXO_PRESERVAR,
+    alinhamento: PREFIXO_PRECISO + "Straighten and align the teeth naturally, as if orthodontic treatment was completed — even spacing, natural positioning." + SUFIXO_PRESERVAR,
+    lentes: PREFIXO_PRECISO + "Apply a natural cosmetic veneer look to the teeth — even shape, bright natural white color, slightly refined edges, realistic enamel texture." + SUFIXO_PRESERVAR,
+    protese: PREFIXO_PRECISO + "Fill in the visible gaps from missing teeth with natural-looking replacement teeth that match the color, size and alignment of the surrounding teeth, creating a complete and natural smile." + SUFIXO_PRESERVAR,
+    gengivoplastia: PREFIXO_PRECISO + "Adjust the gum line to be more even and proportional, naturally reducing an excessive/uneven gum show ('gummy smile')." + SUFIXO_PRESERVAR,
+    otomodelacao: PREFIXO_PRECISO + "Naturally reshape the ears to sit closer to the head, correcting protruding ears (non-surgical ear harmonization result)." + SUFIXO_PRESERVAR,
+    rinoplastia: PREFIXO_PRECISO + "Naturally refine and reshape the nose to be more balanced and proportional to the face." + SUFIXO_PRESERVAR,
+    harmonizacao_facial: PREFIXO_PRECISO + "Apply subtle, natural facial harmonization — slightly more defined jawline and balanced facial proportions." + SUFIXO_PRESERVAR,
+    preenchimento_labial: PREFIXO_PRECISO + "Add natural, proportional fuller volume to the lips, subtle and balanced with the rest of the face." + SUFIXO_PRESERVAR,
   };
 
   // ── Gera a simulação visual do sorriso (edição de imagem via IA) ──
@@ -794,7 +796,8 @@ module.exports = async function handler(req, res) {
       form.append('image[]', fotoBlob, 'sorriso.jpg');
       form.append('prompt', prompt);
       form.append('size', '1024x1024');
-      form.append('quality', 'low'); // suficiente pra preview de WhatsApp, mais barato
+      form.append('quality', 'medium'); // 'low' regenerava rosto inteiro em vez de só a região pedida
+      form.append('input_fidelity', 'high'); // preserva rosto/identidade - recomendado pela OpenAI pra fotos de pessoa
 
       const resp = await fetch('https://api.openai.com/v1/images/edits', {
         method: 'POST',
@@ -1824,7 +1827,7 @@ function montarPromptCombinado(tipos) {
   const partes = tipos.map(t => PROMPTS_SIMULACAO[t]).filter(Boolean);
   if (!partes.length) return null;
   const transformacoes = partes.join('. Also, ');
-  return `${transformacoes}. Apply all these changes together naturally and cohesively, as a single realistic photo. Keep the face, skin tone, expression, hair, background and lighting completely unchanged except for the specific changes described above.`;
+  return `This is a precise, localized photo edit, not a new image. ${transformacoes}. Apply ONLY these specific changes. Do NOT change, regenerate, or reinterpret the person's facial identity, bone structure, face shape, eyes, eyebrows, nose (unless explicitly mentioned above), ears (unless explicitly mentioned above), skin tone, expression, hair, pose, background, or lighting. Everything except the specific change(s) described above must remain pixel-for-pixel identical to the original photo.`;
 }
 
 async function handleGerarSimulacao(req, res, cfg) {
@@ -1859,7 +1862,8 @@ async function handleGerarSimulacao(req, res, cfg) {
     form.append('image[]', fotoBlob, 'foto.jpg');
     form.append('prompt', prompt);
     form.append('size', '1024x1024');
-    form.append('quality', 'low');
+    form.append('quality', 'medium'); // 'low' regenerava rosto inteiro em vez de só a região pedida
+    form.append('input_fidelity', 'high'); // preserva rosto/identidade - recomendado pela OpenAI pra fotos de pessoa
 
     const editResp = await fetch('https://api.openai.com/v1/images/edits', {
       method: 'POST',
