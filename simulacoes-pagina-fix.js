@@ -19,6 +19,7 @@
     { valor: 'rinoplastia', label: '👃 Rinoplastia (nariz)' },
     { valor: 'harmonizacao_facial', label: '💆 Harmonização facial' },
     { valor: 'preenchimento_labial', label: '💋 Preenchimento labial' },
+    { valor: 'toxina_botulinica', label: '💉 Toxina botulínica' },
   ];
 
   let fotoBase64Atual = null;
@@ -168,17 +169,14 @@
       const largura = imgOriginal.naturalWidth;
       const altura = imgOriginal.naturalHeight;
 
-      // 1) tenta detectar a região certa (boca, nariz, orelha...) via IA de visão
+      // 1) DESLIGADO (11/07): a IA de visão não é confiável o suficiente
+      // pra coordenadas exatas de pixel — gerava recortes mal posicionados
+      // e colados de forma visível/quebrada. Voltando pro modo "foto
+      // inteira", que não é perfeito mas não quebra visualmente.
+      // Pra reativar no futuro, precisaria de detecção facial de verdade
+      // (tipo MediaPipe/face-landmarks), não um VLM genérico perguntando
+      // coordenadas.
       let regiao = null;
-      try {
-        const respRegiao = await fetch('/api/webhook', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'detectar_regiao', foto_base64: fotoBase64Atual, tipos: tiposMarcados, largura, altura }),
-        });
-        const dataRegiao = await respRegiao.json();
-        if (dataRegiao.ok) regiao = dataRegiao;
-      } catch (_e) { /* segue sem região — cai no modo antigo (foto inteira) */ }
 
       // 2) monta a imagem que vai pra edição: recorte da região (se achou) ou a foto inteira (fallback)
       const fotoParaEditar = regiao ? recortarRegiao(imgOriginal, regiao.x, regiao.y, regiao.width, regiao.height) : fotoBase64Atual;
