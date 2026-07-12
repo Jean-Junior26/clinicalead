@@ -185,7 +185,10 @@
       const resp = await fetch('/api/webhook', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'gerar_simulacao', clinic_id: clinic?.id, tipos: tiposMarcados, foto_base64: fotoParaEditar }),
+        body: JSON.stringify({
+          action: 'gerar_simulacao', clinic_id: clinic?.id, tipos: tiposMarcados, foto_base64: fotoParaEditar,
+          largura: imgOriginal.naturalWidth, altura: imgOriginal.naturalHeight, // pra IA gerar no mesmo formato, evita efeito de zoom
+        }),
       });
       const data = await resp.json();
       if (data.ok) {
