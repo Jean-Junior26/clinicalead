@@ -280,11 +280,23 @@ module.exports = async function handler(req, res) {
       const sufixo = digitos.slice(-8);
       const nomeLimpo = (nome || '').trim();
       // 1) já existe?
-      const r = await fetch(
-        `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinic_id}&telefone=ilike.*${sufixo}&select=id,nome,procedimento&limit=1`,
+      // ⚠️ AJUSTE 12/07: antes buscava com "ilike.*sufixo" comparando
+      // direto contra o texto salvo — se o telefone estivesse cadastrado
+      // COM formatação (ex: "(17) 97603-3342"), o traço/parênteses no
+      // meio quebravam a comparação e o sistema achava que era gente
+      // nova, criando um lead DUPLICADO (achamos 23 casos assim numa
+      // clínica só). Agora: busca um conjunto de candidatos com um
+      // filtro mais largo (só os últimos 4 dígitos, que bate mesmo com
+      // formatação no meio), e compara de verdade em código, ignorando
+      // qualquer formatação dos dois lados.
+      const sufixoCurto = digitos.slice(-4);
+      const rCand = await fetch(
+        `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinic_id}&telefone=ilike.*${sufixoCurto}&select=id,nome,procedimento,telefone&limit=100`,
         { headers: sbHeaders }
       );
-      const arr = r.ok ? await r.json() : [];
+      const candidatos = rCand.ok ? await rCand.json() : [];
+      const achado = candidatos.find(l => String(l.telefone || '').replace(/\D/g, '').slice(-8) === sufixo);
+      const arr = achado ? [achado] : [];
       if (arr[0] && arr[0].id) {
         const patch = {};
         // se chegou um nome REAL (2+ palavras) e o atual é provisório, atualiza
