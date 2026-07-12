@@ -1855,6 +1855,26 @@ async function handleGerarSimulacao(req, res, cfg) {
   if (!Array.isArray(tipos) || !tipos.length) {
     return res.status(400).json({ ok: false, erro: 'Selecione ao menos 1 tipo de simulação' });
   }
+
+  // ── TRAVA: só funciona se a clínica tiver simulacao_sorriso = true —
+  // mesma trava que já vale pro Brian automático, agora também aqui na
+  // ferramenta manual. Evita usar em clínica que ainda não foi liberada
+  // (feature ainda em teste/ajuste).
+  if (clinic_id) {
+    try {
+      const simCfgResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/brian_config?clinic_id=eq.${clinic_id}&select=simulacao_sorriso&limit=1`,
+        { headers: sbHeaders }
+      );
+      const simCfgArr = simCfgResp.ok ? await simCfgResp.json() : [];
+      if (simCfgArr[0]?.simulacao_sorriso !== true) {
+        return res.status(403).json({ ok: false, erro: 'Simulações ainda não liberadas pra essa clínica (recurso em teste).' });
+      }
+    } catch (e) {
+      return res.status(500).json({ ok: false, erro: 'Falha ao checar liberação da clínica' });
+    }
+  }
+
   const prompt = montarPromptCombinado(tipos);
   if (!prompt) return res.status(400).json({ ok: false, erro: 'Tipo(s) inválido(s)' });
   if (!foto_base64 && !foto_url) {
