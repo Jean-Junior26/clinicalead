@@ -807,7 +807,7 @@ module.exports = async function handler(req, res) {
       const fotoBlob = new Blob([fotoBuffer], { type: 'image/jpeg' });
 
       const form = new FormData();
-      form.append('model', 'gpt-image-1');
+      form.append('model', 'gpt-image-1.5');
       form.append('image[]', fotoBlob, 'sorriso.jpg');
       form.append('prompt', prompt);
       form.append('size', '1024x1024');
@@ -1894,7 +1894,7 @@ async function handleGerarSimulacao(req, res, cfg) {
     const fotoBlob = new Blob([fotoBuffer], { type: 'image/jpeg' });
 
     const form = new FormData();
-    form.append('model', 'gpt-image-1');
+    form.append('model', 'gpt-image-1.5');
     form.append('image[]', fotoBlob, 'foto.jpg');
     form.append('prompt', prompt);
     form.append('size', '1024x1024');
