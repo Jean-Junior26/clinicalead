@@ -61,7 +61,7 @@
         <label style="display:block;font-size:12px;font-weight:600;margin-bottom:8px;">3. Resultado (antes/depois)</label>
         <canvas id="simResultadoCanvas" style="width:100%;border-radius:10px;margin-bottom:14px;"></canvas>
         <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;">Enviar pra um paciente (opcional)</label>
-        <input type="text" id="simTelefoneInput" placeholder="Ex: 34999418861" style="width:100%;padding:10px;border-radius:8px;background:var(--bg-base,#0A0A0B);border:1px solid var(--gold-border,#333);color:var(--text-primary,#F0EAD6);margin-bottom:10px;"/>
+        <input type="text" id="simTelefoneInput" placeholder="Ex: 34 99999-9999" style="width:100%;padding:10px;border-radius:8px;background:var(--bg-base,#0A0A0B);border:1px solid var(--gold-border,#333);color:var(--text-primary,#F0EAD6);margin-bottom:10px;"/>
         <button id="simEnviarBtn" onclick="enviarSimulacaoPagina()" style="width:100%;padding:11px;border-radius:10px;border:1px solid var(--gold,#C9A84C);background:transparent;color:var(--gold,#C9A84C);font-weight:700;font-size:13px;cursor:pointer;">Enviar por WhatsApp</button>
       </div>
     </div>`;
