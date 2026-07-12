@@ -274,7 +274,7 @@ module.exports = async function handler(req, res) {
     return proc;
   }
 
-  async function brianAcharOuCriarLead(clinic_id, phone, nome, origem, procInteresse) {
+  async function brianAcharOuCriarLead(clinic_id, phone, nome, origem, procInteresse, nomeConfirmado = false) {
     try {
       const digitos = String(phone).replace(/\D/g, '');
       const sufixo = digitos.slice(-8);
@@ -291,7 +291,7 @@ module.exports = async function handler(req, res) {
       // qualquer formatação dos dois lados.
       const sufixoCurto = digitos.slice(-4);
       const rCand = await fetch(
-        `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinic_id}&telefone=ilike.*${sufixoCurto}&select=id,nome,procedimento,telefone&limit=100`,
+        `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinic_id}&telefone=ilike.*${sufixoCurto}&select=id,nome,procedimento,telefone,nome_confirmado&limit=100`,
         { headers: sbHeaders }
       );
       const candidatos = rCand.ok ? await rCand.json() : [];
@@ -304,6 +304,12 @@ module.exports = async function handler(req, res) {
         const ehProvisorio = !atual || atual === 'Lead WhatsApp' || atual.split(/\s+/).length < 2;
         const nomeNovoEhReal = nomeLimpo && nomeLimpo !== 'Lead WhatsApp' && nomeLimpo.split(/\s+/).length >= 1;
         if (ehProvisorio && nomeNovoEhReal && nomeLimpo !== atual) patch.nome = nomeLimpo;
+        // ⚠️ AJUSTE 12/07: marca nome_confirmado só quando o nome veio de
+        // verdade da pessoa dizendo na conversa (marcador [[LEAD]]), nunca
+        // quando é só o nome/apelido salvo no WhatsApp dela (nomeProvisorio).
+        // Mensagens automáticas (lembrete, reativação) só usam o nome
+        // quando esse campo é true — evita "Oi, Louco!" em mensagem automática.
+        if (nomeConfirmado && nomeLimpo && !arr[0].nome_confirmado) patch.nome_confirmado = true;
         // se chegou um procedimento de interesse e o atual é o placeholder "Avaliação"
         // (ou vazio), atualiza — assim o lead ganha o interesse real (lentes, implante...)
         const procAtual = (arr[0].procedimento || '').trim().toLowerCase();
@@ -326,6 +332,7 @@ module.exports = async function handler(req, res) {
       const novo = {
         clinic_id,
         nome: nomeLimpo || 'Lead WhatsApp',
+        nome_confirmado: !!(nomeConfirmado && nomeLimpo),
         telefone: digitos,
         origem: origem || 'Brian IA',
         status: 'novo',
@@ -1353,7 +1360,7 @@ module.exports = async function handler(req, res) {
           try {
             // extrai o procedimento da mensagem de anúncio ("Quero saber mais sobre X")
             const procDaMsg = (type === 'text' || (type === 'audio' && content && content.trim() !== '🎵 Áudio')) ? extrairProcedimentoDaMsg(content) : null;
-            await brianAcharOuCriarLead(clinic_id, phone, contact_name || null, 'WhatsApp', procDaMsg);
+            await brianAcharOuCriarLead(clinic_id, phone, contact_name || null, 'WhatsApp', procDaMsg, false);
           } catch (e) { console.log('[LEAD-AUTO] erro ao garantir lead:', e.message); }
         }
 
@@ -1717,7 +1724,7 @@ module.exports = async function handler(req, res) {
                     // Quando ela disser o nome depois, o [[LEAD]] atualiza (brianAcharOuCriarLead não duplica).
                     if (!campoAgendar) {
                       const nomeProvisorio = (campoLead && campoLead.nome) || contact_name || null;
-                      await brianAcharOuCriarLead(clinic_id, phone, nomeProvisorio);
+                      await brianAcharOuCriarLead(clinic_id, phone, nomeProvisorio, undefined, undefined, !!(campoLead && campoLead.nome));
                       // (o status 'contato' já é cuidado pelo handler de from_me, que cobre
                       //  Brian + humano + inbox — não precisa duplicar aqui)
                     }
@@ -1744,7 +1751,7 @@ module.exports = async function handler(req, res) {
                   // (a própria brianAcharOuCriarLead atualiza se o atual for "Avaliação")
                   if (procInteresseConversa) {
                     try {
-                      await brianAcharOuCriarLead(clinic_id, phone, (campoLead && campoLead.nome) || null, 'WhatsApp', procInteresseConversa);
+                      await brianAcharOuCriarLead(clinic_id, phone, (campoLead && campoLead.nome) || null, 'WhatsApp', procInteresseConversa, true);
                     } catch (e) { console.log('[BRIAN-PROC] erro ao gravar procedimento:', e.message); }
                   }
 
@@ -1787,7 +1794,7 @@ module.exports = async function handler(req, res) {
                       }
                     } catch (e) { console.log('[BRIAN-AGENDAR] erro na checagem anti-data-errada (segue sem corrigir):', e.message); }
 
-                    const lead = await brianAcharOuCriarLead(clinic_id, phone, campoAgendar.nome || (campoLead && campoLead.nome));
+                    const lead = await brianAcharOuCriarLead(clinic_id, phone, campoAgendar.nome || (campoLead && campoLead.nome), undefined, undefined, true);
                     if (lead && lead.id) {
                       // resolve o dentista pelo direcionamento (nome vindo no marcador) ou padrão da clínica
                       const dentistaId = await brianResolverDentista(clinic_id, campoAgendar.dentista || '');
@@ -1810,7 +1817,7 @@ module.exports = async function handler(req, res) {
                     }
                   } else if (campoLead && campoLead.nome) {
                     // 3) só captura de nome (sem agendar) → cria/garante o lead
-                    await brianAcharOuCriarLead(clinic_id, phone, campoLead.nome);
+                    await brianAcharOuCriarLead(clinic_id, phone, campoLead.nome, undefined, undefined, true);
                   }
                 } else {
                   console.log(`[BRIAN-ENVIO] ⚠️ não gerou resposta (${dataBrian ? (dataBrian.erro || 'sem texto') : 'sem retorno'})`);
