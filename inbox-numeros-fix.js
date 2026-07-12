@@ -34,18 +34,32 @@ function instalarLoadInbox() {
       // Descobre o número principal (pra mensagens sem instance_name)
       const principal = clinic.whatsapp_instance || null;
 
+      // ⚠️ AJUSTE 12/07: só separa conversa por NÚMERO quando a clínica
+      // REALMENTE tem 2+ números de WhatsApp configurados. Mensagens
+      // enviadas pelo sistema (lembretes automáticos) não gravam
+      // instance_name, então caíam num agrupamento "diferente" das
+      // mensagens que o paciente manda (essas sim vêm com instance_name
+      // do Evolution) — fragmentando a MESMA conversa em duas, mesmo em
+      // clínica de número único (o caso mais comum). Pra clínica com só
+      // 1 número, agrupa só por telefone — sem risco de fragmentar.
+      let clinicaTemMultiplosNumeros = false;
+      try {
+        const { data: extras } = await db.from('instancias').select('id').eq('clinic_id', clinic.id).limit(1);
+        clinicaTemMultiplosNumeros = !!(extras && extras.length);
+      } catch (e) { /* se falhar, assume número único (mais seguro) */ }
+
       const chatMap = {};
       (msgs || []).forEach(m => {
         const phone = (m.phone || '').replace(/\D/g, '');
         if (!phone) return;
         const inst = m.instance_name || principal || 'sem_numero';
-        const chave = phone + '|' + inst; // ← agrupa por telefone + número
+        const chave = clinicaTemMultiplosNumeros ? (phone + '|' + inst) : phone; // ← só separa por número se a clínica realmente tiver mais de um
         if (!chatMap[chave]) {
           const lead = STATE.leads.find(l =>
-            l.telefone && l.telefone.replace(/\D/g, '').slice(-9) === phone.slice(-9)
+            l.telefone && l.telefone.replace(/\D/g, '').slice(-8) === phone.slice(-8)
           );
           chatMap[chave] = {
-            id: chave,            // id único por telefone+número
+            id: chave,            // id único por telefone (+número, se aplicável)
             phone,
             instance_name: inst,  // de qual número é essa conversa
             name: m.contact_name || lead?.nome || phone,
