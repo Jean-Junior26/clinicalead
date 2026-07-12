@@ -14,7 +14,13 @@ async function abrirInboxConversa(telefone) {
   if (typeof showPage === 'function') showPage('inbox');
 
   // 2. Espera os chats carregarem e tenta abrir o do paciente
-  const alvo = digitos.slice(-9); // compara pelos últimos 9 dígitos (padrão do sistema)
+  // compara pelos últimos 8 dígitos — mesma convenção usada no resto do
+  // sistema (webhook.js, disparar-automacoes). Usar 8 em vez de 9 é
+  // proposital: é resistente ao problema do "9º dígito" do celular
+  // brasileiro (o número pode chegar salvo com ou sem esse dígito extra
+  // dependendo da origem, e só os últimos 8 são garantidamente iguais
+  // nos dois formatos).
+  const alvo = digitos.slice(-8);
   let tentativas = 0;
 
   const tentarAbrir = () => {
@@ -23,7 +29,7 @@ async function abrirInboxConversa(telefone) {
       if (tentativas < 20) return setTimeout(tentarAbrir, 300);
       return;
     }
-    const chat = INBOX.chats.find(c => (c.phone || '').replace(/\D/g, '').slice(-9) === alvo);
+    const chat = INBOX.chats.find(c => (c.phone || '').replace(/\D/g, '').slice(-8) === alvo);
     if (chat) {
       if (typeof openChat === 'function') openChat(chat.id);
     } else {
