@@ -13,7 +13,8 @@
     { valor: 'clareamento', label: '✨ Clareamento' },
     { valor: 'alinhamento', label: '📐 Alinhamento (dente torto)' },
     { valor: 'lentes', label: '🦷 Lentes em resina' },
-    { valor: 'protese', label: '🦷 Prótese/Implante (preenche espaço)' },
+    { valor: 'protese_parcial', label: '🦷 Prótese Parcial (mantém cor original)' },
+    { valor: 'protese_total', label: '🦷 Prótese Total/Protocolo (dentes novos)' },
     { valor: 'gengivoplastia', label: '💗 Gengivoplastia' },
     { valor: 'otomodelacao', label: '👂 Otomodelação (orelha)' },
     { valor: 'rinoplastia', label: '👃 Rinoplastia (nariz)' },
@@ -55,7 +56,7 @@
       </div>
 
       <div id="simIntensidadeArea" style="display:none;margin-bottom:18px;">
-        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;">Intensidade da cor (clareamento/lentes)</label>
+        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;">Intensidade da cor (clareamento/lentes/prótese total)</label>
         <div style="display:flex;gap:8px;">
           <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:4px;padding:8px;background:var(--bg-base,#0A0A0B);border-radius:8px;border:1px solid var(--border-subtle,rgba(255,255,255,0.08));cursor:pointer;font-size:11px;">
             <input type="radio" name="simIntensidade" value="natural"> Mais natural
@@ -171,7 +172,7 @@
   // sentido — os outros procedimentos não têm essa variável).
   window.atualizarSeletorIntensidade = function () {
     const marcados = Array.from(document.querySelectorAll('.simTipoCheck:checked')).map(c => c.value);
-    const precisaIntensidade = marcados.includes('clareamento') || marcados.includes('lentes');
+    const precisaIntensidade = marcados.includes('clareamento') || marcados.includes('lentes') || marcados.includes('protese_total');
     const area = document.getElementById('simIntensidadeArea');
     if (area) area.style.display = precisaIntensidade ? 'block' : 'none';
   };
@@ -183,7 +184,7 @@
     // (ex: "lentes" + intensidade "branco" → "lentes_branco")
     const intensidadeEl = document.querySelector('input[name="simIntensidade"]:checked');
     const intensidade = intensidadeEl ? intensidadeEl.value : 'equilibrado';
-    const tiposMarcados = tiposBrutos.map(t => (t === 'clareamento' || t === 'lentes') ? `${t}_${intensidade}` : t);
+    const tiposMarcados = tiposBrutos.map(t => (t === 'clareamento' || t === 'lentes' || t === 'protese_total') ? `${t}_${intensidade}` : t);
     const status = document.getElementById('simStatusPagina');
     const btn = document.getElementById('simGerarBtn');
 
