@@ -13,6 +13,16 @@ async function abrirInboxConversa(telefone) {
   // 1. Vai para a página do Inbox
   if (typeof showPage === 'function') showPage('inbox');
 
+  // ⚠️ AJUSTE 12/07: força um carregamento FRESCO do inbox aqui mesmo,
+  // em vez de só esperar que outra parte do sistema já tenha carregado
+  // a tempo. Antes disso, dava corrida de tempo: ao vir de outra página
+  // (ex: Agenda), o Inbox podia ainda não ter terminado de carregar (ou
+  // estar com dado de outra clínica/momento), e a busca desistia achando
+  // "não existe conversa" mesmo quando ela existia de verdade.
+  if (typeof loadInboxChats === 'function') {
+    try { await loadInboxChats(); } catch (e) { console.error('[abrirInboxConversa] falha ao recarregar:', e); }
+  }
+
   // 2. Espera os chats carregarem e tenta abrir o do paciente
   // compara pelos últimos 8 dígitos — mesma convenção usada no resto do
   // sistema (webhook.js, disparar-automacoes). Usar 8 em vez de 9 é
