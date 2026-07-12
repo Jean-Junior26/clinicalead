@@ -47,11 +47,26 @@
       <div id="simFotoPreview" style="margin-bottom:16px;"></div>
 
       <label style="display:block;font-size:12px;font-weight:600;margin-bottom:8px;">2. Procedimento(s) — pode marcar mais de um</label>
-      <div id="simTiposGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:18px;">
+      <div id="simTiposGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">
         ${TIPOS_SIMULACAO.map(t => `
           <label style="display:flex;align-items:center;gap:6px;padding:8px 10px;background:var(--bg-base,#0A0A0B);border-radius:8px;border:1px solid var(--border-subtle,rgba(255,255,255,0.08));cursor:pointer;font-size:12px;">
-            <input type="checkbox" class="simTipoCheck" value="${t.valor}"> ${t.label}
+            <input type="checkbox" class="simTipoCheck" value="${t.valor}" onchange="atualizarSeletorIntensidade()"> ${t.label}
           </label>`).join('')}
+      </div>
+
+      <div id="simIntensidadeArea" style="display:none;margin-bottom:18px;">
+        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;">Intensidade da cor (clareamento/lentes)</label>
+        <div style="display:flex;gap:8px;">
+          <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:4px;padding:8px;background:var(--bg-base,#0A0A0B);border-radius:8px;border:1px solid var(--border-subtle,rgba(255,255,255,0.08));cursor:pointer;font-size:11px;">
+            <input type="radio" name="simIntensidade" value="natural"> Mais natural
+          </label>
+          <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:4px;padding:8px;background:var(--bg-base,#0A0A0B);border-radius:8px;border:1px solid var(--gold-border,#333);cursor:pointer;font-size:11px;">
+            <input type="radio" name="simIntensidade" value="equilibrado" checked> Equilibrado
+          </label>
+          <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:4px;padding:8px;background:var(--bg-base,#0A0A0B);border-radius:8px;border:1px solid var(--border-subtle,rgba(255,255,255,0.08));cursor:pointer;font-size:11px;">
+            <input type="radio" name="simIntensidade" value="branco"> Mais branco/impacto
+          </label>
+        </div>
       </div>
 
       <button id="simGerarBtn" onclick="gerarSimulacaoPagina()" style="width:100%;padding:12px;border-radius:10px;border:none;background:var(--gold,#C9A84C);color:#0A0A0B;font-weight:700;font-size:14px;cursor:pointer;">Gerar simulação</button>
@@ -151,9 +166,24 @@
     return canvas.toDataURL('image/png');
   }
 
+  // ── Mostra o seletor de intensidade só quando clareamento ou lentes
+  // estiver marcado (é o único lugar onde "intensidade de cor" faz
+  // sentido — os outros procedimentos não têm essa variável).
+  window.atualizarSeletorIntensidade = function () {
+    const marcados = Array.from(document.querySelectorAll('.simTipoCheck:checked')).map(c => c.value);
+    const precisaIntensidade = marcados.includes('clareamento') || marcados.includes('lentes');
+    const area = document.getElementById('simIntensidadeArea');
+    if (area) area.style.display = precisaIntensidade ? 'block' : 'none';
+  };
+
   window.gerarSimulacaoPagina = async function () {
     const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
-    const tiposMarcados = Array.from(document.querySelectorAll('.simTipoCheck:checked')).map(c => c.value);
+    const tiposBrutos = Array.from(document.querySelectorAll('.simTipoCheck:checked')).map(c => c.value);
+    // troca "clareamento"/"lentes" pela chave com a intensidade escolhida
+    // (ex: "lentes" + intensidade "branco" → "lentes_branco")
+    const intensidadeEl = document.querySelector('input[name="simIntensidade"]:checked');
+    const intensidade = intensidadeEl ? intensidadeEl.value : 'equilibrado';
+    const tiposMarcados = tiposBrutos.map(t => (t === 'clareamento' || t === 'lentes') ? `${t}_${intensidade}` : t);
     const status = document.getElementById('simStatusPagina');
     const btn = document.getElementById('simGerarBtn');
 
