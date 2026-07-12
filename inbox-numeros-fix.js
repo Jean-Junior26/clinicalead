@@ -18,11 +18,17 @@ function instalarLoadInbox() {
     const clinic = currentClinic();
     if (!clinic) return;
     try {
+      // ⚠️ AJUSTE URGENTE 12/07: limite subiu de 500 pra 8000. Com 500,
+      // qualquer clínica com bom volume de mensagens (as 3 reais já têm
+      // 4-6 mil cada) fazia conversas mais antigas "sumirem" do inbox —
+      // não porque os dados foram apagados, mas porque simplesmente não
+      // entravam nas 500 mais recentes buscadas. Isso causava o "não há
+      // conversa com este paciente" mesmo com a conversa existindo.
       const { data: msgs, error } = await db
         .from('mensagens').select('*')
         .eq('clinic_id', clinic.id)
         .order('created_at', { ascending: false })
-        .limit(500);
+        .limit(8000);
       if (error) throw error;
 
       // Descobre o número principal (pra mensagens sem instance_name)
