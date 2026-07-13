@@ -181,7 +181,29 @@
 
     setErro('Criando…');
     try {
-      const linhas = passos.map(p => ({
+      // ⚠️ AJUSTE 13/07: antes criava os 5 passos sem checar se já existia
+      // regra pro mesmo dia — se a clínica já tinha uma regra manual (ex:
+      // "Reativação 7 dias") e clicava nesse botão, ficava com 2 regras
+      // pro mesmo dia, competindo entre si e confundindo o motor de disparo
+      // (foi exatamente isso que aconteceu com uma clínica real). Agora
+      // confere antes, e só cria os dias que ainda não têm regra.
+      const { data: existentes } = await db.from('automacoes_regras')
+        .select('espera_valor')
+        .eq('evento', 'dias_sem_resposta')
+        .eq('espera_unidade', 'dias')
+        .eq('ativo', true)
+        .or(global ? 'global.eq.true' : `clinic_id.eq.${clinic.id}`);
+      const diasJaExistentes = new Set((existentes || []).map(r => Number(r.espera_valor)));
+
+      const passosNovos = passos.filter(p => !diasJaExistentes.has(Number(p.dias)));
+      const passosPulados = passos.filter(p => diasJaExistentes.has(Number(p.dias)));
+
+      if (!passosNovos.length) {
+        setErro('Todos os dias dessa régua já têm regra criada — nada novo pra adicionar. Edite as existentes na lista.');
+        return;
+      }
+
+      const linhas = passosNovos.map(p => ({
         nome: p.nome + (global ? '' : ''),
         evento: 'dias_sem_resposta',
         espera_valor: p.dias,
@@ -198,7 +220,10 @@
       if (error) throw error;
 
       document.getElementById('fuModal').remove();
-      if (typeof toast === 'function') toast('Régua de follow-up criada! 🚀 5 mensagens ativas');
+      const avisoPulados = passosPulados.length
+        ? ` (${passosPulados.length} dia${passosPulados.length > 1 ? 's' : ''} pulado${passosPulados.length > 1 ? 's' : ''} por já ter regra: ${passosPulados.map(p => p.dias).join(', ')})`
+        : '';
+      if (typeof toast === 'function') toast(`Régua criada! 🚀 ${passosNovos.length} mensagem${passosNovos.length > 1 ? 's' : ''} nova${passosNovos.length > 1 ? 's' : ''}${avisoPulados}`);
       // recarrega a lista da tela (reabre a página)
       if (typeof abrirAutomacoesPro === 'function') abrirAutomacoesPro();
     } catch (e) {
