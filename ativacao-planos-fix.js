@@ -152,6 +152,7 @@
         .eq('clinic_id', clinicId).maybeSingle();
 
       const hoje = new Date().toISOString();
+      const hojeISOData = hoje.split('T')[0];
       const dados = {
         clinic_id: clinicId,
         incluso_mes: plano.msgs,
@@ -165,9 +166,17 @@
 
       if (existente) {
         // mantém o que já foi usado e os extras comprados (não zera avulsos)
+        // NÃO mexe em ultima_renovacao aqui — clínica já existente já tem
+        // seu ciclo rodando, trocar de plano não deve resetar isso.
         await database.from('brian_saldo').update(dados).eq('clinic_id', clinicId);
       } else {
-        await database.from('brian_saldo').insert({ ...dados, usado_mes: 0, extra_comprado: 0, extra_usado: 0 });
+        // ⚠️ AJUSTE 14/07: clínica NOVA — antes NÃO gravava ultima_renovacao
+        // aqui, ficava em branco até o sistema "adivinhar" a primeira
+        // renovação (esperando cair exatamente no dia certo do mês). Isso
+        // causou um desalinhamento real numa clínica (o ciclo dela
+        // "escorregou" do dia 27 pro dia 9). Agora já grava a data de
+        // ativação como o início do primeiro ciclo — sem essa lacuna.
+        await database.from('brian_saldo').insert({ ...dados, usado_mes: 0, extra_comprado: 0, extra_usado: 0, ultima_renovacao: hojeISOData });
       }
 
       if (typeof toast === 'function') toast(`Plano ${plano.nome} ativado! ✓`, 'success');
@@ -180,7 +189,7 @@
         const fallback = { clinic_id: clinicId, incluso_mes: plano.msgs, dia_renovacao: dia, ativado_em: new Date().toISOString() };
         const { data: ex } = await database.from('brian_saldo').select('clinic_id').eq('clinic_id', clinicId).maybeSingle();
         if (ex) await database.from('brian_saldo').update(fallback).eq('clinic_id', clinicId);
-        else await database.from('brian_saldo').insert({ ...fallback, usado_mes: 0, extra_comprado: 0, extra_usado: 0 });
+        else await database.from('brian_saldo').insert({ ...fallback, usado_mes: 0, extra_comprado: 0, extra_usado: 0, ultima_renovacao: new Date().toISOString().split('T')[0] });
         if (typeof toast === 'function') toast(`Plano ${plano.nome} ativado! ✓`, 'success');
         const modal = document.getElementById('modalAtivacao');
         if (modal) modal.remove();
