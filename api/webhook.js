@@ -419,7 +419,7 @@ module.exports = async function handler(req, res) {
 
   // Cria a consulta ocupando o horário. Travas: data/hora válidas, não no passado,
   // horário existe na grade e está LIVRE (anti-duplo-agendamento). Retorna true se criou.
-  async function brianCriarConsulta(clinic_id, lead_id, data, hora, dentista_id) {
+  async function brianCriarConsulta(clinic_id, lead_id, data, hora, dentista_id, telefonePaciente) {
     try {
       if (!lead_id || !data || !hora) return { ok: false, motivo: 'dados incompletos' };
       // formato data AAAA-MM-DD e hora HH:MM
@@ -488,7 +488,35 @@ module.exports = async function handler(req, res) {
       // coladas), NÃO é conflito: ele já agendou pra esse paciente. Trata
       // como sucesso (idempotente) em vez de dizer "ocupado" (bug do fantasma).
       if (ocupA.length) {
-        const consultaDoProprioLead = ocupA.find(c => c.lead_id === lead_id);
+        let consultaDoProprioLead = ocupA.find(c => c.lead_id === lead_id);
+
+        // ⚠️ REFORÇO 15/07: o match só por lead_id falha se duas mensagens
+        // do MESMO paciente chegarem quase juntas e o servidor processar em
+        // paralelo — cada processo pode criar um lead DUPLICADO pro mesmo
+        // telefone (ambos "acham" que o lead não existe ainda). Nesse caso
+        // o lead_id não bate mesmo sendo o mesmíssimo paciente. Por isso,
+        // se não achou por lead_id, confere por TELEFONE (imune a duplicata
+        // de lead) antes de declarar conflito de verdade.
+        if (!consultaDoProprioLead && telefonePaciente && ocupA.length) {
+          const sufixoPac = String(telefonePaciente).replace(/\D/g, '').slice(-8);
+          const idsLeadsOcupados = [...new Set(ocupA.map(c => c.lead_id).filter(Boolean))];
+          if (sufixoPac && idsLeadsOcupados.length) {
+            const leadsR = await fetch(
+              `${SUPABASE_URL}/rest/v1/leads?id=in.(${idsLeadsOcupados.join(',')})&select=id,telefone`,
+              { headers: sbHeaders }
+            );
+            const leadsA = leadsR.ok ? await leadsR.json() : [];
+            const leadMesmoTelefone = leadsA.find(l => String(l.telefone || '').replace(/\D/g, '').slice(-8) === sufixoPac);
+            if (leadMesmoTelefone) {
+              const idOcupado = leadMesmoTelefone.id;
+              consultaDoProprioLead = ocupA.find(c => c.lead_id === idOcupado);
+              if (consultaDoProprioLead) {
+                console.log(`[BRIAN-AGENDAR] 🔗 lead duplicado detectado (mesmo telefone, lead_id diferente: ${lead_id} vs ${idOcupado}) — tratando como já agendado, não como conflito`);
+              }
+            }
+          }
+        }
+
         if (consultaDoProprioLead) {
           return { ok: true, jaAgendado: true, motivo: 'já agendado para este paciente' };
         }
@@ -1811,7 +1839,7 @@ module.exports = async function handler(req, res) {
                     if (lead && lead.id) {
                       // resolve o dentista pelo direcionamento (nome vindo no marcador) ou padrão da clínica
                       const dentistaId = await brianResolverDentista(clinic_id, campoAgendar.dentista || '');
-                      const r = await brianCriarConsulta(clinic_id, lead.id, campoAgendar.data, campoAgendar.hora, dentistaId);
+                      const r = await brianCriarConsulta(clinic_id, lead.id, campoAgendar.data, campoAgendar.hora, dentistaId, phone);
                       if (r.ok && r.jaAgendado) {
                         // o Brian processou a mesma intenção 2x (mensagens coladas).
                         // Já estava agendado pra esse paciente nesse horário — não
