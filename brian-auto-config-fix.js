@@ -26,7 +26,7 @@
     carregando = true;
     let cfg = {};
     try {
-      const { data } = await db.from('brian_config').select('auto_ativo, auto_modo, horario_funcionamento, palavras_anuncio').eq('clinic_id', clinic.id).maybeSingle();
+      const { data } = await db.from('brian_config').select('auto_ativo, auto_modo, horario_funcionamento, palavras_anuncio, escopo').eq('clinic_id', clinic.id).maybeSingle();
       cfg = data || {};
     } catch (e) { cfg = {}; }
 
@@ -83,6 +83,18 @@
         }).join('')}
       </div>
 
+      <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">Quem o Brian atende</div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px;">
+        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;padding:10px 12px;border:1px solid var(--border,rgba(201,168,76,0.2));border-radius:8px;background:var(--bg-input,#16161A);">
+          <input type="radio" name="brianEscopo" value="completo" ${(cfg.escopo || 'completo') !== 'somente_leads' ? 'checked' : ''} style="margin-top:2px;cursor:pointer;">
+          <span style="font-size:12px;color:var(--text-primary);"><b>👥 Todo mundo</b> — o Brian responde qualquer contato, seja lead novo ou paciente que já atende.</span>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;padding:10px 12px;border:1px solid var(--border,rgba(201,168,76,0.2));border-radius:8px;background:var(--bg-input,#16161A);">
+          <input type="radio" name="brianEscopo" value="somente_leads" ${(cfg.escopo || 'completo') === 'somente_leads' ? 'checked' : ''} style="margin-top:2px;cursor:pointer;">
+          <span style="font-size:12px;color:var(--text-primary);"><b>🎯 Só leads novos</b> — o Brian foca em captar e qualificar quem ainda não é paciente. Quem já é paciente conhecido (importado como "compareceu"/"fechado", ou marcado assim pelo Brian), ele não responde — fica pra equipe atender pelo mesmo número.</span>
+        </label>
+      </div>
+
       <label class="form-label" style="font-size:12px;">Palavras-chave dos seus anúncios <span style="color:var(--text-muted);font-weight:400;">(identifica leads de anúncio)</span></label>
       <textarea class="form-input" id="brianPalavrasAnuncio" rows="3" placeholder="Ex.: tenho interesse em, vi no instagram, quanto custa, gostaria de informações, vi o anúncio" style="width:100%;resize:vertical;">${cfg.palavras_anuncio || ''}</textarea>
       <div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.5;">Separe por vírgula. O Brian também reconhece sozinho palavras comuns de interesse (preço, valor, agendar, implante, etc.).</div>
@@ -115,6 +127,8 @@
     const palavras = (document.getElementById('brianPalavrasAnuncio').value || '').trim();
     const modoEl = document.querySelector('input[name="brianModo"]:checked');
     const auto_modo = modoEl ? modoEl.value : 'fora';
+    const escopoEl = document.querySelector('input[name="brianEscopo"]:checked');
+    const escopo = escopoEl ? escopoEl.value : 'completo';
 
     const horario = {};
     DIAS.forEach(d => {
@@ -135,6 +149,7 @@
         auto_ativo,
         auto_modo,
         auto_so_fora_horario: auto_modo !== 'sempre',
+        escopo,
         horario_funcionamento: horario,
         palavras_anuncio: palavras || null,
         atualizado_em: new Date().toISOString(),
