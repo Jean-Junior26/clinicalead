@@ -91,13 +91,13 @@
   <div class="plan-card" id="card-basico">
     <div class="plan-name">Básico</div>
     <div class="plan-desc">Tudo que sua clínica precisa + IA</div>
-    <div class="plan-price"><span class="price-value" id="price-basico">R$ 174,90</span><span class="price-period">/mês</span></div>
+    <div class="plan-price"><span class="price-value" id="price-basico">R$ 189,90</span><span class="price-period">/mês</span></div>
     <div class="price-total" id="total-basico"></div>
     <ul class="plan-features">
       <li>CRM completo + automações</li>
       <li>Multi-dentista e follow-up</li>
       <li>🤖 Brian IA no WhatsApp</li>
-      <li><strong>1.000 mensagens de IA/mês</strong></li>
+      <li><strong>1.500 mensagens de IA/mês</strong></li>
       <li>1 número de WhatsApp incluso</li>
       <li class="addon-hint">+ WhatsApp extra: R$ 39,90/mês</li>
     </ul>
@@ -108,13 +108,13 @@
     <div class="popular-badge">⭐ Mais popular</div>
     <div class="plan-name">Premium</div>
     <div class="plan-desc">Para clínicas com mais movimento</div>
-    <div class="plan-price"><span class="price-value" id="price-premium">R$ 249,90</span><span class="price-period">/mês</span></div>
+    <div class="plan-price"><span class="price-value" id="price-premium">R$ 254,90</span><span class="price-period">/mês</span></div>
     <div class="price-total" id="total-premium"></div>
     <ul class="plan-features">
       <li>CRM completo + automações</li>
       <li>Multi-dentista e follow-up</li>
       <li>🤖 Brian IA no WhatsApp</li>
-      <li><strong>2.000 mensagens de IA/mês</strong></li>
+      <li><strong>2.500 mensagens de IA/mês</strong></li>
       <li>1 número de WhatsApp incluso</li>
       <li class="addon-hint">+ WhatsApp extra: R$ 39,90/mês</li>
     </ul>
@@ -130,7 +130,7 @@
       <li>CRM completo + automações</li>
       <li>Multi-dentista e follow-up</li>
       <li>🤖 Brian IA no WhatsApp</li>
-      <li><strong>3.000 mensagens de IA/mês</strong></li>
+      <li><strong>4.000 mensagens de IA/mês</strong></li>
       <li>1 número de WhatsApp incluso</li>
       <li class="addon-hint">+ WhatsApp extra: R$ 39,90/mês</li>
       <li>Prioridade no suporte</li>
@@ -157,7 +157,7 @@
   </details>
   <details class="faq-item">
     <summary>Como escolho o plano certo?</summary>
-    <p>Os planos se diferenciam pela quantidade de mensagens de IA que o Brian responde por mês (1.000, 2.000 ou 3.000). Quanto mais movimento de pacientes no WhatsApp, mais mensagens você precisa. Todos os planos incluem o CRM completo, automações e o Brian IA — a diferença é só o volume de mensagens.</p>
+    <p>Os planos se diferenciam pela quantidade de mensagens de IA que o Brian responde por mês (1.500, 2.500 ou 4.000). Quanto mais movimento de pacientes no WhatsApp, mais mensagens você precisa. Todos os planos incluem o CRM completo, automações e o Brian IA — a diferença é só o volume de mensagens.</p>
   </details>
   <details class="faq-item">
     <summary>E se eu precisar de mais de um número de WhatsApp?</summary>
@@ -179,14 +179,14 @@ const { createClient } = supabase;
 const db = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const precos = {
-  basico:   { mensal: 174.90, trimestral: 157.41, semestral: 148.66 },
-  premium:  { mensal: 249.90, trimestral: 224.91, semestral: 212.41 },
+  basico:   { mensal: 189.90, trimestral: 170.91, semestral: 161.41 },
+  premium:  { mensal: 254.90, trimestral: 229.41, semestral: 216.66 },
   platinum: { mensal: 319.90, trimestral: 287.91, semestral: 271.91 },
 };
 
 const totais = {
-  basico:   { mensal: '', trimestral: 'R$ 472,23 cobrado a cada 3 meses', semestral: 'R$ 891,96 cobrado a cada 6 meses' },
-  premium:  { mensal: '', trimestral: 'R$ 674,73 cobrado a cada 3 meses', semestral: 'R$ 1.274,46 cobrado a cada 6 meses' },
+  basico:   { mensal: '', trimestral: 'R$ 512,73 cobrado a cada 3 meses', semestral: 'R$ 968,46 cobrado a cada 6 meses' },
+  premium:  { mensal: '', trimestral: 'R$ 688,23 cobrado a cada 3 meses', semestral: 'R$ 1.299,96 cobrado a cada 6 meses' },
   platinum: { mensal: '', trimestral: 'R$ 863,73 cobrado a cada 3 meses', semestral: 'R$ 1.631,46 cobrado a cada 6 meses' },
 };
 
