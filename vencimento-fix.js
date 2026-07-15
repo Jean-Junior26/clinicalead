@@ -38,7 +38,16 @@
       if (dias === null) return;
       // só mostra a partir de 3 dias antes
       if (dias > 3) { removerBanner(); return; }
-      mostrarBanner(dias, s.vence_em);
+
+      // clínica usa Brian IA? (evita citar o Brian pra quem só usa o CRM)
+      let usaIA = false;
+      try {
+        const { data: cfg } = await database.from('brian_config')
+          .select('brian_liberado').eq('clinic_id', clinic.id).maybeSingle();
+        usaIA = !!(cfg && cfg.brian_liberado);
+      } catch (e) { /* se falhar, assume sem IA (mensagem genérica) */ }
+
+      mostrarBanner(dias, s.vence_em, usaIA);
     } catch (e) { console.error('[vencimento]', e); }
   }
 
@@ -49,24 +58,30 @@
 
   function fmtData(iso) { const p = iso.split('-'); return `${p[2]}/${p[1]}`; }
 
-  function mostrarBanner(dias, venceEm) {
+  function mostrarBanner(dias, venceEm, usaIA) {
     removerBanner();
     let cor, titulo, texto;
     if (dias > 0) {
       // 3 a 1 dia antes — gentil
       cor = '#C9A84C';
       titulo = `🗓️ Seu plano vence em ${dias} dia${dias > 1 ? 's' : ''}`;
-      texto = `Pra manter o Brian IA atendendo sem interrupção, é só renovar até ${fmtData(venceEm)}. 😊`;
+      texto = usaIA
+        ? `Pra manter o Brian IA atendendo sem interrupção, é só renovar até ${fmtData(venceEm)}. 😊`
+        : `Pra manter o sistema funcionando sem interrupção, é só renovar até ${fmtData(venceEm)}. 😊`;
     } else if (dias === 0) {
       // no dia
       cor = '#C9A84C';
       titulo = '🗓️ Seu plano vence hoje';
-      texto = 'Renove hoje pra o Brian continuar atendendo seus pacientes sem pausa. 😊';
+      texto = usaIA
+        ? 'Renove hoje pra o Brian continuar atendendo seus pacientes sem pausa. 😊'
+        : 'Renove hoje pra continuar com acesso completo ao sistema. 😊';
     } else {
       // vencido — firme mas educado
       cor = '#C0624A';
       titulo = `⚠️ Seu plano venceu há ${Math.abs(dias)} dia${Math.abs(dias) > 1 ? 's' : ''}`;
-      texto = 'Regularize pra reativar o atendimento do Brian IA. Qualquer dúvida, fale com a gente!';
+      texto = usaIA
+        ? 'Regularize pra reativar o atendimento do Brian IA. Qualquer dúvida, fale com a gente!'
+        : 'Regularize pra reativar seu acesso completo. Qualquer dúvida, fale com a gente!';
     }
     const banner = document.createElement('div');
     banner.id = 'vencimentoBanner';
