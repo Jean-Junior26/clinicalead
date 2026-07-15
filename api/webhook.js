@@ -86,7 +86,7 @@ module.exports = async function handler(req, res) {
         }
       } catch (e) { /* se falhar, segue (outras travas protegem) */ }
       const cfgResp = await fetch(
-        `${SUPABASE_URL}/rest/v1/brian_config?clinic_id=eq.${clinic_id}&select=auto_ativo,auto_so_fora_horario,auto_modo,horario_funcionamento,palavras_anuncio,brian_liberado&limit=1`,
+        `${SUPABASE_URL}/rest/v1/brian_config?clinic_id=eq.${clinic_id}&select=auto_ativo,auto_so_fora_horario,auto_modo,horario_funcionamento,palavras_anuncio,brian_liberado,escopo&limit=1`,
         { headers: sbHeaders }
       );
       const cfgArr = cfgResp.ok ? await cfgResp.json() : [];
@@ -195,6 +195,19 @@ module.exports = async function handler(req, res) {
       );
       const leadArr = leadResp.ok ? await leadResp.json() : [];
       const jaEhLead = leadArr.length > 0;
+
+      // ── Trava 9 (escopo "somente leads"): Brian não atende quem já é paciente ──
+      // Modo 'somente_leads': o Brian foca em captar/qualificar quem ainda não é
+      // paciente. Status 'compareceu' e 'fechado' marcam paciente conhecido —
+      // seja importado em massa (importar-pacientes-fix.js) ou fechado pelo Brian
+      // no funil normal. Nesses casos ele fica quieto e deixa pra equipe humana,
+      // que atende pelo mesmo número.
+      if (cfg.escopo === 'somente_leads' && jaEhLead) {
+        const statusPaciente = ['compareceu', 'fechado'];
+        if (statusPaciente.includes(leadArr[0].status)) {
+          return motivo(false, 'modo "somente leads": contato já é paciente conhecido');
+        }
+      }
 
       if (!jaEhLead) {
         // número novo: precisa mencionar palavra-chave (da clínica OU padrão de intenção)
