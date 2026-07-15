@@ -1266,6 +1266,18 @@ module.exports = async function handler(req, res) {
     const insertados = [];
     const erros = [];
 
+    // ── TRAVA ANTI-ÓRFÃO ──
+    // Se a instância não bateu com nenhuma clínica cadastrada (nem principal
+    // nem extra), NÃO processa nada. Sem isso, o código seguia em frente com
+    // clinic_id = null e criava leads/mensagens órfãos — que além de lixo no
+    // banco, quebravam a checagem de duplicata (o PostgREST não casa
+    // "clinic_id=eq.null" contra uma linha com clinic_id nulo, então cada
+    // mensagem daquela instância desconhecida virava um lead novo, sempre).
+    if (instanceName && !clinic_id) {
+      console.log(`[WEBHOOK] ⚠️ instância "${instanceName}" não corresponde a nenhuma clínica cadastrada — evento ignorado (nada foi gravado)`);
+      return res.status(200).json({ ok: true, ignorado: 'instancia_nao_cadastrada', instance: instanceName });
+    }
+
     for (const msg of list) {
       try {
         const key = msg?.key || {};
