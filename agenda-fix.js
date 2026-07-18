@@ -1,62 +1,3 @@
-// ============================================================
-// CLINICALEAD — PROCEDIMENTO NO AGENDAMENTO
-// Adiciona o campo "Procedimento" no modal de novo agendamento,
-// alimentado pelo catálogo vivo da clínica (página Procedimentos).
-// Criou um procedimento novo? Ele já aparece aqui na hora.
-// Bônus: ao escolher o paciente, sugere o procedimento do lead.
-// ============================================================
-
-let AGF = { procs: [] };
-
-// ── Carrega o catálogo ativo da clínica ──────────────────────
-async function agfCarregarProcs() {
-  const clinic = currentClinic();
-  if (!clinic) return;
-  const { data } = await db.from('procedimentos')
-    .select('id,nome').eq('clinic_id', clinic.id).eq('ativo', true).order('nome');
-  AGF.procs = data || [];
-}
-
-// ── Injeta o select no modal (uma vez) ───────────────────────
-function agfInjetarSelect() {
-  if (!document.getElementById('naProcedimentoGroup')) {
-    const obsGroup = document.getElementById('naObs')?.closest('.form-group');
-    if (!obsGroup) return;
-    const g = document.createElement('div');
-    g.className = 'form-group';
-    g.id = 'naProcedimentoGroup';
-    g.innerHTML = `
-      <label class="form-label">Procedimento</label>
-      <select class="form-select" id="naProcedimento">
-        <option value="">Selecione (opcional)</option>
-      </select>`;
-    obsGroup.insertAdjacentElement('beforebegin', g);
-    document.getElementById('naLead')?.addEventListener('change', agfSugerirDoLead);
-  }
-  agfPopularSelect();
-}
-
-function agfPopularSelect(manterValor) {
-  const sel = document.getElementById('naProcedimento');
-  if (!sel) return;
-  const atual = manterValor ? sel.value : '';
-  sel.innerHTML = '<option value="">Selecione (opcional)</option>' +
-    AGF.procs.map(p => `<option value="${p.nome.replace(/"/g, '&quot;')}">${p.nome}</option>`).join('');
-  sel.value = atual;
-}
-
-// ── Sugestão automática: procedimento do lead escolhido ──────
-function agfSugerirDoLead() {
-  const leadId = document.getElementById('naLead')?.value;
-  const sel = document.getElementById('naProcedimento');
-  if (!leadId || !sel || sel.value) return;
-  const lead = (STATE.leads || []).find(l => l.id === leadId);
-  if (!lead?.procedimento) return;
-  const match = AGF.procs.find(p => p.nome.toLowerCase() === lead.procedimento.toLowerCase());
-  if (match) sel.value = match.nome;
-}
-
-// ── Engata nos modais de agendamento ─────────────────────────
 (function () {
   const _openNA = openNovoAgendamento;
   openNovoAgendamento = function () {
@@ -106,16 +47,29 @@ salvarNovoAgendamento = async function () {
   if (clinic?.whatsapp_instance && lead?.telefone) {
     try {
       // Usa a mensagem editável da tela de Automações (tipo "confirmacao")
-      const { data: autoConf } = await db.from('automacoes')
-        .select('mensagem,ativo')
+      // IMPORTANTE: usar .limit(1) em vez de .maybeSingle() — se por algum motivo
+      // existir mais de uma linha (duplicata), .maybeSingle() falha e ANTES o código
+      // caía no fallback "sempre ativo". Agora, em caso de erro/ambiguidade,
+      // o padrão é NÃO ENVIAR (seguro por padrão).
+      const { data: autoConfRows, error: autoConfError } = await db.from('automacoes')
+        .select('mensagem,ativo,updated_at')
         .eq('clinic_id', clinic.id)
         .eq('tipo', 'confirmacao')
-        .maybeSingle();
+        .order('updated_at', { ascending: false, nullsFirst: false })
+        .limit(1);
 
       let template = null;
-      if (autoConf) {
-        template = autoConf.ativo ? autoConf.mensagem : null; // desativada = não envia
+
+      if (autoConfError) {
+        // Erro ao consultar = não envia, por segurança. Não usa mais o fallback perigoso.
+        console.error('[agenda-fix] Erro ao buscar automação de confirmação, mensagem NÃO enviada por segurança:', autoConfError.message);
+      } else if (autoConfRows && autoConfRows.length > 0) {
+        // Existe configuração salva pra essa clínica: respeita o ativo/inativo dela.
+        const autoConf = autoConfRows[0];
+        template = autoConf.ativo ? autoConf.mensagem : null;
       } else if (typeof AUTOMACOES_DEFAULTS !== 'undefined') {
+        // Só usa o padrão de fábrica se a clínica NUNCA configurou essa automação
+        // (nenhuma linha encontrada, sem erro nenhum).
         template = AUTOMACOES_DEFAULTS.find(a => a.tipo === 'confirmacao')?.msg || null;
       }
 
@@ -130,8 +84,10 @@ salvarNovoAgendamento = async function () {
         await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg);
         toast('Confirmação enviada por WhatsApp! ✓');
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error('[agenda-fix] Erro inesperado ao enviar confirmação, mensagem NÃO enviada:', e.message);
+    }
   }
 };
 
-console.log('✅ agenda-fix.js carregado — procedimento no agendamento ativo');
+console.log('✅ agenda-fix.js carregado — procedimento no agendamento ativo (correção: erro/duplicata = não envia)');
