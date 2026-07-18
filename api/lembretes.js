@@ -89,6 +89,25 @@ export default async function handler(req, res) {
     const hoje = brtAgora.toISOString().split('T')[0];
     const limite = new Date(brtAgora.getTime() + 2 * 24 * 3600 * 1000).toISOString().split('T')[0];
 
+    // ── HORÁRIO DE SILÊNCIO: lembretes automáticos (24h e 2h) nunca
+    // disparam entre 22h e 7h (horário de Brasília). Isso NÃO afeta a
+    // confirmação de agendamento (essa é resposta a uma ação em tempo
+    // real — manual ou via Brian IA — e pode acontecer a qualquer hora).
+    // Ajuste os dois números abaixo se quiser mudar a janela.
+    const HORARIO_SILENCIO_INICIO = 22; // 22h
+    const HORARIO_SILENCIO_FIM = 6;     // 06h
+    const horaAtualBR = brtAgora.getUTCHours();
+    const emHorarioDeSilencio = horaAtualBR >= HORARIO_SILENCIO_INICIO || horaAtualBR < HORARIO_SILENCIO_FIM;
+
+    if (emHorarioDeSilencio) {
+      return res.status(200).json({
+        ok: true,
+        enviados_24h: 0,
+        enviados_2h: 0,
+        msg: `Horário de silêncio (${HORARIO_SILENCIO_INICIO}h–${HORARIO_SILENCIO_FIM}h BR) — lembretes automáticos pausados até o próximo ciclo fora dessa janela.`,
+      });
+    }
+
     // Consultas candidatas: agendadas ou confirmadas, de hoje até +2 dias
     const consultas = await sbGet(
       `consultas?data=gte.${hoje}&data=lte.${limite}&status=in.(agendado,confirmado)&select=id,clinic_id,lead_id,data,hora,status,lembrete_24h,lembrete_2h`
