@@ -132,28 +132,51 @@
 
     if (clinic?.whatsapp_instance && lead?.telefone) {
       try {
-        const { data: autoConf } = await db.from('automacoes')
-          .select('mensagem,ativo').eq('clinic_id', clinic.id).eq('tipo', 'confirmacao').maybeSingle();
+        // .limit(1) em vez de .maybeSingle(): se existir mais de uma linha
+        // (duplicata), .maybeSingle() falhava e o código caía no fallback
+        // "sempre ativo". Agora erro de consulta = não envia (seguro por padrão).
+        const { data: autoConfRows, error: autoConfError } = await db.from('automacoes')
+          .select('mensagem,ativo,updated_at')
+          .eq('clinic_id', clinic.id).eq('tipo', 'confirmacao')
+          .order('updated_at', { ascending: false, nullsFirst: false })
+          .limit(1);
+
         let template = null;
-        if (autoConf) template = autoConf.ativo ? autoConf.mensagem : null;
-        else if (typeof AUTOMACOES_DEFAULTS !== 'undefined') template = AUTOMACOES_DEFAULTS.find(a => a.tipo === 'confirmacao')?.msg || null;
-        // ── GARANTIA: se não achou nenhuma regra configurada (nem específica da
-        // clínica, nem padrão do sistema), usa uma mensagem fixa de confirmação.
-        // Antes, sem regra 'confirmacao' cadastrada, a mensagem simplesmente
-        // NUNCA era enviada — silenciosamente, sem log nem aviso. Isso afetava
-        // TODO agendamento feito por essa tela (não só encaixe), sempre que a
-        // clínica não tinha essa automação específica configurada.
-        if (!template) {
+        let deveEnviar = true; // padrão: tenta enviar (clínica sem automação configurada ainda)
+
+        if (autoConfError) {
+          console.error('[agenda-intervalo] erro ao consultar automação de confirmação, NÃO enviando por segurança:', autoConfError.message);
+          deveEnviar = false;
+        } else if (autoConfRows && autoConfRows.length > 0) {
+          const autoConf = autoConfRows[0];
+          if (autoConf.ativo) {
+            template = autoConf.mensagem;
+          } else {
+            // ── A clínica desativou essa automação de propósito.
+            // Antes, isso era ignorado e a "GARANTIA" abaixo mandava um
+            // fallback fixo mesmo assim. Agora, desativado = NÃO ENVIA NADA.
+            deveEnviar = false;
+          }
+        } else if (typeof AUTOMACOES_DEFAULTS !== 'undefined') {
+          template = AUTOMACOES_DEFAULTS.find(a => a.tipo === 'confirmacao')?.msg || null;
+        }
+
+        // ── GARANTIA: só entra aqui se a clínica NUNCA configurou essa
+        // automação (nem specific, nem erro, nem desativada de propósito).
+        if (deveEnviar && !template) {
           template = 'Olá, {nome}! 🎉 Sua consulta está *confirmada*!\n\n📅 *Data:* {data}\n⏰ *Horário:* {hora}\n\nQualquer dúvida, é só chamar aqui! Te esperamos 😊';
         }
-        const dataFormatada = new Date(data + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
-        const horaTexto = horaFim ? `${hora} às ${horaFim}` : hora;
-        const msg = template
-          .replaceAll('{nome}', lead.nome || '').replaceAll('{clinica}', clinic.nome || clinic.name || '')
-          .replaceAll('{data}', dataFormatada).replaceAll('{hora}', horaTexto)
-          .replaceAll('{procedimento}', procedimento || lead.procedimento || 'sua avaliação');
-        await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg);
-        toast('Confirmação enviada por WhatsApp! ✓');
+
+        if (deveEnviar && template) {
+          const dataFormatada = new Date(data + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+          const horaTexto = horaFim ? `${hora} às ${horaFim}` : hora;
+          const msg = template
+            .replaceAll('{nome}', lead.nome || '').replaceAll('{clinica}', clinic.nome || clinic.name || '')
+            .replaceAll('{data}', dataFormatada).replaceAll('{hora}', horaTexto)
+            .replaceAll('{procedimento}', procedimento || lead.procedimento || 'sua avaliação');
+          await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg);
+          toast('Confirmação enviada por WhatsApp! ✓');
+        }
       } catch (e) {
         console.error('[agenda-intervalo] falha ao enviar confirmação:', e.message);
         if (typeof toast === 'function') toast('Consulta salva, mas a confirmação por WhatsApp falhou — avise o paciente manualmente.', 'error');
