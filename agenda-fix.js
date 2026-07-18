@@ -1,3 +1,62 @@
+// ============================================================
+// CLINICALEAD — PROCEDIMENTO NO AGENDAMENTO
+// Adiciona o campo "Procedimento" no modal de novo agendamento,
+// alimentado pelo catálogo vivo da clínica (página Procedimentos).
+// Criou um procedimento novo? Ele já aparece aqui na hora.
+// Bônus: ao escolher o paciente, sugere o procedimento do lead.
+// ============================================================
+
+let AGF = { procs: [] };
+
+// ── Carrega o catálogo ativo da clínica ──────────────────────
+async function agfCarregarProcs() {
+  const clinic = currentClinic();
+  if (!clinic) return;
+  const { data } = await db.from('procedimentos')
+    .select('id,nome').eq('clinic_id', clinic.id).eq('ativo', true).order('nome');
+  AGF.procs = data || [];
+}
+
+// ── Injeta o select no modal (uma vez) ───────────────────────
+function agfInjetarSelect() {
+  if (!document.getElementById('naProcedimentoGroup')) {
+    const obsGroup = document.getElementById('naObs')?.closest('.form-group');
+    if (!obsGroup) return;
+    const g = document.createElement('div');
+    g.className = 'form-group';
+    g.id = 'naProcedimentoGroup';
+    g.innerHTML = `
+      <label class="form-label">Procedimento</label>
+      <select class="form-select" id="naProcedimento">
+        <option value="">Selecione (opcional)</option>
+      </select>`;
+    obsGroup.insertAdjacentElement('beforebegin', g);
+    document.getElementById('naLead')?.addEventListener('change', agfSugerirDoLead);
+  }
+  agfPopularSelect();
+}
+
+function agfPopularSelect(manterValor) {
+  const sel = document.getElementById('naProcedimento');
+  if (!sel) return;
+  const atual = manterValor ? sel.value : '';
+  sel.innerHTML = '<option value="">Selecione (opcional)</option>' +
+    AGF.procs.map(p => `<option value="${p.nome.replace(/"/g, '&quot;')}">${p.nome}</option>`).join('');
+  sel.value = atual;
+}
+
+// ── Sugestão automática: procedimento do lead escolhido ──────
+function agfSugerirDoLead() {
+  const leadId = document.getElementById('naLead')?.value;
+  const sel = document.getElementById('naProcedimento');
+  if (!leadId || !sel || sel.value) return;
+  const lead = (STATE.leads || []).find(l => l.id === leadId);
+  if (!lead?.procedimento) return;
+  const match = AGF.procs.find(p => p.nome.toLowerCase() === lead.procedimento.toLowerCase());
+  if (match) sel.value = match.nome;
+}
+
+// ── Engata nos modais de agendamento ─────────────────────────
 (function () {
   const _openNA = openNovoAgendamento;
   openNovoAgendamento = function () {
