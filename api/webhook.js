@@ -1844,6 +1844,38 @@ module.exports = async function handler(req, res) {
                       } else if (mencionaHoje && !mencionaAmanha && campoAgendar.data !== hojeISOcheck) {
                         console.log(`[BRIAN-AGENDAR] ⚠️ CORREÇÃO ANTI-DATA-ERRADA: conversa menciona "hoje" mas marcador gravou ${campoAgendar.data} — corrigindo pra ${hojeISOcheck}`);
                         campoAgendar.data = hojeISOcheck;
+                      } else {
+                        // ── EXTENSÃO: mesma trava, agora pra nomes de dia da semana ──
+                        // Cobre o caso relatado: paciente/Brian falam "sábado" mas o
+                        // marcador grava uma data que nem é sábado (ex: 27/07/2026,
+                        // que cai numa segunda-feira). Só corrige quando exatamente 1
+                        // dia da semana foi citado na janela recente (se citou mais de
+                        // um — ex: "segunda ou terça" — fica ambíguo, não mexe).
+                        const semAcentoRecente = textoRecente.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                        const DIAS_SEMANA_NOMES = ['domingo', 'segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado'];
+                        const diasMencionados = [];
+                        DIAS_SEMANA_NOMES.forEach((nome, idx) => {
+                          if (new RegExp(`\\b${nome}\\b`, 'i').test(semAcentoRecente)) diasMencionados.push(idx);
+                        });
+                        if (diasMencionados.length === 1) {
+                          const diaAlvo = diasMencionados[0];
+                          const [ay, am, ad] = campoAgendar.data.split('-').map(Number);
+                          const diaSemanaMarcador = new Date(ay, am - 1, ad).getDay();
+                          if (diaSemanaMarcador !== diaAlvo) {
+                            // recalcula a PRÓXIMA data real (0 a 7 dias à frente, a
+                            // partir de hoje) cujo dia da semana bate com o mencionado
+                            for (let i = 0; i <= 7; i++) {
+                              const cand = new Date(baseBRTcheck.getTime() + i * 24 * 3600 * 1000);
+                              const candISO = cand.toISOString().split('T')[0];
+                              const [cy, cm, cd] = candISO.split('-').map(Number);
+                              if (new Date(cy, cm - 1, cd).getDay() === diaAlvo) {
+                                console.log(`[BRIAN-AGENDAR] ⚠️ CORREÇÃO ANTI-DATA-ERRADA: conversa menciona "${DIAS_SEMANA_NOMES[diaAlvo]}" mas marcador gravou ${campoAgendar.data} (dia da semana não bate) — corrigindo pra ${candISO}`);
+                                campoAgendar.data = candISO;
+                                break;
+                              }
+                            }
+                          }
+                        }
                       }
                     } catch (e) { console.log('[BRIAN-AGENDAR] erro na checagem anti-data-errada (segue sem corrigir):', e.message); }
 
