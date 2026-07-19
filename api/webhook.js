@@ -1549,6 +1549,27 @@ module.exports = async function handler(req, res) {
                     textoResposta = String(textoResposta).replace(/\s*\[\[AGENDAR\|[^\]]+\]\]\s*/i, ' ').trim();
                   }
 
+                  // ── TRAVA ANTI-NOME-VAZADO-DO-CONTATO ──
+                  // O prompt do Brian PROÍBE explicitamente usar o nome salvo no
+                  // contato do WhatsApp (pushName) como se fosse o nome que a
+                  // pessoa disse na conversa — mas o modelo às vezes ignora essa
+                  // regra e grava esse nome no marcador mesmo assim (aconteceu:
+                  // paciente se apresentou como "Ana Maria" na conversa, mas o
+                  // marcador gravou "Lorivaldo Carrijo" — nome salvo no contato
+                  // do WhatsApp de quem enviava a mensagem). Aqui o SERVIDOR
+                  // confere: se o nome do marcador bate com o contact_name
+                  // (normalizado, sem acento/maiúscula), rejeita e ignora esse
+                  // nome — nunca confia nele pra criar lead nem pra confirmação.
+                  const _normNome = (s) => String(s || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                  if (contact_name && campoLead && campoLead.nome && _normNome(campoLead.nome) === _normNome(contact_name)) {
+                    console.log(`[BRIAN-LEAD] 🚫 nome do marcador [[LEAD]] ("${campoLead.nome}") bate com o nome salvo no contato do WhatsApp — rejeitado por segurança.`);
+                    campoLead.nome = null;
+                  }
+                  if (contact_name && campoAgendar && campoAgendar.nome && _normNome(campoAgendar.nome) === _normNome(contact_name)) {
+                    console.log(`[BRIAN-AGENDAR] 🚫 nome do marcador [[AGENDAR]] ("${campoAgendar.nome}") bate com o nome salvo no contato do WhatsApp — rejeitado por segurança.`);
+                    campoAgendar.nome = null;
+                  }
+
                   // marcador CASOS (enviar fotos de antes/depois de um procedimento)
                   let procCasos = null;
                   const mCasos = String(textoResposta).match(/\[\[CASOS\|([^\]]+)\]\]/i);
