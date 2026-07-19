@@ -1891,7 +1891,17 @@ module.exports = async function handler(req, res) {
                         console.log(`[BRIAN-AGENDAR] ↩️ já estava agendado (${campoAgendar.data} ${campoAgendar.hora}) — ignora duplicata`);
                       } else if (r.ok) {
                         console.log(`[BRIAN-AGENDAR] ✅ CONSULTA CRIADA | ${campoAgendar.data} ${campoAgendar.hora} | lead ${lead.id}${dentistaId ? ' | dentista ' + dentistaId : ''}`);
-                        await brianEnviarConfirmacao(instanceName, clinic_id, phone, lead.nome || campoAgendar.nome, campoAgendar.data, campoAgendar.hora);
+                        // ⚠️ CORREÇÃO: antes usava lead.nome || campoAgendar.nome — ou
+                        // seja, se o CADASTRO já tinha um nome "real" salvo (2+
+                        // palavras), a confirmação sempre usava ele, mesmo que a
+                        // pessoa falando agora fosse outra (telefone compartilhado
+                        // entre familiares/casal, ou número reaproveitado). Isso
+                        // mandava "Prontinho, Lorivaldo!" pra quem estava confirmado
+                        // como Ana Maria na própria conversa. Agora prioriza o nome
+                        // que ACABOU de ser confirmado nesta conversa (marcador
+                        // [[AGENDAR|nome=...]]), só cai pro nome do cadastro se a IA
+                        // não tiver informado nome nenhum nesta consulta específica.
+                        await brianEnviarConfirmacao(instanceName, clinic_id, phone, campoAgendar.nome || lead.nome, campoAgendar.data, campoAgendar.hora);
                       } else {
                         console.log(`[BRIAN-AGENDAR] ⚠️ NÃO agendou (${r.motivo}) — avisa o paciente`);
                         // se o horário deu problema (ocupado/passado), avisa gentilmente
