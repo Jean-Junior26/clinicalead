@@ -195,9 +195,23 @@
         continue;
       }
       if (e.ate <= e.de) { if (typeof toast === 'function') toast(`${d.nome}: hora final deve ser depois da inicial`, 'error'); return; }
-      let horarios = gerarFaixa(e.de, e.ate, parseInt(e.passo) || 30);
+     const _passo = parseInt(e.passo) || 30;
+      // Almoço: gera DUAS faixas (manhã + tarde) em vez de gerar contínuo e cortar.
+      // Assim a tarde RECOMEÇA no fim do almoço (ex: 13:30) — o horário que você
+      // digitou aparece certinho, sem "continuar o compasso" da manhã (que fazia
+      // 13:30 nunca nascer, sobrando só 13:45).
+      let horarios;
       if (e.almocoOn && e.almocoAte > e.almocoDe) {
-        horarios = horarios.filter(h => !(h >= e.almocoDe && h < e.almocoAte));
+        const _sub = (hhmm, min) => {
+          const [h, m] = hhmm.split(':').map(Number);
+          const t = h * 60 + m - min;
+          return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+        };
+        const manha = gerarFaixa(e.de, _sub(e.almocoDe, _passo), _passo); // início → antes do almoço
+        const tarde = gerarFaixa(e.almocoAte, e.ate, _passo);             // fim do almoço → fim (recomeça limpo!)
+        horarios = Array.from(new Set([...manha, ...tarde])).sort();
+      } else {
+        horarios = gerarFaixa(e.de, e.ate, _passo);
       }
       linhas.push({ clinic_id: clinic.id, dia_semana: d.n, horarios, ativo: true });
     }
