@@ -113,7 +113,8 @@ const PLANOS = {
       const resumo = document.getElementById('atvResumo');
       resumo.innerHTML = `Preço cheio: R$ ${plano.preco.toFixed(2).replace('.', ',')}${whats > 0 ? ` + ${whats} WhatsApp (R$ ${(whats*WHATSAPP_EXTRA).toFixed(2).replace('.', ',')})` : ''} = <b>R$ ${sugerido.toFixed(2).replace('.', ',')}</b>. Edite o valor acima se for dar desconto.`;
     };
-    document.getElementById('atvTipoProduto').onchange = () => { atualizarOpcoesPlano(); recalc(); };
+   document.getElementById('atvTipoProduto').onchange = () => { atualizarOpcoesPlano(); recalc(); };
+    atualizarOpcoesPlano(); // preenche o dropdown com os planos certos ao ABRIR o modal
     document.getElementById('atvPlano').onchange = recalc;
     document.getElementById('atvWhats').oninput = recalc;
     recalc();
