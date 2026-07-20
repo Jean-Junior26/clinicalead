@@ -103,7 +103,25 @@
     const dateStr = CAL.selectedDate || new Date().toISOString().split('T')[0];
 
     // gera os horários da faixa que esse DIA vai atender (ex: sábado 08:00–13:00)
-    const faixa = gerarFaixa(de, ate, passo);
+   // Gera a faixa RESPEITANDO o almoço: manhã (de→almoço) + tarde (almoço→ate).
+    // A tarde RECOMEÇA no fim do almoço (ex: 13:30) — assim o horário que você
+    // digita aparece certinho, sem "continuar o compasso" da manhã (que fazia
+    // 13:30 virar 13:45). Sem almoço, gera a faixa contínua normal.
+    function _subMin(hhmm, min) {
+      const [h, m] = hhmm.split(':').map(Number);
+      const t = h * 60 + m - min;
+      return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+    }
+    let faixa;
+    if (almocoOn) {
+      // manhã: do início até 1 passo ANTES do almoço começar (não inclui o horário do almoço)
+      const manha = gerarFaixa(de, _subMin(almocoDe, passo), passo);
+      // tarde: recomeça EXATAMENTE no fim do almoço (o horário que você digitou)
+      const tarde = gerarFaixa(almocoAte, ate, passo);
+      faixa = Array.from(new Set([...manha, ...tarde])).sort();
+    } else {
+      faixa = gerarFaixa(de, ate, passo);
+    }
 
     // ── IMPORTANTE: a grade (CAL.horariosDisponiveis) é ÚNICA pra todos os dias.
     // Pra cada dia ter sua própria "cara" SEM vazar pros outros, a gente:
