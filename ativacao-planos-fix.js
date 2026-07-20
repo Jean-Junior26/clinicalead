@@ -18,10 +18,10 @@
   }
 
   // catálogo de planos CRM completo (msgs + preço cheio de referência)
-  const PLANOS = {
-    basico:   { nome: 'Básico',   msgs: 1000, preco: 174.90 },
-    premium:  { nome: 'Premium',  msgs: 2000, preco: 249.90 },
-    platinum: { nome: 'Platinum', msgs: 3000, preco: 319.90 },
+const PLANOS = {
+    basico:   { nome: 'Básico',   msgs: 1500, preco: 189.90 },
+    premium:  { nome: 'Premium',  msgs: 2500, preco: 254.90 },
+    platinum: { nome: 'Platinum', msgs: 4000, preco: 319.90 },
   };
   // catálogo Brian Solo (só a IA de atendimento, sem CRM completo)
   const PLANOS_SOLO = {
