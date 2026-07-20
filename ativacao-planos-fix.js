@@ -69,9 +69,7 @@ const PLANOS = {
 
         <label style="display:block;font-size:13px;color:var(--text-secondary,#8A8570);margin-bottom:6px;">Plano</label>
         <select id="atvPlano" class="form-select" style="width:100%;margin-bottom:16px;padding:9px;border-radius:8px;background:var(--bg-base,#0A0A0B);border:1px solid var(--gold-border,#333);color:var(--text-primary,#F0EAD6);">
-          <option value="basico">Básico — 1.000 msgs — R$ 174,90</option>
-          <option value="premium" selected>Premium — 2.000 msgs — R$ 249,90</option>
-          <option value="platinum">Platinum — 3.000 msgs — R$ 319,90</option>
+       <option value="premium" selected>Carregando…</option>
         </select>
 
         <div style="display:flex;gap:12px;margin-bottom:16px;">
