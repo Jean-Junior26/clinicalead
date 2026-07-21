@@ -1463,20 +1463,45 @@ function showExpiringBanner() {
 // ── SUPABASE DATA ─────────────────────────────
 async function loadClinics() {
   const isAdmin = STATE.profile?.role === 'admin' || STATE.profile?.role === 'administrador';
-  let query = db.from('clinicas').select('*').order('created_at', { ascending: true });
-  
-  // Não admin vê só as suas clínicas
-  if (!isAdmin) {
-    query = query.eq('user_id', STATE.user.id);
-  }
-  
-const { data, error } = await query;
-  if (error) { console.error('clinicas:', error); return; }
-  STATE.clinics = data || [];
 
-  // Cadastro novo: o trigger cria a clínica em milissegundos. Se vier vazia
-  // para um não-admin, re-tenta algumas vezes antes de desistir (evita o wizard à toa).
-  if (!isAdmin && STATE.clinics.length === 0) {
+  // Admin vê todas
+  if (isAdmin) {
+    const { data, error } = await db.from('clinicas').select('*').order('created_at', { ascending: true });
+    if (error) { console.error('clinicas:', error); return; }
+    STATE.clinics = data || [];
+    { const b = document.getElementById('navClinicasBadge'); if (b) b.textContent = STATE.clinics.length; }
+    renderClinicSwitcher();
+    return;
+  }
+
+  // Não-admin: junta as clínicas que ele é DONO (user_id) + onde é COLABORADOR (clinic_users)
+  let proprias = [];
+  try {
+    const rp = await db.from('clinicas').select('*').eq('user_id', STATE.user.id).order('created_at', { ascending: true });
+    proprias = rp.data || [];
+  } catch (e) {}
+
+  let colaboradas = [];
+  try {
+    // pega os clinic_id onde este usuário é colaborador (por user_id OU email)
+    let cu = await db.from('clinic_users').select('clinic_id').eq('user_id', STATE.user.id);
+    if ((!cu.data || !cu.data.length) && STATE.user.email) {
+      cu = await db.from('clinic_users').select('clinic_id').eq('email', STATE.user.email);
+    }
+    const ids = [...new Set((cu.data || []).map(r => r.clinic_id).filter(Boolean))];
+    if (ids.length) {
+      const rc = await db.from('clinicas').select('*').in('id', ids);
+      colaboradas = rc.data || [];
+    }
+  } catch (e) { console.warn('[loadClinics] clinic_users:', e.message); }
+
+  // junta sem duplicar
+  const mapa = {};
+  [...proprias, ...colaboradas].forEach(c => { if (c && c.id) mapa[c.id] = c; });
+  STATE.clinics = Object.values(mapa).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+  // Cadastro novo: re-tenta se vier vazio (evita o wizard à toa)
+  if (STATE.clinics.length === 0) {
     for (let i = 0; i < 3 && STATE.clinics.length === 0; i++) {
       await new Promise(r => setTimeout(r, 800));
       const re = await db.from('clinicas').select('*').eq('user_id', STATE.user.id).order('created_at', { ascending: true });
