@@ -55,6 +55,8 @@ async function abrirGerenciarResponsaveis() {
             <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
               <div><label class="form-label" style="font-size:12px;">Débito (%)</label><input type="number" step="0.01" class="form-input" id="taxaDebito" placeholder="0" style="width:110px;"/></div>
               <div><label class="form-label" style="font-size:12px;">Crédito à vista (%)</label><input type="number" step="0.01" class="form-input" id="taxaCreditoVista" placeholder="0" style="width:150px;"/></div>
+              <div><label class="form-label" style="font-size:12px;">Boleto (%)</label><input type="number" step="0.01" class="form-input" id="taxaBoletoPct" placeholder="0" style="width:110px;"/></div>
+              <div><label class="form-label" style="font-size:12px;">Boleto taxa fixa (R$)</label><input type="number" step="0.01" class="form-input" id="taxaBoletoFixo" placeholder="0" style="width:150px;"/></div>
             </div>
             <div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;">Crédito parcelado (faixas de parcelas):</div>
             <div id="taxasFaixas"></div>
@@ -158,6 +160,8 @@ async function renderTaxasCartao() {
   TAXAS.faixas = (cfg && Array.isArray(cfg.parcelado)) ? cfg.parcelado.slice() : [];
   const d = document.getElementById('taxaDebito'); if (d) d.value = (cfg && cfg.debito != null) ? cfg.debito : '';
   const cv = document.getElementById('taxaCreditoVista'); if (cv) cv.value = (cfg && cfg.credito_vista != null) ? cfg.credito_vista : '';
+  const bp = document.getElementById('taxaBoletoPct'); if (bp) bp.value = (cfg && cfg.boleto_pct) ? cfg.boleto_pct : '';
+  const bf = document.getElementById('taxaBoletoFixo'); if (bf) bf.value = (cfg && cfg.boleto_fixo) ? cfg.boleto_fixo : '';
   renderFaixasTaxa();
 }
 
@@ -186,15 +190,19 @@ window.salvarTaxasCartao = async function () {
   if (!clinic) return;
   const debito = parseFloat(document.getElementById('taxaDebito').value);
   const creditoVista = parseFloat(document.getElementById('taxaCreditoVista').value);
+  const boletoPct = parseFloat(document.getElementById('taxaBoletoPct')?.value);
+  const boletoFixo = parseFloat(document.getElementById('taxaBoletoFixo')?.value);
   const parcelado = TAXAS.faixas
     .filter(f => f.de != null && f.ate != null && f.taxa != null)
     .map(f => ({ de: Number(f.de), ate: Number(f.ate), taxa: Number(f.taxa) }));
   const cfg = {
     debito: isNaN(debito) ? 0 : debito,
     credito_vista: isNaN(creditoVista) ? 0 : creditoVista,
+    boleto_pct: isNaN(boletoPct) ? 0 : boletoPct,
+    boleto_fixo: isNaN(boletoFixo) ? 0 : boletoFixo,
     parcelado,
   };
-  const vazio = !cfg.debito && !cfg.credito_vista && !parcelado.length;
+  const vazio = !cfg.debito && !cfg.credito_vista && !cfg.boleto_pct && !cfg.boleto_fixo && !parcelado.length;
   const { error } = await db.from('clinicas').update({ taxas_cartao: vazio ? null : cfg }).eq('id', clinic.id);
   if (error) { toast('Erro: ' + error.message, 'error'); return; }
   // atualiza o estado local da clínica, se existir
