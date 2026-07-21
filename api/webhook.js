@@ -1379,6 +1379,35 @@ module.exports = async function handler(req, res) {
           content = '[mídia]'; type = 'unknown';
         }
 
+        // ── TRAVA ANTI-ECO (evita duplicar disparos) ──────────────
+        // Quando a clínica ENVIA uma mensagem (disparo em massa, Brian,
+        // resposta), ela já é gravada no banco pelo código de envio —
+        // porém SEM message_id. Segundos depois, o WhatsApp devolve o
+        // "echo" dessa mesma mensagem pelo webhook, agora COM message_id.
+        // A trava por message_id não pega (a original não tinha id), então
+        // a mensagem duplicava. Aqui: se for from_me e já existir a MESMA
+        // mensagem (mesmo telefone + conteúdo) gravada nos últimos 60s,
+        // não grava de novo — é o eco do próprio envio.
+        if (fromMe && content && content.trim()) {
+          try {
+            const sufEco = phone.replace(/\D/g, '').slice(-8);
+            const desdeEco = new Date(Date.now() - 60 * 1000).toISOString();
+            const ecoResp = await fetch(
+              `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufEco}&from_me=eq.true&created_at=gte.${desdeEco}&select=id,content&limit=10`,
+              { headers: sbHeaders }
+            );
+            if (ecoResp.ok) {
+              const jaTem = await ecoResp.json();
+              const norm = (s) => String(s || '').trim().replace(/\s+/g, ' ');
+              if ((jaTem || []).some(x => norm(x.content) === norm(content))) {
+                console.log(`[ANTI-ECO] 🔁 eco de disparo ignorado (${phone}): "${content.slice(0, 40)}..."`);
+                insertados.push(phone);
+                continue;
+              }
+            }
+          } catch (e) { /* na dúvida, segue e grava (não perde mensagem) */ }
+        }
+
         const payload = { clinic_id, phone, contact_name, content, type, from_me: fromMe, media_url, message_id, created_at, instance_name: instanceName };
         const insertResp = await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
           method: 'POST',
