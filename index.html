@@ -689,7 +689,10 @@ tbody tr:hover td { background:var(--bg-elevated); }
     <div class="topbar">
       <div>
         <div class="topbar-title">Clínica<span style="color:var(--gold);">Lead</span></div>
-        <div style="font-size:11px;color:var(--text-secondary);margin-top:1px;" id="topbarSub">—</div>
+        <div style="position:relative;display:inline-block;">
+          <div style="font-size:11px;color:var(--text-secondary);margin-top:1px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;user-select:none;" id="topbarSub" onclick="toggleTopbarClinics(event)">—</div>
+          <div id="topbarClinicDropdown" style="display:none;position:absolute;top:100%;left:0;margin-top:6px;background:var(--bg-surface,#141414);border:1px solid var(--gold-border,rgba(201,168,76,0.25));border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,0.45);z-index:1000;min-width:230px;overflow:hidden;"></div>
+        </div>
       </div>
       <div class="topbar-right">
         <div class="notif-wrap">
@@ -1516,16 +1519,37 @@ function toggleClinicDropdown() {
   document.getElementById('clinicDropdown').classList.toggle('open');
 }
 
+// ── troca de clínica pela TOPBAR (nome da clínica lá em cima) ──
+function toggleTopbarClinics(ev) {
+  if (ev) ev.stopPropagation();
+  const dd = document.getElementById('topbarClinicDropdown');
+  if (!dd) return;
+  // só abre se houver mais de uma clínica pra trocar
+  if ((STATE.clinics || []).length < 2) return;
+  dd.style.display = (dd.style.display === 'none' || !dd.style.display) ? 'block' : 'none';
+}
+// fecha o dropdown da topbar ao clicar fora
+document.addEventListener('click', function (e) {
+  const dd = document.getElementById('topbarClinicDropdown');
+  const sub = document.getElementById('topbarSub');
+  if (dd && dd.style.display === 'block' && !dd.contains(e.target) && e.target !== sub) {
+    dd.style.display = 'none';
+  }
+});
+
 function renderClinicSwitcher() {
   const c = currentClinic();
+  const varias = (STATE.clinics || []).length >= 2;
   if (!c) {
     document.getElementById('clinicName').textContent = 'Nenhuma clínica';
     document.getElementById('clinicPlan').textContent = 'Adicione uma clínica';
-    document.getElementById('topbarSub').textContent = '—';
+    document.getElementById('topbarSub').innerHTML = '—';
   } else {
     document.getElementById('clinicName').textContent = c.nome;
     document.getElementById('clinicPlan').textContent = 'Plano ' + (c.plano || 'Pro');
-    document.getElementById('topbarSub').textContent = c.nome + ' · ' + new Date().toLocaleDateString('pt-BR', {month:'long',year:'numeric'});
+    const label = c.nome + ' · ' + new Date().toLocaleDateString('pt-BR', {month:'long',year:'numeric'});
+    // setinha só quando há mais de uma clínica (indica que dá pra trocar)
+    document.getElementById('topbarSub').innerHTML = label + (varias ? ' <i class="ti ti-chevron-down" style="font-size:12px;"></i>' : '');
   }
   const dd = document.getElementById('clinicDropdown');
   dd.innerHTML = STATE.clinics.map((cl, i) => `
@@ -1537,6 +1561,24 @@ function renderClinicSwitcher() {
   `).join('') + `
 ${STATE.clinics.length === 0 || STATE.profile?.role === 'admin' ? `<div class="clinic-add" onclick="openAddClinicWizard()"><i class="ti ti-plus"></i><span>Adicionar nova clínica</span></div>` : ''}
 `;
+  // popula o dropdown da TOPBAR (mesma lista, troca com 1 clique)
+  const tdd = document.getElementById('topbarClinicDropdown');
+  if (tdd) {
+    tdd.innerHTML = STATE.clinics.map((cl, i) => `
+      <div onclick="switchTopbarClinic(${i})" style="display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer;font-size:13px;color:var(--text-primary,#F0EAD6);border-bottom:1px solid var(--border-subtle,rgba(255,255,255,0.05));${i===STATE.currentClinicIdx?'background:rgba(201,168,76,0.10);':''}" onmouseover="this.style.background='rgba(201,168,76,0.06)'" onmouseout="this.style.background='${i===STATE.currentClinicIdx?'rgba(201,168,76,0.10)':'transparent'}'">
+        <i class="ti ti-building-hospital" style="color:var(--gold,#C9A84C);font-size:15px;"></i>
+        <span style="flex:1;">${cl.nome}</span>
+        ${i===STATE.currentClinicIdx?'<i class="ti ti-check" style="color:var(--gold,#C9A84C);"></i>':''}
+      </div>
+    `).join('');
+  }
+}
+
+// troca pela topbar e fecha o dropdown
+async function switchTopbarClinic(idx) {
+  const dd = document.getElementById('topbarClinicDropdown');
+  if (dd) dd.style.display = 'none';
+  await switchClinic(idx);
 }
 
 async function switchClinic(idx) {
