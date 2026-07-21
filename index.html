@@ -2385,12 +2385,15 @@ async function saveNewClinic() {
 
 // ── WHATSAPP FUNCTIONS ───────────────────────
 let currentWAInstance = null;
+let currentWAClinic = null;
 let qrInterval = null;
 
 async function openWhatsAppConnect(clinicIdx) {
   const clinic = STATE.clinics[clinicIdx];
   if (!clinic) return;
-  currentWAInstance = clinic.nome.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,20) + '_' + clinic.id.slice(0,8);
+  currentWAClinic = clinic; // guarda a clínica sendo conectada (salvamento confiável)
+  // reusa a instância JÁ vinculada, se houver (evita criar nova a cada tentativa)
+  currentWAInstance = clinic.whatsapp_instance || (clinic.nome.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,20) + '_' + clinic.id.slice(0,8));
   document.getElementById('waStatus').textContent = '';
   document.getElementById('qrCodeArea').style.display = 'none';
   document.getElementById('btnGerarQR').style.display = '';
@@ -2411,44 +2414,74 @@ async function gerarQRCode() {
   btn.innerHTML = '<i class="ti ti-loader"></i> Gerando...';
   btn.disabled = true;
   try {
-    // Create instance
-    await createWhatsAppInstance(currentWAInstance);
+    // Cria a instância (se já existir, a Evolution ignora e segue)
+    try { await createWhatsAppInstance(currentWAInstance); } catch (e) { /* já existe, ok */ }
     await new Promise(r => setTimeout(r, 2000));
-    // Get QR
-    const data = await getQRCode(currentWAInstance);
-    if (data?.base64) {
-      document.getElementById('qrCodeImg').src = data.base64;
-      document.getElementById('qrCodeArea').style.display = 'block';
-      document.getElementById('waStatus').textContent = 'Aguardando leitura do QR Code...';
-      btn.innerHTML = '<i class="ti ti-refresh"></i> Atualizar QR Code';
-      btn.disabled = false;
-      // Poll for connection
-      if (qrInterval) clearInterval(qrInterval);
-      qrInterval = setInterval(async () => {
-        try {
-          const s = await getInstanceStatus(currentWAInstance);
-          if (s?.instance?.state === 'open') {
-            clearInterval(qrInterval);
-            fetch('/api/setup-webhook', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instance: currentWAInstance }) });
-            document.getElementById('waStatus').innerHTML = '<span style="color:var(--gold);font-weight:600;">✅ WhatsApp conectado com sucesso!</span>';
-            document.getElementById('qrCodeArea').style.display = 'none';
-            document.getElementById('btnGerarQR').style.display = 'none';
-            // Save instance name to clinic
-            const clinic = STATE.clinics.find(c => (c.nome.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,20) + '_' + c.id.slice(0,8)) === currentWAInstance);
-            if (clinic) {
-              await db.from('clinicas').update({whatsapp_instance: currentWAInstance}).eq('id', clinic.id);
-              clinic.whatsapp_instance = currentWAInstance;
-              renderClinicas();
-              toast('WhatsApp conectado! 🎉');
-            }
-          }
-        } catch(e) {}
-      }, 3000);
-    } else {
+
+    // função que busca e mostra o QR (reutilizada no refresh)
+    async function mostrarQR() {
+      const data = await getQRCode(currentWAInstance);
+      const b64 = data?.base64 || data?.qrcode?.base64 || null;
+      if (b64) {
+        document.getElementById('qrCodeImg').src = b64;
+        document.getElementById('qrCodeArea').style.display = 'block';
+        document.getElementById('waStatus').textContent = 'Aguardando leitura do QR Code... (o código renova sozinho)';
+        btn.innerHTML = '<i class="ti ti-refresh"></i> Atualizar QR Code';
+        btn.disabled = false;
+        return true;
+      }
+      return false;
+    }
+
+    const ok = await mostrarQR();
+    if (!ok) {
       document.getElementById('waStatus').textContent = 'Erro ao gerar QR Code. Tente novamente.';
       btn.innerHTML = '<i class="ti ti-qrcode"></i> Tentar novamente';
       btn.disabled = false;
+      return;
     }
+
+    // ⏱️ RENOVA o QR a cada 20s (o QR do WhatsApp expira rápido!)
+    if (window.qrRefreshInterval) clearInterval(window.qrRefreshInterval);
+    let refreshCount = 0;
+    window.qrRefreshInterval = setInterval(async () => {
+      refreshCount++;
+      if (refreshCount > 15) { clearInterval(window.qrRefreshInterval); return; } // ~5 min
+      try {
+        const s = await getInstanceStatus(currentWAInstance);
+        if (s?.instance?.state === 'open') return; // já conectou, para de renovar
+        await mostrarQR();
+      } catch (e) {}
+    }, 20000);
+
+    // 🔄 Verifica a conexão a cada 3s
+    if (qrInterval) clearInterval(qrInterval);
+    qrInterval = setInterval(async () => {
+      try {
+        const s = await getInstanceStatus(currentWAInstance);
+        if (s?.instance?.state === 'open') {
+          clearInterval(qrInterval);
+          if (window.qrRefreshInterval) clearInterval(window.qrRefreshInterval);
+          // registra o webhook
+          fetch('/api/setup-webhook', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instance: currentWAInstance }) }).catch(()=>{});
+          document.getElementById('waStatus').innerHTML = '<span style="color:var(--gold);font-weight:600;">✅ WhatsApp conectado com sucesso!</span>';
+          document.getElementById('qrCodeArea').style.display = 'none';
+          document.getElementById('btnGerarQR').style.display = 'none';
+          // salva a instância na clínica (usa a clínica sendo conectada — sem recalcular nome!)
+          const clinic = (typeof currentWAClinic !== 'undefined' && currentWAClinic)
+            ? currentWAClinic
+            : STATE.clinics.find(c => (c.nome.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,20) + '_' + c.id.slice(0,8)) === currentWAInstance);
+          if (clinic) {
+            await db.from('clinicas').update({ whatsapp_instance: currentWAInstance }).eq('id', clinic.id);
+            clinic.whatsapp_instance = currentWAInstance;
+            renderClinicas();
+            toast('WhatsApp conectado! 🎉');
+          } else {
+            toast('Conectado! Confirme o vínculo na lista.', 'success');
+          }
+        }
+      } catch(e) {}
+    }, 3000);
   } catch(e) {
     document.getElementById('waStatus').textContent = 'Erro: ' + e.message;
     btn.innerHTML = '<i class="ti ti-qrcode"></i> Tentar novamente';
