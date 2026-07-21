@@ -2481,28 +2481,60 @@ async function gerarQRCode() {
 
     // 🔄 Verifica a conexão a cada 3s
     if (qrInterval) clearInterval(qrInterval);
+    let checkCount = 0;
     qrInterval = setInterval(async () => {
       try {
-        const s = await getInstanceStatus(currentWAInstance);
-        if (s?.instance?.state === 'open') {
+        checkCount++;
+        if (checkCount > 100) { clearInterval(qrInterval); return; } // ~5min de espera
+        // busca o estado; se a instância que a tela criou não existe (a Evolution
+        // renomeou com sufixo), procura a instância REAL pelo estado open recente
+        let estadoOpen = false;
+        let nomeReal = currentWAInstance;
+        try {
+          const s = await getInstanceStatus(currentWAInstance);
+          if (s?.instance?.state === 'open') estadoOpen = true;
+        } catch (e) {}
+
+        // se não achou pelo nome calculado, varre a Evolution pra achar a instância
+        // desta clínica que ficou "open" (resolve o problema do sufixo aleatório)
+        if (!estadoOpen) {
+          try {
+            const todas = await evoRequest('GET', '/instance/fetchInstances');
+            const base = currentWAInstance.split('_').slice(0, 2).join('_'); // ex: gouodontocamaqua_8558528d
+            const cand = (Array.isArray(todas) ? todas : []).find(i => {
+              const n = i.name || i.instance?.instanceName || i.instanceName || '';
+              const st = i.connectionStatus || i.instance?.state || i.state || '';
+              return n.startsWith(base) && st === 'open';
+            });
+            if (cand) {
+              nomeReal = cand.name || cand.instance?.instanceName || cand.instanceName;
+              estadoOpen = true;
+            }
+          } catch (e) {}
+        }
+
+        if (estadoOpen) {
           clearInterval(qrInterval);
           if (window.qrRefreshInterval) clearInterval(window.qrRefreshInterval);
-          // registra o webhook
-          fetch('/api/setup-webhook', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instance: currentWAInstance }) }).catch(()=>{});
+          currentWAInstance = nomeReal; // usa o nome REAL da instância conectada
+          // registra o webhook na instância REAL
+          fetch('/api/setup-webhook', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instance: nomeReal }) }).catch(()=>{});
           document.getElementById('waStatus').innerHTML = '<span style="color:var(--gold);font-weight:600;">✅ WhatsApp conectado com sucesso!</span>';
           document.getElementById('qrCodeArea').style.display = 'none';
           document.getElementById('btnGerarQR').style.display = 'none';
-          // salva a instância na clínica (usa a clínica sendo conectada — sem recalcular nome!)
-          const clinic = (typeof currentWAClinic !== 'undefined' && currentWAClinic)
-            ? currentWAClinic
-            : STATE.clinics.find(c => (c.nome.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,20) + '_' + c.id.slice(0,8)) === currentWAInstance);
+          // salva o nome REAL na clínica que está sendo conectada
+          const clinic = (typeof currentWAClinic !== 'undefined' && currentWAClinic) ? currentWAClinic : null;
           if (clinic) {
-            await db.from('clinicas').update({ whatsapp_instance: currentWAInstance }).eq('id', clinic.id);
-            clinic.whatsapp_instance = currentWAInstance;
-            renderClinicas();
-            toast('WhatsApp conectado! 🎉');
+            const { error } = await db.from('clinicas').update({ whatsapp_instance: nomeReal }).eq('id', clinic.id);
+            if (!error) {
+              clinic.whatsapp_instance = nomeReal;
+              if (typeof renderClinicas === 'function') renderClinicas();
+              toast('WhatsApp conectado! 🎉');
+            } else {
+              toast('Conectado, mas erro ao salvar: ' + error.message, 'error');
+            }
           } else {
-            toast('Conectado! Confirme o vínculo na lista.', 'success');
+            toast('Conectado! Recarregue e confirme o vínculo.', 'success');
           }
         }
       } catch(e) {}
