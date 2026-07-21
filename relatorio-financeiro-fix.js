@@ -25,6 +25,16 @@ function rfTaxaPagamento(taxas, forma, parcelas) {
     const f = (taxas.parcelado || []).find(x => p >= Number(x.de) && p <= Number(x.ate));
     return f ? (Number(f.taxa) || 0) : 0;
   }
+  if (forma === 'boleto') {
+    // boleto = % + taxa fixa em R$. Retorna o % efetivo: se o valor do
+    // pagamento for informado (4º arg), converte a parte fixa em % sobre ele;
+    // senão retorna só o percentual.
+    const pct = Number(taxas.boleto_pct) || 0;
+    const fixo = Number(taxas.boleto_fixo) || 0;
+    const valor = Number(arguments[3]) || 0;
+    if (valor > 0 && fixo > 0) return pct + (fixo / valor) * 100;
+    return pct;
+  }
   return 0;
 }
 
@@ -97,7 +107,7 @@ async function relfinRender() {
       taxasCartao = (cRow && cRow.taxas_cartao) ? cRow.taxas_cartao : null;
     } catch (e) { taxasCartao = null; }
     const totalTaxas = taxasCartao
-      ? pagamentos.reduce((s, p) => s + Number(p.valor || 0) * rfTaxaPagamento(taxasCartao, p.forma, p.parcelas) / 100, 0)
+      ? pagamentos.reduce((s, p) => s + Number(p.valor || 0) * rfTaxaPagamento(taxasCartao, p.forma, p.parcelas, Number(p.valor || 0)) / 100, 0)
       : 0;
     const liquido = recebido - totalTaxas;
 
@@ -285,7 +295,10 @@ function relfinDetalhe(tipo) {
       <div class="modal" style="max-width:620px;width:96vw;">
         <div class="modal-header">
           <h3 id="relFinDetTitulo"></h3>
-          <button class="btn btn-ghost btn-icon" onclick="closeModal('modalRelFin')"><i class="ti ti-x"></i></button>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <button class="btn btn-sm btn-ghost" id="relFinBtnImprimir" title="Imprimir esta lista" onclick="relfinImprimir()"><i class="ti ti-printer" style="margin-right:4px;"></i>Imprimir</button>
+            <button class="btn btn-ghost btn-icon" onclick="closeModal('modalRelFin')"><i class="ti ti-x"></i></button>
+          </div>
         </div>
         <div class="modal-body" id="relFinDetBody" style="max-height:65vh;overflow-y:auto;"></div>
       </div>`;
@@ -299,6 +312,7 @@ function relfinDetalhe(tipo) {
   };
   const c = config[tipo];
   const lista = (RELFIN.det && RELFIN.det[tipo]) || [];
+  RELFIN.detAberto = tipo; // guarda qual lista está aberta (pra impressão)
   document.getElementById('relFinDetTitulo').innerHTML = c.titulo;
 
   document.getElementById('relFinDetBody').innerHTML = lista.length ? lista.map(item => `
@@ -319,5 +333,60 @@ function relfinDetalhe(tipo) {
 
   document.getElementById('modalRelFin').classList.add('open');
 }
+
+// ── IMPRIMIR a lista detalhada (comissão/recebidos/etc) ──
+// Abre uma janela limpa com a lista atual formatada e chama a impressão.
+window.relfinImprimir = function () {
+  const tipo = RELFIN.detAberto || 'recebidos';
+  const titulos = { recebidos: 'Pagamentos recebidos', pagantes: 'Pacientes pagantes', orcados: 'Orçamentos do período' };
+  const titulo = titulos[tipo] || 'Detalhamento';
+  const lista = (RELFIN.det && RELFIN.det[tipo]) || [];
+  const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
+  const nomeClinica = (clinic && clinic.nome) || 'Clínica';
+  const periodo = (RELFIN.inicio && RELFIN.fim)
+    ? `${new Date(RELFIN.inicio + 'T12:00').toLocaleDateString('pt-BR')} a ${new Date(RELFIN.fim + 'T12:00').toLocaleDateString('pt-BR')}`
+    : '';
+  const total = lista.reduce((s, i) => s + Number(i.valor || 0), 0);
+  const esc = (t) => String(t == null ? '' : t).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  const linhas = lista.length ? lista.map((item, i) => `
+    <tr>
+      <td style="text-align:center;color:#888;">${i + 1}</td>
+      <td>${esc(item.nome)}</td>
+      <td style="color:#555;font-size:12px;">${esc(item.sub || '')}</td>
+      <td style="text-align:right;font-weight:600;white-space:nowrap;">${rfFmt(item.valor)}</td>
+    </tr>`).join('') : `<tr><td colspan="4" style="text-align:center;padding:20px;color:#888;">Sem registros no período.</td></tr>`;
+
+  const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(titulo)} — ${esc(nomeClinica)}</title>
+    <style>
+      * { box-sizing:border-box; }
+      body { font-family: 'Segoe UI', Arial, sans-serif; color:#1a1a1a; padding:30px; max-width:800px; margin:0 auto; }
+      h1 { font-size:20px; margin:0 0 4px; }
+      .sub { color:#666; font-size:13px; margin-bottom:2px; }
+      .periodo { color:#888; font-size:12px; margin-bottom:18px; }
+      table { width:100%; border-collapse:collapse; font-size:13px; }
+      th { text-align:left; border-bottom:2px solid #333; padding:8px 10px; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:#555; }
+      td { padding:8px 10px; border-bottom:1px solid #eee; }
+      tfoot td { border-top:2px solid #333; border-bottom:none; font-weight:700; font-size:15px; padding-top:12px; }
+      .rodape { margin-top:24px; color:#999; font-size:11px; text-align:center; }
+      @media print { body { padding:10px; } .noprint { display:none; } }
+    </style></head><body>
+    <h1>${esc(titulo)}</h1>
+    <div class="sub">${esc(nomeClinica)}</div>
+    ${periodo ? `<div class="periodo">Período: ${esc(periodo)}</div>` : ''}
+    <table>
+      <thead><tr><th style="width:34px;text-align:center;">#</th><th>Nome</th><th>Detalhe</th><th style="text-align:right;">Valor</th></tr></thead>
+      <tbody>${linhas}</tbody>
+      <tfoot><tr><td colspan="3" style="text-align:right;">Total (${lista.length})</td><td style="text-align:right;">${rfFmt(total)}</td></tr></tfoot>
+    </table>
+    <div class="rodape">Emitido em ${new Date().toLocaleString('pt-BR')} · ClinicaLead</div>
+    <script>window.onload = function(){ setTimeout(function(){ window.print(); }, 300); };<\/script>
+    </body></html>`;
+
+  const w = window.open('', '_blank');
+  if (!w) { if (typeof toast === 'function') toast('Permita pop-ups pra imprimir', 'error'); return; }
+  w.document.write(html);
+  w.document.close();
+};
 
 console.log('✅ relatorio-financeiro-fix.js carregado — relatório financeiro ativo');
