@@ -312,9 +312,20 @@ module.exports = async function handler(req, res) {
       const arr = achado ? [achado] : [];
       if (arr[0] && arr[0].id) {
         const patch = {};
-        // se chegou um nome REAL (2+ palavras) e o atual é provisório, atualiza
+        // se chegou um nome REAL e o atual ainda não foi CONFIRMADO pela pessoa
+        // na conversa, atualiza.
+        // ⚠️ AJUSTE 22/07: antes decidia "é provisório?" contando palavras do nome
+        // atual (< 2 palavras = provisório). Isso falhava quando o nome salvo era
+        // o nome/apelido do CONTATO do WhatsApp (ex: "Luh Mattos" — 2 palavras,
+        // mas é o pushName, não o nome real dito na conversa). Como já tinha
+        // "sobrenome", o sistema achava que já era definitivo e NUNCA deixava o
+        // nome verdadeiro que a pessoa informou (ex: "Luciane dos Santos Mattos",
+        // via marcador [[LEAD]]) sobrescrever. Agora usa nome_confirmado — o
+        // único jeito de um nome virar "definitivo" é a própria pessoa ter dito
+        // na conversa (nomeConfirmado=true lá na chamada), não a contagem de
+        // palavras do que veio do perfil do WhatsApp.
         const atual = (arr[0].nome || '').trim();
-        const ehProvisorio = !atual || atual === 'Lead WhatsApp' || atual.split(/\s+/).length < 2;
+        const ehProvisorio = !atual || atual === 'Lead WhatsApp' || !arr[0].nome_confirmado;
         const nomeNovoEhReal = nomeLimpo && nomeLimpo !== 'Lead WhatsApp' && nomeLimpo.split(/\s+/).length >= 1;
         if (ehProvisorio && nomeNovoEhReal && nomeLimpo !== atual) patch.nome = nomeLimpo;
         // ⚠️ AJUSTE 12/07: marca nome_confirmado só quando o nome veio de
