@@ -52,15 +52,22 @@ function instalarLoadInbox() {
       (msgs || []).forEach(m => {
         const phone = (m.phone || '').replace(/\D/g, '');
         if (!phone) return;
+        // ⚠️ FIX 22/07: agrupar pelo telefone INTEIRO fazia o mesmo paciente
+        // virar 2 conversas quando o número chegava gravado em formatos
+        // diferentes (com ou sem o nono dígito do celular — ex: 555199429402
+        // vs 5551999429402 são a MESMA pessoa). Igual já era feito no
+        // lead-anti-duplicado-fix.js e no Brian, agrupamos pelos ÚLTIMOS 8
+        // DÍGITOS (sufixo estável — DDI/DDD/nono variam, o final não).
+        const sufixo = phone.length >= 8 ? phone.slice(-8) : phone;
         const inst = m.instance_name || principal || 'sem_numero';
-        const chave = clinicaTemMultiplosNumeros ? (phone + '|' + inst) : phone; // ← só separa por número se a clínica realmente tiver mais de um
+        const chave = clinicaTemMultiplosNumeros ? (sufixo + '|' + inst) : sufixo; // ← só separa por número se a clínica realmente tiver mais de um
         if (!chatMap[chave]) {
           const lead = STATE.leads.find(l =>
-            l.telefone && l.telefone.replace(/\D/g, '').slice(-8) === phone.slice(-8)
+            l.telefone && l.telefone.replace(/\D/g, '').slice(-8) === sufixo
           );
           chatMap[chave] = {
             id: chave,            // id único por telefone (+número, se aplicável)
-            phone,
+            phone,                // telefone completo da mensagem mais recente (msgs vêm ordenadas desc) — usado pra exibir e responder
             instance_name: inst,  // de qual número é essa conversa
             name: m.contact_name || lead?.nome || phone,
             lastMsg: '', time: new Date(m.created_at),
