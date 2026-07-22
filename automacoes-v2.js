@@ -250,7 +250,7 @@ function renderAutomacoes() {
 function cardAutomacao(a) {
   const nomeDentista = a.dentista_id ? _autoNomeDentista(a.dentista_id) : null;
   return `
-    <div class="auto-card" ${nomeDentista ? 'style="border-left:3px solid var(--gold,#C9A84C);"' : ''}>
+    <div class="auto-card" style="min-width:0;${nomeDentista ? 'border-left:3px solid var(--gold,#C9A84C);' : ''}">
       <div class="auto-card-top">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px;">
           <div class="auto-card-icon"><i class="ti ${a.icon || 'ti-bolt'}"></i></div>
@@ -264,7 +264,7 @@ function cardAutomacao(a) {
       </div>
       <div class="auto-body">
         <div class="auto-trigger-label">Gatilho: ${a.trigger}</div>
-        <div class="auto-msg" style="margin-top:8px;">${(a.msg || a.mensagem || '').replace(/\n/g, '<br>')}</div>
+        <div class="auto-msg" style="margin-top:8px;overflow-wrap:anywhere;word-break:break-word;">${(a.msg || a.mensagem || '').replace(/\n/g, '<br>')}</div>
       </div>
       <div class="auto-footer">
         <div class="toggle-wrap">
