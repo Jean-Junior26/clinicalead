@@ -1514,7 +1514,25 @@ async function loadClinics() {
 }
 
 async function loadLeads() {
-  const { data, error } = await db.from('leads').select('*').order('created_at', { ascending: false });
+  // ⚠️ AJUSTE 22/07: antes buscava TODOS os leads de TODAS as clínicas
+  // numa query só, sem filtro nenhum. Isso tinha 2 problemas sérios:
+  // 1) o Supabase corta em 1000 linhas por padrão sem paginação — com
+  //    várias clínicas + Brian criando lead automático pra cada contato
+  //    do WhatsApp, o total já passa disso, e os leads mais ANTIGOS
+  //    (fora das 1000 mais recentes GLOBAIS) somem — não aparecem em
+  //    NENHUMA busca/filtro da tela, porque o dado nem chega no
+  //    navegador. Foi exatamente esse o caso do lead do Wilton (José
+  //    Bonifácio, 29/06) que sumiu da busca.
+  // 2) trazia dado de TODAS as clínicas pra memória o tempo todo — peso
+  //    desnecessário de egress (relevante depois do susto do limite do
+  //    Supabase Free).
+  // Agora busca só da clínica ATUAL — os 3 pontos que chamam loadLeads()
+  // (login inicial, switchClinic, switchClinicById) já recarregam
+  // automaticamente a cada troca de clínica, então continua sempre
+  // atualizado, só que sem competir com dado de clínica nenhuma outra.
+  const clinic = currentClinic();
+  if (!clinic) { STATE.leads = []; document.getElementById('navLeadsBadge').textContent = '0'; return; }
+  const { data, error } = await db.from('leads').select('*').eq('clinic_id', clinic.id).order('created_at', { ascending: false });
   if (error) { console.error('leads:', error); return; }
   STATE.leads = data || [];
   document.getElementById('navLeadsBadge').textContent = currentLeads().length;
@@ -2183,9 +2201,19 @@ async function renderClinicas() {
 
   // Admin vê todas as clínicas
   let clinics = STATE.clinics;
+  let leadCounts = {}; // ⚠️ AJUSTE 22/07: contagem separada — STATE.leads agora só
+  // guarda os leads da clínica ATUALMENTE selecionada (loadLeads foi
+  // escopado por clínica, ver comentário lá). Essa tela de admin precisa
+  // do total de TODAS as clínicas, então busca só a coluna clinic_id
+  // (bem mais leve que trazer a linha inteira de cada lead) e conta em
+  // memória — sem voltar a carregar tudo pesado o tempo todo.
   if (isAdmin) {
     const { data } = await db.from('clinicas').select('*').order('created_at', { ascending: false });
     clinics = data || [];
+    try {
+      const { data: leadsClinicIds } = await db.from('leads').select('clinic_id');
+      (leadsClinicIds || []).forEach(l => { leadCounts[l.clinic_id] = (leadCounts[l.clinic_id] || 0) + 1; });
+    } catch (e) { /* se falhar, mostra 0 abaixo — não trava a tela */ }
   }
 
   document.getElementById('clinicasList').innerHTML = clinics.length
@@ -2200,7 +2228,7 @@ async function renderClinicas() {
         <td style="color:var(--text-secondary);">${c.responsavel || '—'}</td>
         <td class="td-muted">${c.telefone || '—'}</td>
         <td><span class="badge ${c.plano === 'Pro' ? 'badge-gold' : 'badge-gray'}">${c.plano || 'Pro'}</span></td>
-        <td class="td-mono">${STATE.leads.filter(l => l.clinic_id === c.id).length}</td>
+        <td class="td-mono">${isAdmin ? (leadCounts[c.id] || 0) : STATE.leads.filter(l => l.clinic_id === c.id).length}</td>
        <td><div style="display:flex;align-items:center;gap:6px;">
           ${c.whatsapp_instance
             ? `<span class="badge badge-gold"><i class="ti ti-check"></i> Conectado</span>
