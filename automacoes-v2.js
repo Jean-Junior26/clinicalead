@@ -160,6 +160,16 @@ async function loadAutomations() {
     return;
   }
 
+  // ⚠️ AJUSTE 22/07: window.DENT_lista() devolve [] na PRIMEIRA chamada
+  // depois de trocar de clínica (dispara o carregamento em segundo plano
+  // e só devolve os dados de verdade na chamada SEGUINTE). Sem isso, os
+  // cards de automação por dentista mostravam "(dentista removido)" pra
+  // dentista que existe normalmente — só não tinha carregado ainda.
+  // Espera o carregamento terminar ANTES de montar os cards.
+  if (typeof window.DENT_carregar === 'function') {
+    try { await window.DENT_carregar(); } catch (e) { /* segue mesmo se falhar */ }
+  }
+
   const { data: salvas } = await db
     .from('automacoes')
     .select('*')
