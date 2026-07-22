@@ -137,10 +137,29 @@
         });
       }
 
+      // ── AJUSTE 22/07: usa a "Confirmação de agendamento" DO DENTISTA
+      // selecionado, se existir uma versão personalizada pra ele (feature
+      // pedida pelo José Bonifácio). A função original (_origSalvar) lê
+      // STATE.automations.find(a => a.tipo === 'confirmacao') sem saber
+      // nada de dentista — aqui trocamos essa entrada temporariamente
+      // pela versão certa, e devolvemos ao normal logo depois de enviar.
+      let _confirmacaoOriginal = null, _idxConfirmacao = -1;
+      if (dentistaId && typeof STATE !== 'undefined' && Array.isArray(STATE.automations)) {
+        const especifica = STATE.automations.find(a => a.tipo === 'confirmacao' && a.dentista_id === dentistaId);
+        if (especifica) {
+          _idxConfirmacao = STATE.automations.findIndex(a => a.tipo === 'confirmacao' && !a.dentista_id);
+          if (_idxConfirmacao > -1) {
+            _confirmacaoOriginal = STATE.automations[_idxConfirmacao];
+            STATE.automations[_idxConfirmacao] = { ..._confirmacaoOriginal, msg: especifica.msg, mensagem: especifica.msg };
+          }
+        }
+      }
+
       try {
         const resultado = await _origSalvar.apply(this, args);
         // restaura a lista completa imediatamente (a salvar já fez seu trabalho)
         CAL.consultas = _consultasOriginais;
+        if (_idxConfirmacao > -1 && _confirmacaoOriginal) STATE.automations[_idxConfirmacao] = _confirmacaoOriginal;
         // ── RECARREGA do banco pra garantir que TODAS as consultas aparecem ──
         // (a manipulação temporária de CAL.consultas pode deixar a lista incompleta;
         //  recarregar do banco é a fonte da verdade e evita consulta "sumindo").
@@ -158,6 +177,9 @@
         return resultado;
       } finally {
         database.from = _origFrom; // restaura
+        // rede de segurança: se algo lançou erro antes da restauração normal
+        // (linha ~162), garante que a troca da automação não fica "presa"
+        if (_idxConfirmacao > -1 && _confirmacaoOriginal) STATE.automations[_idxConfirmacao] = _confirmacaoOriginal;
       }
     };
     console.log('✅ dentistas-agendamento-fix.js: salvar envelopado');
