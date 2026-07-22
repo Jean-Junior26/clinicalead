@@ -236,21 +236,34 @@ function renderAutomacoes() {
   const porTipo = {};
   STATE.automations.forEach(a => { (porTipo[a.tipo] = porTipo[a.tipo] || []).push(a); });
 
+  // ⚠️ AJUSTE 22/07: antes cada card e o botão "+ versão por dentista"
+  // eram itens SOLTOS dentro do grid externo de 3 colunas. Quando um
+  // tipo só tinha 1 card (a maioria), o botão (que precisa da linha
+  // inteira) não cabia mais na linha do card e o navegador pulava pra
+  // próxima linha SEM preencher as 2 colunas que sobraram — ficavam
+  // vazias pra sempre (grid não "recua" pra preencher buraco). Resultado:
+  // tudo espremido numa faixa estreita à esquerda, resto da tela vazio.
+  // Agora cada TIPO vira um bloco próprio (ocupa a linha inteira do grid
+  // externo) com layout flex INTERNO pros seus cards — sem depender do
+  // grid externo pra encaixar card+botão juntos, então não sobra buraco.
   grid.innerHTML = Object.keys(porTipo).map(tipo => {
     const itens = porTipo[tipo].slice().sort((a, b) => (a.dentista_id ? 1 : 0) - (b.dentista_id ? 1 : 0));
     const cards = itens.map(a => cardAutomacao(a)).join('');
     const podeVersaoPorDentista = temDentistas && AUTOMACOES_DEFAULTS.find(d => d.tipo === tipo);
     const botaoVersao = podeVersaoPorDentista
-      ? `<button class="btn btn-sm" style="grid-column:1/-1;justify-self:start;" onclick="criarVersaoAutoPorDentista('${tipo}')"><i class="ti ti-stethoscope"></i> + versão por dentista para "${(itens[0].titulo || itens[0].title)}"</button>`
+      ? `<button class="btn btn-sm" style="margin-top:2px;" onclick="criarVersaoAutoPorDentista('${tipo}')"><i class="ti ti-stethoscope"></i> + versão por dentista para "${(itens[0].titulo || itens[0].title)}"</button>`
       : '';
-    return cards + botaoVersao;
+    return `<div style="grid-column:1/-1;">
+      <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:stretch;">${cards}</div>
+      ${botaoVersao}
+    </div>`;
   }).join('');
 }
 
 function cardAutomacao(a) {
   const nomeDentista = a.dentista_id ? _autoNomeDentista(a.dentista_id) : null;
   return `
-    <div class="auto-card" style="min-width:0;${nomeDentista ? 'border-left:3px solid var(--gold,#C9A84C);' : ''}">
+    <div class="auto-card" style="min-width:0;flex:1 1 360px;max-width:420px;${nomeDentista ? 'border-left:3px solid var(--gold,#C9A84C);' : ''}">
       <div class="auto-card-top">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px;">
           <div class="auto-card-icon"><i class="ti ${a.icon || 'ti-bolt'}"></i></div>
