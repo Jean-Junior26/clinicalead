@@ -1,9 +1,18 @@
 // ============================================================
 // CLINICALEAD — AUTOMAÇÕES V3
 // Variáveis disponíveis nas mensagens:
-//   {nome} {clinica} {procedimento} {data} {hora}
+//   {nome} {clinica} {procedimento} {data} {hora} {dentista}
 // Dica: cada clínica deve editar as mensagens de confirmação e
 // lembretes para incluir o PRÓPRIO endereço e link do Maps.
+//
+// AJUSTE 22/07: suporte a VERSÃO POR DENTISTA (pedido José Bonifácio).
+// Cada automação (confirmação, lembrete 2h, 24h, etc.) pode ter uma
+// versão GERAL (dentista_id null) e, opcionalmente, versões
+// específicas por dentista. Requer a coluna automacoes.dentista_id
+// (ver adicionar-dentista-automacoes.sql). A escolha de qual versão
+// enviar acontece no ponto de disparo (salvarNovoAgendamento, via
+// dentistas-agendamento-fix.js, para a confirmação; e no
+// disparar-automacoes Edge Function para os lembretes por tempo).
 // ============================================================
 
 const AUTOMACOES_DEFAULTS = [
@@ -106,12 +115,48 @@ const AUTOMACOES_DEFAULTS = [
   },
 ];
 
+// ── lista de dentistas da clínica atual (pro seletor de versão) ──
+function _autoDentistasDisponiveis() {
+  return (typeof window.DENT_lista === 'function') ? window.DENT_lista() : [];
+}
+function _autoNomeDentista(id) {
+  const d = _autoDentistasDisponiveis().find(x => x.id === id);
+  return d ? d.nome : '(dentista removido)';
+}
+
+// ── acha/grava UMA linha de automação (geral ou de um dentista) ──
+// Não usa upsert com onConflict porque NULL em dentista_id não conta
+// como "igual" pro Postgres — faríamos linha geral duplicada. Em vez
+// disso, busca manualmente tratando NULL corretamente (.is / .eq).
+async function salvarLinhaAutomacao(clinic, a) {
+  let q = db.from('automacoes').select('id').eq('clinic_id', clinic.id).eq('tipo', a.tipo);
+  q = a.dentista_id ? q.eq('dentista_id', a.dentista_id) : q.is('dentista_id', null);
+  const { data: existente } = await q.maybeSingle();
+
+  const payload = {
+    clinic_id: clinic.id,
+    tipo: a.tipo,
+    titulo: a.titulo || a.title,
+    mensagem: a.msg || a.mensagem,
+    ativo: a.active !== undefined ? a.active : (a.ativo !== undefined ? a.ativo : true),
+    dentista_id: a.dentista_id || null,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (existente) {
+    const { error } = await db.from('automacoes').update(payload).eq('id', existente.id);
+    return { error, id: existente.id };
+  }
+  const { data: inserida, error } = await db.from('automacoes').insert(payload).select().single();
+  return { error, id: inserida?.id };
+}
+
 // ── loadAutomations ──────────────────────────────────────────
 async function loadAutomations() {
   const clinic = currentClinic();
 
   if (!clinic) {
-    STATE.automations = AUTOMACOES_DEFAULTS.map(d => ({ ...d }));
+    STATE.automations = AUTOMACOES_DEFAULTS.map(d => ({ ...d, dentista_id: null }));
     return;
   }
 
@@ -121,25 +166,44 @@ async function loadAutomations() {
     .eq('clinic_id', clinic.id)
     .order('created_at', { ascending: true });
 
+  // versão GERAL de cada tipo padrão (mantém os ids 1-12, comportamento de sempre)
   const merged = AUTOMACOES_DEFAULTS.map(def => {
-    const salva = (salvas || []).find(s => s.tipo === def.tipo);
-    if (salva) {
+    const geral = (salvas || []).find(s => s.tipo === def.tipo && !s.dentista_id);
+    if (geral) {
       return {
         ...def,
-        db_id: salva.id,
-        active: salva.ativo,
-        ativo: salva.ativo,
-        msg: salva.mensagem,
-        mensagem: salva.mensagem,
+        db_id: geral.id,
+        active: geral.ativo,
+        ativo: geral.ativo,
+        msg: geral.mensagem,
+        mensagem: geral.mensagem,
+        dentista_id: null,
       };
     }
-    return { ...def };
+    return { ...def, dentista_id: null };
   });
 
+  // versões POR DENTISTA de tipos padrão — viram cards extras (ids sintéticos 1000+)
+  const porDentista = (salvas || [])
+    .filter(s => s.dentista_id && AUTOMACOES_DEFAULTS.find(d => d.tipo === s.tipo))
+    .map((s, i) => {
+      const def = AUTOMACOES_DEFAULTS.find(d => d.tipo === s.tipo);
+      return {
+        ...def,
+        id: 1000 + i,
+        db_id: s.id,
+        active: s.ativo,
+        ativo: s.ativo,
+        msg: s.mensagem,
+        mensagem: s.mensagem,
+        dentista_id: s.dentista_id,
+      };
+    });
+
+  // totalmente customizadas (tipo não existe nos padrões) — segue geral apenas, como antes
   const customizadas = (salvas || []).filter(s =>
     !AUTOMACOES_DEFAULTS.find(d => d.tipo === s.tipo)
   );
-
   const customMapped = customizadas.map((s, i) => ({
     id: 100 + i,
     db_id: s.id,
@@ -155,9 +219,10 @@ async function loadAutomations() {
     msg: s.mensagem,
     mensagem: s.mensagem,
     customizada: true,
+    dentista_id: null,
   }));
 
-  STATE.automations = [...merged, ...customMapped];
+  STATE.automations = [...merged, ...porDentista, ...customMapped];
 }
 
 // ── renderAutomacoes ─────────────────────────────────────────
@@ -165,8 +230,27 @@ function renderAutomacoes() {
   const grid = document.getElementById('autoGrid');
   if (!grid) return;
 
-  grid.innerHTML = STATE.automations.map(a => `
-    <div class="auto-card">
+  const temDentistas = _autoDentistasDisponiveis().length > 0;
+
+  // agrupa por tipo pra desenhar a versão geral + as por-dentista juntas
+  const porTipo = {};
+  STATE.automations.forEach(a => { (porTipo[a.tipo] = porTipo[a.tipo] || []).push(a); });
+
+  grid.innerHTML = Object.keys(porTipo).map(tipo => {
+    const itens = porTipo[tipo].slice().sort((a, b) => (a.dentista_id ? 1 : 0) - (b.dentista_id ? 1 : 0));
+    const cards = itens.map(a => cardAutomacao(a)).join('');
+    const podeVersaoPorDentista = temDentistas && AUTOMACOES_DEFAULTS.find(d => d.tipo === tipo);
+    const botaoVersao = podeVersaoPorDentista
+      ? `<button class="btn btn-sm" style="grid-column:1/-1;justify-self:start;" onclick="criarVersaoAutoPorDentista('${tipo}')"><i class="ti ti-stethoscope"></i> + versão por dentista para "${(itens[0].titulo || itens[0].title)}"</button>`
+      : '';
+    return cards + botaoVersao;
+  }).join('');
+}
+
+function cardAutomacao(a) {
+  const nomeDentista = a.dentista_id ? _autoNomeDentista(a.dentista_id) : null;
+  return `
+    <div class="auto-card" ${nomeDentista ? 'style="border-left:3px solid var(--gold,#C9A84C);"' : ''}>
       <div class="auto-card-top">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px;">
           <div class="auto-card-icon"><i class="ti ${a.icon || 'ti-bolt'}"></i></div>
@@ -175,8 +259,8 @@ function renderAutomacoes() {
             : `<span style="font-size:9px;padding:2px 8px;border-radius:10px;background:rgba(255,255,255,0.05);color:var(--text-muted);border:1px solid var(--border-subtle);">MANUAL</span>`
           }
         </div>
-        <div class="auto-title">${a.title || a.titulo}</div>
-        <div class="auto-desc">${a.desc}</div>
+        <div class="auto-title">${a.title || a.titulo}${nomeDentista ? ` <span style="font-size:11px;font-weight:600;color:var(--gold);">🦷 ${nomeDentista}</span>` : ''}</div>
+        <div class="auto-desc">${nomeDentista ? `Só quando a consulta for com ${nomeDentista}.` : a.desc}</div>
       </div>
       <div class="auto-body">
         <div class="auto-trigger-label">Gatilho: ${a.trigger}</div>
@@ -193,10 +277,10 @@ function renderAutomacoes() {
         </div>
         <div style="display:flex;gap:6px;">
           <button class="btn btn-sm" onclick="editAuto(${a.id})"><i class="ti ti-edit"></i> Editar</button>
-          ${a.customizada ? `<button class="btn btn-sm btn-danger" onclick="excluirAuto(${a.id})"><i class="ti ti-trash"></i></button>` : ''}
+          ${(a.customizada || nomeDentista) ? `<button class="btn btn-sm btn-danger" onclick="excluirAuto(${a.id})"><i class="ti ti-trash"></i></button>` : ''}
         </div>
       </div>
-    </div>`).join('');
+    </div>`;
 }
 
 // ── toggleAuto ───────────────────────────────────────────────
@@ -208,14 +292,9 @@ async function toggleAuto(id) {
 
   const clinic = currentClinic();
   if (clinic) {
-    await db.from('automacoes').upsert({
-      clinic_id: clinic.id,
-      tipo: a.tipo,
-      titulo: a.titulo || a.title,
-      mensagem: a.msg || a.mensagem,
-      ativo: a.active,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'clinic_id,tipo' });
+    const { error, id: dbId } = await salvarLinhaAutomacao(clinic, a);
+    if (error) { toast('Erro: ' + error.message, 'error'); a.active = !a.active; a.ativo = a.active; renderAutomacoes(); return; }
+    if (dbId) a.db_id = dbId;
   }
 
   renderAutomacoes();
@@ -227,12 +306,30 @@ function editAuto(id) {
   const a = STATE.automations.find(x => x.id === id);
   if (!a) return;
   document.getElementById('editAutoId').value = id;
-  document.getElementById('editAutoTitle').textContent = a.title || a.titulo;
+  document.getElementById('editAutoTitle').textContent = (a.title || a.titulo) + (a.dentista_id ? ' — 🦷 ' + _autoNomeDentista(a.dentista_id) : '');
   document.getElementById('editAutoMsg').value = a.msg || a.mensagem || '';
   const toggle = document.getElementById('editAutoToggle');
   if (toggle) {
     toggle.className = 'toggle ' + (a.automatica ? '' : 'off');
   }
+
+  // seletor de dentista (só aparece se essa linha É uma versão por dentista)
+  let selDent = document.getElementById('editAutoDentista');
+  if (a.dentista_id) {
+    if (!selDent) {
+      selDent = document.createElement('select');
+      selDent.id = 'editAutoDentista';
+      selDent.className = 'form-select';
+      selDent.style.marginBottom = '10px';
+      const msgEl = document.getElementById('editAutoMsg');
+      if (msgEl && msgEl.parentNode) msgEl.parentNode.insertBefore(selDent, msgEl);
+    }
+    selDent.style.display = '';
+    selDent.innerHTML = _autoDentistasDisponiveis().map(d => `<option value="${d.id}" ${d.id === a.dentista_id ? 'selected' : ''}>${d.nome}</option>`).join('');
+  } else if (selDent) {
+    selDent.style.display = 'none';
+  }
+
   openModal('modalEditAuto');
 }
 
@@ -253,6 +350,8 @@ async function saveAutoEdit() {
   const novaMsg = document.getElementById('editAutoMsg').value;
   const toggle = document.getElementById('editAutoToggle');
   const novaAutomatica = toggle ? !toggle.classList.contains('off') : a.automatica;
+  const selDent = document.getElementById('editAutoDentista');
+  if (a.dentista_id && selDent && selDent.value) a.dentista_id = selDent.value;
 
   a.msg = novaMsg;
   a.mensagem = novaMsg;
@@ -260,14 +359,9 @@ async function saveAutoEdit() {
 
   const clinic = currentClinic();
   if (clinic) {
-    await db.from('automacoes').upsert({
-      clinic_id: clinic.id,
-      tipo: a.tipo,
-      titulo: a.titulo || a.title,
-      mensagem: novaMsg,
-      ativo: a.active !== undefined ? a.active : true,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'clinic_id,tipo' });
+    const { error, id: dbId } = await salvarLinhaAutomacao(clinic, a);
+    if (error) { toast('Erro: ' + error.message, 'error'); return; }
+    if (dbId) a.db_id = dbId;
     toast('Automação salva! ✓');
   }
 
@@ -275,15 +369,37 @@ async function saveAutoEdit() {
   renderAutomacoes();
 }
 
+// ── criarVersaoAutoPorDentista ────────────────────────────────
+// Cria, na tela, uma nova versão de uma automação padrão pra um
+// dentista específico (a partir da geral). Só grava no banco quando
+// o usuário clicar Salvar no modal de edição (que já abre em seguida).
+function criarVersaoAutoPorDentista(tipoBase) {
+  const lista = _autoDentistasDisponiveis();
+  if (!lista.length) { toast('Cadastre os dentistas primeiro (menu Dentistas).', 'error'); return; }
+  const geral = STATE.automations.find(a => a.tipo === tipoBase && !a.dentista_id);
+  if (!geral) return;
+  const jaUsados = new Set(STATE.automations.filter(a => a.tipo === tipoBase && a.dentista_id).map(a => a.dentista_id));
+  const proximo = lista.find(d => !jaUsados.has(d.id));
+  if (!proximo) { toast('Já existe uma versão pra todos os dentistas cadastrados.', 'error'); return; }
+
+  const novoId = 1000 + STATE.automations.filter(a => a.id >= 1000).length + 1;
+  const nova = { ...geral, id: novoId, db_id: null, dentista_id: proximo.id };
+  STATE.automations.push(nova);
+  renderAutomacoes();
+  editAuto(novoId);
+}
+
 // ── excluirAuto ──────────────────────────────────────────────
 async function excluirAuto(id) {
   const a = STATE.automations.find(x => x.id === id);
-  if (!a || !a.customizada) return;
-  if (!confirm(`Excluir a automação "${a.titulo || a.title}"?`)) return;
+  if (!a || (!a.customizada && !a.dentista_id)) return; // não deixa apagar a versão geral padrão
+  const rotulo = (a.titulo || a.title) + (a.dentista_id ? ' (🦷 ' + _autoNomeDentista(a.dentista_id) + ')' : '');
+  if (!confirm(`Excluir a automação "${rotulo}"?`)) return;
 
   const clinic = currentClinic();
   if (clinic && a.db_id) {
-    await db.from('automacoes').delete().eq('id', a.db_id);
+    const { error } = await db.from('automacoes').delete().eq('id', a.db_id);
+    if (error) { toast('Erro: ' + error.message, 'error'); return; }
   }
 
   STATE.automations = STATE.automations.filter(x => x.id !== id);
@@ -319,6 +435,7 @@ async function salvarNovaAutomacao() {
     mensagem,
     gatilho: gatilho || 'Manual',
     ativo: true,
+    dentista_id: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   }).select().single();
@@ -340,6 +457,7 @@ async function salvarNovaAutomacao() {
     msg: mensagem,
     mensagem,
     customizada: true,
+    dentista_id: null,
   };
 
   STATE.automations.push(novaAuto);
@@ -348,4 +466,4 @@ async function salvarNovaAutomacao() {
   toast(`Automação "${titulo}" criada! ✓`);
 }
 
-console.log('✅ automacoes-v2.js carregado com sucesso (v3 — 12 automações)');
+console.log('✅ automacoes-v2.js carregado com sucesso (v3 — 12 automações + versão por dentista)');
