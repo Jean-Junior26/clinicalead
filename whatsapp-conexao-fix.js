@@ -117,7 +117,20 @@
                 });
               } catch (e) { console.warn('[wa-conexao] setup-webhook:', e.message); }
               // grava a instância nova no banco (pela clínica alvo — id certo)
-              await getDb().from('clinicas').update({ whatsapp_instance: novaInst }).eq('id', clinic.id);
+              // ⚠️ FIX 22/07: antes não checava erro aqui. Se o UPDATE falhasse
+              // (ex: RLS bloqueando dono/colaborador — só o admin geral tinha
+              // permissão de escrita em 'clinicas'), o código seguia em frente
+              // e mostrava "conectado com sucesso" mesmo SEM ter gravado nada
+              // no banco — o WhatsApp ficava "conectado" no Evolution mas
+              // invisível pro CRM (Brian não liberava, inbox não recebia).
+              // Agora checa o erro e avisa de verdade em vez de fingir sucesso.
+              const { error: erroSalvarInstancia } = await getDb().from('clinicas').update({ whatsapp_instance: novaInst }).eq('id', clinic.id);
+              if (erroSalvarInstancia) {
+                console.error('[wa-conexao] ❌ ERRO ao salvar whatsapp_instance no banco:', erroSalvarInstancia.message);
+                if (st) st.innerHTML = `<span style="color:var(--coral,#C0624A);font-weight:600;">⚠️ O WhatsApp conectou no celular, mas houve um erro ao salvar no sistema (${erroSalvarInstancia.message}). Avise o suporte — o número não vai funcionar até isso ser corrigido.</span>`;
+                if (btn) btn.style.display = 'none';
+                return; // não finge sucesso — trava aqui pra não confundir o usuário
+              }
               const cLocal = STATE.clinics.find(c => c.id === clinic.id);
               if (cLocal) cLocal.whatsapp_instance = novaInst;
               if (st) st.innerHTML = '<span style="color:var(--gold);font-weight:600;">✅ WhatsApp conectado com sucesso!</span>';
