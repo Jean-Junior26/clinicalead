@@ -27,10 +27,22 @@
   function ehTelefone(el) {
     if (!el || el.tagName !== 'INPUT') return false;
     if (el.dataset.maskTel === '1') return false; // já tratado
+    // ⚠️ AJUSTE 22/07: NUNCA aplica em caixas de BUSCA — mesmo que a
+    // palavra "telefone" apareça no placeholder (ex: "Buscar por nome ou
+    // telefone..."), são campos de texto LIVRE que buscam por vários
+    // critérios ao mesmo tempo, não um campo de telefone puro. Aplicar a
+    // máscara aqui apagava qualquer LETRA digitada (a máscara só aceita
+    // dígito) e também quebrava a própria busca por telefone (reformatava
+    // o texto digitado com parênteses/traço — "(34) 99946-5229" — que
+    // nunca bate com o telefone cru salvo no banco, tipo "5534999465229").
+    // Caso real: campo de busca da tela Pacientes.
+    if (el.closest('.search-box')) return false;
     const tipo = (el.type || '').toLowerCase();
     if (tipo === 'tel') return true;
     if (tipo && tipo !== 'text' && tipo !== 'search') return false; // ignora number/email/date/etc.
     const alvo = ((el.id || '') + ' ' + (el.name || '') + ' ' + (el.placeholder || '') + ' ' + (el.className || '')).toLowerCase();
+    // reforço extra: qualquer campo com cara de BUSCA nunca é telefone puro
+    if (/buscar|pesquisar|procurar/.test(alvo)) return false;
     // palavras-chave (sem exigir borda de palavra: pega nlPhone, editPhone, telCliente, etc.)
     if (/telefone|whatsapp|whats|celular|fone|phone|contato|tel\b|ddd/.test(alvo)) return true;
     // placeholder com cara de telefone: (XX), (00), (34) 9...
