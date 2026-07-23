@@ -38,7 +38,24 @@ function setPacDatas() {
   renderPacientes();
 }
 
-function setPacBusca(v) { PAC.busca = v; renderPacientes(); }
+// ⚠️ AJUSTE 22/07: renderPacientes() reconstrói a página inteira (via
+// innerHTML) a cada tecla digitada — isso DESTRÓI o <input> de busca e
+// cria um novo, fazendo o campo perder o foco a cada letra (só a 1ª
+// "grudava", da 2ª em diante o teclado não tinha mais pra onde mandar).
+// Mesmo padrão já corrigido em orcSetBusca (orcamentos-lista-fix.js):
+// guarda se o campo estava focado e a posição do cursor ANTES de
+// reconstruir, e devolve os dois pro novo input DEPOIS.
+function setPacBusca(v) {
+  PAC.busca = v;
+  const inputEl = document.querySelector('#page-pacientes .search-box input');
+  const focado = document.activeElement === inputEl;
+  const cursor = focado ? inputEl.selectionStart : null;
+  renderPacientes();
+  if (focado) {
+    const novo = document.querySelector('#page-pacientes .search-box input');
+    if (novo) { novo.focus(); novo.setSelectionRange(cursor, cursor); }
+  }
+}
 function setPacProc(v) { PAC.proc = v; renderPacientes(); }
 
 // ── Renderização ─────────────────────────────────────────────
