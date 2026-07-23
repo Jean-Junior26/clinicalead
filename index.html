@@ -2323,8 +2323,16 @@ function openEditLead(id) {
 
 async function saveEditLead() {
   const id = document.getElementById('editLeadId').value;
+  // ⚠️ AJUSTE 23/07: quando um humano digita/corrige o nome aqui no CRM,
+  // marca nome_confirmado=true — senão o próximo webhook (mensagem do
+  // WhatsApp) acha que esse nome ainda é "provisório" e deixa o nome
+  // salvo no CONTATO do WhatsApp da pessoa (ex: apelido "Cartom")
+  // sobrescrever o nome certo que acabou de ser cadastrado aqui. Caso
+  // real: Elaíde corrigiu o nome de um lead pra "José" e o Brian voltou
+  // a chamá-lo de "Cartom" na mensagem seguinte.
   const updates = {
     nome: document.getElementById('editLeadName').value,
+    nome_confirmado: true,
     telefone: document.getElementById('editLeadPhone').value,
     procedimento: document.getElementById('editLeadProc').value,
     valor: parseFloat(document.getElementById('editLeadValue').value)||null,
@@ -2356,9 +2364,13 @@ async function saveNewLead() {
   const nome = document.getElementById('nlName').value.trim();
   const procedimento = document.getElementById('nlProc').value;
   if (!nome||!procedimento) { toast('Preencha nome e procedimento','error'); return; }
+  // ⚠️ AJUSTE 23/07: mesma proteção do saveEditLead — nome digitado por
+  // humano aqui já nasce confirmado, pra não ser sobrescrito pelo nome
+  // do contato do WhatsApp na primeira mensagem que a pessoa mandar.
   const newLead = {
     clinic_id: currentClinic().id,
     nome,
+    nome_confirmado: true,
     telefone: document.getElementById('nlPhone').value,
     procedimento,
     origem: document.getElementById('nlSource').value,
