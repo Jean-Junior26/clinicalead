@@ -180,6 +180,7 @@
       // então fisicamente não tem como a função original escolher errado,
       // não importa a ordem interna nem nenhum outro detalhe.
       let _automationsOriginais = null;
+      let _mensagemCorreta = null; // ⚠️ ver interceptação de sendWhatsAppMessage logo abaixo
       if (typeof STATE !== 'undefined' && Array.isArray(STATE.automations)) {
         const geral = STATE.automations.find(a => a.tipo === 'confirmacao' && !a.dentista_id);
         const especifica = dentistaId ? STATE.automations.find(a => a.tipo === 'confirmacao' && a.dentista_id === dentistaId) : null;
@@ -188,7 +189,40 @@
           _automationsOriginais = STATE.automations;
           STATE.automations = STATE.automations.filter(a => a.tipo !== 'confirmacao' || a.id === escolhida.id);
           console.log(`[dentistas] confirmação escolhida: ${escolhida.dentista_id ? 'específica (' + escolhida.dentista_id + ')' : 'geral'} — dentistaId da consulta: ${dentistaId || '(nenhum)'}`);
+
+          // ── AJUSTE 24/07 (trava final, à prova de qualquer bug ainda não
+          // encontrado): calcula aqui a mensagem CORRETA já com as variáveis
+          // substituídas, e intercepta sendWhatsAppMessage — se o texto que
+          // está SAINDO de verdade for diferente do que devia (ex: menciona
+          // outro dentista que não é o escolhido aqui), troca na hora pelo
+          // texto certo, ANTES de ir pro WhatsApp. Não depende de entender
+          // a causa exata do bug — garante o resultado final de qualquer jeito.
+          try {
+            const leadIdSel = document.getElementById('naLead')?.value;
+            const leadSel = (typeof STATE !== 'undefined' && Array.isArray(STATE.leads)) ? STATE.leads.find(l => l.id === leadIdSel) : null;
+            const clinicSel = (typeof currentClinic === 'function') ? currentClinic() : null;
+            if (leadSel && clinicSel && typeof substituirVariaveis === 'function') {
+              const dataFormatadaSel = new Date(data + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+              _mensagemCorreta = substituirVariaveis(escolhida.msg || escolhida.mensagem, leadSel, clinicSel, dataFormatadaSel, hora);
+            }
+          } catch (e) { console.error('[dentistas] erro ao pré-calcular mensagem correta', e); }
         }
+      }
+
+      // intercepta o envio real — só ativa se conseguimos calcular a mensagem certa acima
+      let _origSendWA = null;
+      if (_mensagemCorreta && typeof window.sendWhatsAppMessage === 'function') {
+        _origSendWA = window.sendWhatsAppMessage;
+        window.sendWhatsAppMessage = async function (instanceName, phone, message) {
+          // só mexe se for claramente a confirmação de agendamento (contém a
+          // assinatura do template) — não intercepta outras mensagens à toa
+          const pareceConfirmacao = typeof message === 'string' && /est[áa]\s*\*?confirmada/i.test(message);
+          if (pareceConfirmacao && message !== _mensagemCorreta) {
+            console.warn('[dentistas] ⚠️ mensagem de confirmação divergente da esperada — corrigindo antes de enviar');
+            message = _mensagemCorreta;
+          }
+          return _origSendWA.call(this, instanceName, phone, message);
+        };
       }
 
       try {
@@ -216,6 +250,7 @@
         // rede de segurança: se algo lançou erro antes da restauração normal,
         // garante que o array de automações não fica "preso" filtrado
         if (_automationsOriginais) STATE.automations = _automationsOriginais;
+        if (_origSendWA) window.sendWhatsAppMessage = _origSendWA; // restaura o envio original
       }
     };
     console.log('✅ dentistas-agendamento-fix.js: salvar envelopado');
