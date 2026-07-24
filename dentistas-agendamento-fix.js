@@ -161,21 +161,33 @@
         });
       }
 
-      // ── AJUSTE 22/07: usa a "Confirmação de agendamento" DO DENTISTA
-      // selecionado, se existir uma versão personalizada pra ele (feature
-      // pedida pelo José Bonifácio). A função original (_origSalvar) lê
-      // STATE.automations.find(a => a.tipo === 'confirmacao') sem saber
-      // nada de dentista — aqui trocamos essa entrada temporariamente
-      // pela versão certa, e devolvemos ao normal logo depois de enviar.
-      let _confirmacaoOriginal = null, _idxConfirmacao = -1;
-      if (dentistaId && typeof STATE !== 'undefined' && Array.isArray(STATE.automations)) {
-        const especifica = STATE.automations.find(a => a.tipo === 'confirmacao' && a.dentista_id === dentistaId);
-        if (especifica) {
-          _idxConfirmacao = STATE.automations.findIndex(a => a.tipo === 'confirmacao' && !a.dentista_id);
-          if (_idxConfirmacao > -1) {
-            _confirmacaoOriginal = STATE.automations[_idxConfirmacao];
-            STATE.automations[_idxConfirmacao] = { ..._confirmacaoOriginal, msg: especifica.msg, mensagem: especifica.msg };
-          }
+      // ── AJUSTE 24/07 (reforço — versão à prova de falha): a função
+      // original (_origSalvar) faz só `STATE.automations.find(a => a.tipo
+      // === 'confirmacao')` — sem NENHUM filtro de dentista_id. Isso quer
+      // dizer que, se existir mais de UMA linha com tipo='confirmacao' no
+      // array (a geral + a da Giovana, por exemplo), ela pode escolher
+      // qualquer uma das duas dependendo da ordem em que aparecem — não
+      // é garantido que pegue a certa. Caso real: José Bonifácio, Jean
+      // agendou DE PROPÓSITO com a Dra. Andresa (não a Giovana) e mesmo
+      // assim recebeu a mensagem personalizada da Giovana. A versão
+      // anterior desse fix (trocar-e-devolver o conteúdo de UMA entrada)
+      // não resolvia isso de raiz, porque a função original nunca olhava
+      // pro dentista_id — só pro tipo. Agora a correção é bem mais
+      // radical: durante a chamada, o array STATE.automations fica com
+      // NO MÁXIMO uma única linha tipo='confirmacao' (a certa pra esse
+      // dentista, ou a geral se não houver versão específica) — todas as
+      // OUTRAS variações de confirmação somem temporariamente do array,
+      // então fisicamente não tem como a função original escolher errado,
+      // não importa a ordem interna nem nenhum outro detalhe.
+      let _automationsOriginais = null;
+      if (typeof STATE !== 'undefined' && Array.isArray(STATE.automations)) {
+        const geral = STATE.automations.find(a => a.tipo === 'confirmacao' && !a.dentista_id);
+        const especifica = dentistaId ? STATE.automations.find(a => a.tipo === 'confirmacao' && a.dentista_id === dentistaId) : null;
+        const escolhida = especifica || geral;
+        if (escolhida) {
+          _automationsOriginais = STATE.automations;
+          STATE.automations = STATE.automations.filter(a => a.tipo !== 'confirmacao' || a.id === escolhida.id);
+          console.log(`[dentistas] confirmação escolhida: ${escolhida.dentista_id ? 'específica (' + escolhida.dentista_id + ')' : 'geral'} — dentistaId da consulta: ${dentistaId || '(nenhum)'}`);
         }
       }
 
@@ -183,7 +195,7 @@
         const resultado = await _origSalvar.apply(this, args);
         // restaura a lista completa imediatamente (a salvar já fez seu trabalho)
         CAL.consultas = _consultasOriginais;
-        if (_idxConfirmacao > -1 && _confirmacaoOriginal) STATE.automations[_idxConfirmacao] = _confirmacaoOriginal;
+        if (_automationsOriginais) STATE.automations = _automationsOriginais;
         // ── RECARREGA do banco pra garantir que TODAS as consultas aparecem ──
         // (a manipulação temporária de CAL.consultas pode deixar a lista incompleta;
         //  recarregar do banco é a fonte da verdade e evita consulta "sumindo").
@@ -201,9 +213,9 @@
         return resultado;
       } finally {
         database.from = _origFrom; // restaura
-        // rede de segurança: se algo lançou erro antes da restauração normal
-        // (linha ~162), garante que a troca da automação não fica "presa"
-        if (_idxConfirmacao > -1 && _confirmacaoOriginal) STATE.automations[_idxConfirmacao] = _confirmacaoOriginal;
+        // rede de segurança: se algo lançou erro antes da restauração normal,
+        // garante que o array de automações não fica "preso" filtrado
+        if (_automationsOriginais) STATE.automations = _automationsOriginais;
       }
     };
     console.log('✅ dentistas-agendamento-fix.js: salvar envelopado');
