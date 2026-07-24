@@ -206,11 +206,25 @@
           // a causa exata do bug — garante o resultado final de qualquer jeito.
           try {
             const leadIdSel = document.getElementById('naLead')?.value;
-            const leadSel = (typeof STATE !== 'undefined' && Array.isArray(STATE.leads)) ? STATE.leads.find(l => l.id === leadIdSel) : null;
+            let leadSel = (typeof STATE !== 'undefined' && Array.isArray(STATE.leads)) ? STATE.leads.find(l => l.id === leadIdSel) : null;
+            // ⚠️ AJUSTE 24/07: fallback pra buscar direto no banco se o lead
+            // ainda não estiver em STATE.leads (caso real: paciente criado na
+            // hora, na mesma tela do agendamento — STATE.leads só atualiza
+            // depois de um reload. Sem isso, a busca falhava silenciosamente
+            // e a trava de segurança nunca chegava a ativar de verdade).
+            if (!leadSel && leadIdSel) {
+              try {
+                const { data: leadFresh } = await getDb().from('leads').select('*').eq('id', leadIdSel).single();
+                if (leadFresh) leadSel = leadFresh;
+              } catch (e2) { console.error('[dentistas] erro ao buscar lead direto no banco', e2); }
+            }
             const clinicSel = (typeof currentClinic === 'function') ? currentClinic() : null;
             if (leadSel && clinicSel && typeof substituirVariaveis === 'function') {
               const dataFormatadaSel = new Date(data + 'T12:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
               _mensagemCorreta = substituirVariaveis(escolhida.msg || escolhida.mensagem, leadSel, clinicSel, dataFormatadaSel, hora);
+              console.log('[dentistas] mensagem correta pré-calculada com sucesso, trava de envio ATIVA');
+            } else {
+              console.warn('[dentistas] ⚠️ não consegui montar a mensagem correta (lead ou clínica não encontrados) — trava de envio NÃO vai ativar nesta chamada');
             }
           } catch (e) { console.error('[dentistas] erro ao pré-calcular mensagem correta', e); }
         }
