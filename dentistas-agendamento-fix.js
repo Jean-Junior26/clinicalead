@@ -68,7 +68,31 @@
     window.__dentSalvarInstalado = true;
 
     const _origSalvar = salvarNovoAgendamento;
+    let _salvandoAgora = false; // ⚠️ AJUSTE 24/07: trava anti-clique-duplo — ver
+    // comentário logo abaixo, dentro do wrapper.
     window.salvarNovoAgendamento = async function (...args) {
+      // ⚠️ AJUSTE 24/07 (URGENTE): o botão "Agendar" não se desabilitava
+      // enquanto salvava (a operação é assíncrona, leva um instante) — se a
+      // pessoa clicasse de novo nesse meio-tempo (por impaciência, ou o clique
+      // "grudando"), cada clique disparava um agendamento + confirmação
+      // INTEIRO do zero. Caso real: José Bonifácio, pacientes receberam a
+      // mesma confirmação (com o texto personalizado da Dra. Giovana) 2, 3 e
+      // até 4 VEZES seguidas, em poucos segundos — não era bug de "dentista
+      // errado", era isso. Agora, enquanto uma chamada ainda está em
+      // andamento, cliques extras são simplesmente ignorados.
+      if (_salvandoAgora) {
+        console.log('[dentistas] clique duplo ignorado — já está salvando');
+        return;
+      }
+      _salvandoAgora = true;
+      try {
+        return await _salvarNovoAgendamentoComDentista.apply(this, args);
+      } finally {
+        _salvandoAgora = false;
+      }
+    };
+
+    async function _salvarNovoAgendamentoComDentista(...args) {
       const lista = dentistas();
       const selDent = document.getElementById('naDentista');
       const dentistaId = selDent ? selDent.value : '';
