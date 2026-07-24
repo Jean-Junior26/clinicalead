@@ -96,6 +96,15 @@
       const lista = dentistas();
       const selDent = document.getElementById('naDentista');
       const dentistaId = selDent ? selDent.value : '';
+      // ⚠️ AJUSTE 24/07: data/hora movidos pra cá (escopo principal da função) —
+      // antes só existiam DENTRO do bloco "if (dentistaId)" da trava anti-duplo,
+      // e o trecho mais abaixo que calcula a mensagem correta pra interceptação
+      // do envio tentava usar essa mesma variável fora do escopo dela, gerando
+      // "ReferenceError: data is not defined" — o erro quebrava o cálculo da
+      // mensagem ANTES de conseguir interceptar o envio, então a trava definitiva
+      // nunca chegava a entrar em ação de verdade.
+      const data = document.getElementById('naData')?.value;
+      const hora = document.getElementById('naHora')?.value;
 
       // se a clínica TEM dentistas cadastrados E o dropdown está na tela, o dentista é obrigatório
       const dropdownNaTela = !!document.getElementById('naDentistaGroup');
@@ -107,8 +116,6 @@
       // ── TRAVA ANTI-DUPLO POR DENTISTA ──
       // bloqueia só se o MESMO dentista já tem consulta no mesmo dia+hora.
       if (dentistaId) {
-        const data = document.getElementById('naData')?.value;
-        const hora = document.getElementById('naHora')?.value;
         if (data && hora && typeof CAL !== 'undefined' && Array.isArray(CAL.consultas)) {
           const conflito = CAL.consultas.find(c =>
             c.data === data && c.hora === hora &&
