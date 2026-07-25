@@ -161,7 +161,25 @@ module.exports = async function handler(req, res) {
       );
       const humArr = humResp.ok ? await humResp.json() : [];
       // mensagens automáticas conhecidas (não contam como "humano")
-      const marcadoresAuto = ['confirma sua presença', 'lembrar que', 'sua consulta', 'parabéns', 'follow', 'avaliação gratuita'];
+      // ⚠️ AJUSTE 25/07: lista expandida — estava curta demais e deixava passar
+      // várias mensagens automáticas de verdade (confirmação de agendamento,
+      // follow-ups de "dias sem resposta", indicação, reativação) como se
+      // fossem um humano da equipe respondendo. Caso real: follow-up "Passei
+      // aqui pra saber se ficou alguma dúvida sobre o que conversamos..."
+      // não batia com nenhuma frase da lista antiga, então o Brian achou que
+      // um humano tinha assumido e ficou 30min calado, ignorando a resposta
+      // do lead logo em seguida. Esse tipo de detecção por palavra-chave
+      // sempre vai ser um pouco frágil (o texto muda com variações do
+      // template), mas uma lista mais ampla cobre a maioria dos casos reais.
+      const marcadoresAuto = [
+        'confirma sua presença', 'lembrar que', 'sua consulta está', 'está *confirmada*',
+        'parabéns', 'avaliação gratuita', 'passei aqui', 'ficou alguma dúvida',
+        'à disposição pra te ajudar', 'separei um horário', 'condição especial',
+        'oportunidade', 'sentimos sua falta', 'recebi sua mensagem', 'já vou repassar',
+        'em breve alguém entra em contato', 'esse horário já está ocupado',
+        'foi um prazer receber você', 'ficamos felizes', 'foi confirmado', 'reservado',
+        'fico no aguardo', 'te dou um toque', 'aniversário', 'indicação', 'indicou',
+      ];
       const normMsg = (x) => String(x || '').trim().toLowerCase();
       const conteudoAtual = normMsg(content);
       const humanoAtivo = humArr.some(m => {
@@ -745,8 +763,13 @@ module.exports = async function handler(req, res) {
 
       const sufixo = String(phone).replace(/\D/g, '').slice(-8);
 
+      // ⚠️ AJUSTE 23/07: essa consulta usava a coluna "phone", que não
+      // existe na tabela leads (é "telefone", como em todo o resto do
+      // arquivo) — o PostgREST rejeitava a query, leadArr virava [], e o
+      // lead nunca era encontrado aqui (as travas de "lead antigo" e "já
+      // teve consulta" abaixo nunca chegavam a rodar de verdade).
       const leadResp = await fetch(
-        `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinicId}&phone=ilike.*${sufixo}&select=id,created_at&limit=1`,
+        `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinicId}&telefone=ilike.*${sufixo}&select=id,created_at&limit=1`,
         { headers: sbHeaders }
       );
       const leadArr = leadResp.ok ? await leadResp.json() : [];
@@ -770,15 +793,28 @@ module.exports = async function handler(req, res) {
         if (consultaArr.length > 0) return false;
       }
 
-      // quem respondeu por último nesta conversa? (vazio = ninguém ainda,
-      // conta como "janela do Brian" também — é o 1º contato puro)
-      const ultimaRespResp = await fetch(
-        `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinicId}&phone=ilike.*${sufixo}&from_me=eq.true&select=contact_name&order=created_at.desc&limit=1`,
+      // ── HUMANO JÁ ASSUMIU ESSA CONVERSA? ──────────────────────────
+      // ⚠️ AJUSTE 23/07: antes checava se a ÚLTIMA MENSAGEM DA CLÍNICA
+      // tinha contact_name = 'BRIAN_AUTO'. Isso dava falso positivo o
+      // tempo todo: mensagens automáticas (confirmação de agendamento,
+      // lembrete 2h/24h — ver disparar-automacoes) são salvas com
+      // contact_name = NOME DO PACIENTE, não 'BRIAN_AUTO'. Resultado: assim
+      // que qualquer automação mandava uma mensagem — o que é rotina, quase
+      // toda conversa recebe uma confirmação em algum momento — a
+      // transcrição ficava bloqueada pra sempre, achando (errado) que um
+      // humano tinha assumido. Confirmado: 100% das tentativas recentes de
+      // transcrição vieram "pulado" em 3 clínicas diferentes por causa
+      // disso. Agora usa a MESMA fonte de verdade que o resto do sistema
+      // usa pra saber se um humano assumiu: brian_conversa.escalado /
+      // auto_desligado (setado só quando alguém realmente assume ou
+      // desliga o Brian manualmente na conversa — nunca por automação).
+      const convResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/brian_conversa?clinic_id=eq.${clinicId}&phone=ilike.*${sufixo}&select=escalado,auto_desligado&limit=1`,
         { headers: sbHeaders }
       );
-      const ultimaRespArr = ultimaRespResp.ok ? await ultimaRespResp.json() : [];
-      const ultimaResp = ultimaRespArr[0];
-      if (ultimaResp && ultimaResp.contact_name !== 'BRIAN_AUTO') return false; // humano já assumiu essa conversa
+      const convArr = convResp.ok ? await convResp.json() : [];
+      const conv = convArr[0];
+      if (conv && (conv.escalado === true || conv.auto_desligado === true)) return false; // humano assumiu ou Brian foi desligado nesta conversa
 
       return true;
     } catch (e) { return false; } // na dúvida, NÃO transcreve (evita gasto indevido)
@@ -1707,169 +1743,20 @@ module.exports = async function handler(req, res) {
                     } catch (e) { console.log('[BRIAN-VOZ] erro checando opt-out (seguindo com voz):', e.message); }
                   }
 
-                  // 1) decide como responder: em ÁUDIO (se temVoz e deu certo) ou em TEXTO
-                  if (textoResposta) {
-                    let audioEnviadoComSucesso = false;
-
-                    if (temVoz) {
-                      try {
-                        const vozCfgResp = await fetch(
-                          `${SUPABASE_URL}/rest/v1/brian_config?clinic_id=eq.${clinic_id}&select=voz_tts&limit=1`,
-                          { headers: sbHeaders }
-                        );
-                        const vozCfgArr = vozCfgResp.ok ? await vozCfgResp.json() : [];
-                        const vozEscolhida = vozCfgArr[0]?.voz_tts;
-                        if (vozEscolhida) {
-                          const audioBase64 = await gerarAudioTTS(textoResposta, vozEscolhida);
-                          if (audioBase64) {
-                            const envioOk = await enviarAudioWhatsApp(instanceName, phone, audioBase64);
-                            if (envioOk) {
-                              audioEnviadoComSucesso = true;
-                              console.log(`[BRIAN-VOZ] 🔊 respondeu ${phone} SÓ EM ÁUDIO (voz: ${vozEscolhida}): "${String(textoResposta).slice(0, 60)}"`);
-                              // salva no histórico + storage, pra tocar depois no inbox
-                              try {
-                                const cleanPhoneVoz = String(phone).replace(/\D/g, '');
-                                const numberVoz = cleanPhoneVoz.startsWith('55') ? cleanPhoneVoz : '55' + cleanPhoneVoz;
-                                const nomeArquivo = `tts_${numberVoz}_${Date.now()}.mp3`;
-                                const upload = await fetch(`${SUPABASE_URL}/storage/v1/object/audios/${nomeArquivo}`, {
-                                  method: 'POST',
-                                  headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'audio/mpeg' },
-                                  body: Buffer.from(audioBase64, 'base64'),
-                                });
-                                const mediaUrlTts = upload.ok ? `${SUPABASE_URL}/storage/v1/object/public/audios/${nomeArquivo}` : null;
-                                await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
-                                  method: 'POST',
-                                  headers: { ...sbHeaders, Prefer: 'return=minimal' },
-                                  body: JSON.stringify({
-                                    clinic_id, phone: numberVoz, contact_name: 'BRIAN_AUTO',
-                                    content: textoResposta, type: 'audio', from_me: true, media_url: mediaUrlTts,
-                                    created_at: new Date().toISOString(),
-                                  }),
-                                });
-                              } catch (e) { console.log('[BRIAN-VOZ] erro ao salvar histórico:', e.message); }
-                            } else {
-                              console.log(`[BRIAN-VOZ] falha ao ENVIAR o áudio pelo WhatsApp — caindo pro texto`);
-                            }
-                          } else {
-                            console.log(`[BRIAN-VOZ] falha ao GERAR o áudio — caindo pro texto`);
-                          }
-                        } else {
-                          console.log(`[BRIAN-VOZ] clínica ${clinic_id} sem voz_tts configurada — pulando áudio`);
-                        }
-                      } catch (e) { console.log('[BRIAN-VOZ] falhou:', e.message); }
-                    }
-
-                    // 2) só manda em TEXTO se não mandou em áudio (evita duplicar a mesma
-                    // mensagem nos dois formatos) — se temVoz era false, ou se a voz
-                    // falhou por qualquer motivo, o texto garante a resposta de qualquer jeito
-                    if (!audioEnviadoComSucesso) {
-                      await responderPaciente(instanceName, clinic_id, phone, textoResposta, 'BRIAN_AUTO');
-                      console.log(`[BRIAN-ENVIO] ✅ respondeu ${phone} em texto: "${String(textoResposta).slice(0, 60)}"`);
-                    }
-
-                    // ── SIMULAÇÃO VISUAL DO SORRISO (se o Brian marcou [[SIMULAR]]) ──
-                    if (simularTipo) {
-                      try {
-                        const simCfgResp = await fetch(
-                          `${SUPABASE_URL}/rest/v1/brian_config?clinic_id=eq.${clinic_id}&select=simulacao_sorriso&limit=1`,
-                          { headers: sbHeaders }
-                        );
-                        const simCfgArr = simCfgResp.ok ? await simCfgResp.json() : [];
-                        const simulacaoAtiva = simCfgArr[0]?.simulacao_sorriso === true;
-                        if (simulacaoAtiva) {
-                          // busca a última FOTO que o paciente mandou nesta conversa
-                          const sufixoSim = String(phone).replace(/\D/g, '').slice(-8);
-                          const fotoResp = await fetch(
-                            `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixoSim}&from_me=eq.false&type=eq.image&select=media_url&order=created_at.desc&limit=1`,
-                            { headers: sbHeaders }
-                          );
-                          const fotoArr = fotoResp.ok ? await fotoResp.json() : [];
-                          const fotoUrl = fotoArr[0]?.media_url;
-                          if (fotoUrl) {
-                            const imgBase64 = await gerarSimulacaoSorriso(fotoUrl, simularTipo);
-                            if (imgBase64) {
-                              const cleanPhoneSim = String(phone).replace(/\D/g, '');
-                              const numberSim = cleanPhoneSim.startsWith('55') ? cleanPhoneSim : '55' + cleanPhoneSim;
-                              const nomeArquivoSim = `sim_${simularTipo}_${numberSim}_${Date.now()}.png`;
-                              const uploadSim = await fetch(`${SUPABASE_URL}/storage/v1/object/midias/${nomeArquivoSim}`, {
-                                method: 'POST',
-                                headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'image/png' },
-                                body: Buffer.from(imgBase64, 'base64'),
-                              });
-                              const mediaUrlSim = uploadSim.ok ? `${SUPABASE_URL}/storage/v1/object/public/midias/${nomeArquivoSim}` : null;
-                              if (mediaUrlSim) {
-                                // ── LEGENDA SEMPRE COM O AVISO — garantido por código, não
-                                // depende do Brian lembrar de escrever isso.
-                                const legendaSim = '✨ Isso é só uma *simulação ilustrativa* pra você ter uma ideia — o resultado real é sempre definido na sua avaliação com a dentista, viu? 💙';
-                                await fetch(`${EVO_URL}/message/sendMedia/${instanceName}`, {
-                                  method: 'POST',
-                                  headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ number: numberSim, mediatype: 'image', media: mediaUrlSim, caption: legendaSim }),
-                                });
-                                await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
-                                  method: 'POST',
-                                  headers: { ...sbHeaders, Prefer: 'return=minimal' },
-                                  body: JSON.stringify({
-                                    clinic_id, phone: numberSim, contact_name: 'BRIAN_AUTO',
-                                    content: legendaSim, type: 'image', from_me: true, media_url: mediaUrlSim,
-                                    created_at: new Date().toISOString(),
-                                  }),
-                                });
-                                console.log(`[BRIAN-SIMULACAO] ✅ enviada (tipo: ${simularTipo}) | phone: ${phone}`);
-                                await logDebug(clinic_id, phone, 'simulacao', 'sucesso', `tipo: ${simularTipo}`);
-                              }
-                            } else {
-                              console.log(`[BRIAN-SIMULACAO] falhou ao gerar imagem | phone: ${phone}`);
-                              await logDebug(clinic_id, phone, 'simulacao', 'falhou', `tipo: ${simularTipo} — API não retornou imagem`);
-                            }
-                          } else {
-                            console.log(`[BRIAN-SIMULACAO] sem foto recente do paciente pra simular | phone: ${phone}`);
-                            await logDebug(clinic_id, phone, 'simulacao', 'pulado', 'Brian marcou SIMULAR mas não achou foto recente do paciente');
-                          }
-                        } else {
-                          await logDebug(clinic_id, phone, 'simulacao', 'pulado', `clínica ${clinic_id} sem simulacao_sorriso ativada`);
-                        }
-                      } catch (e) { console.log('[BRIAN-SIMULACAO] falhou:', e.message); }
-                    }
-
-                    // ── GARANTE O LEAD CEDO (pra follow-up reaquecer quem some sem dar o nome) ──
-                    // Se a pessoa demonstrou interesse (o Brian respondeu), ela já vira lead,
-                    // mesmo sem ter dito o nome. Usa o pushName do WhatsApp como nome provisório.
-                    // Quando ela disser o nome depois, o [[LEAD]] atualiza (brianAcharOuCriarLead não duplica).
-                    if (!campoAgendar) {
-                      const nomeProvisorio = (campoLead && campoLead.nome) || contact_name || null;
-                      await brianAcharOuCriarLead(clinic_id, phone, nomeProvisorio, undefined, undefined, !!(campoLead && campoLead.nome));
-                      // (o status 'contato' já é cuidado pelo handler de from_me, que cobre
-                      //  Brian + humano + inbox — não precisa duplicar aqui)
-                    }
-
-                    // incrementa o contador de mensagens da conversa
-                    const totalDia = await brianIncrementarContador(clinic_id, phone);
-                    // se ESTA resposta atingiu o limite, escala pra equipe (avisa + cria tarefa)
-                    const LIMITE = 12;
-                    if (totalDia >= LIMITE) {
-                      const nomeLead = (campoLead && campoLead.nome) || (campoAgendar && campoAgendar.nome) || '';
-                      const primeiro = String(nomeLead).split(' ')[0] || '';
-                      const aviso = `${primeiro ? primeiro + ', ' : ''}vou pedir pra um especialista da nossa equipe te dar uma atenção mais completa, tá? 😊 Em breve alguém continua seu atendimento por aqui!`;
-                      await responderPaciente(instanceName, clinic_id, phone, aviso, 'BRIAN_AUTO');
-                      await brianEscalar(clinic_id, phone, nomeLead);
-                    }
-                  }
-
-                  // 1.5) envia os casos (antes/depois) se o Brian sinalizou
-                  if (procCasos) {
-                    await brianEnviarCasos(instanceName, clinic_id, phone, procCasos);
-                  }
-
-                  // 1.6) grava o procedimento de interesse revelado na conversa
-                  // (a própria brianAcharOuCriarLead atualiza se o atual for "Avaliação")
-                  if (procInteresseConversa) {
-                    try {
-                      await brianAcharOuCriarLead(clinic_id, phone, (campoLead && campoLead.nome) || null, 'WhatsApp', procInteresseConversa, true);
-                    } catch (e) { console.log('[BRIAN-PROC] erro ao gravar procedimento:', e.message); }
-                  }
-
-                  // 2) executa o agendamento (se houver) — cria lead + consulta + confirma
+                  // ⚠️ AJUSTE 23/07: bloco de agendamento MOVIDO pra cá — ANTES do
+                  // envio da resposta principal do Brian (antes ficava lá embaixo,
+                  // depois do texto já ter sido mandado). O motivo: o texto que o
+                  // Brian escreve já vem com a frase de confirmação embutida (ex:
+                  // "Deixei reservado sábado às 12h30..."), junto com o marcador
+                  // [[AGENDAR]]. Antes, esse texto era enviado JÁ, e só DEPOIS o
+                  // sistema checava se o horário realmente estava livre no banco —
+                  // se desse conflito (outro paciente pegou o horário nesse meio
+                  // tempo), o paciente recebia DUAS mensagens contraditórias: uma
+                  // confirmando, seguida de "esse horário já está ocupado" (caso
+                  // real: Ana Paula, Uberlândia, 23/07). Agora a checagem roda
+                  // PRIMEIRO — se der conflito, a confirmação falsa nem chega a
+                  // ser enviada, só a mensagem de correção.
+                  let agendamentoConflito = false;
                   if (campoAgendar && campoAgendar.data && campoAgendar.hora) {
                     // ── TRAVA ANTI-DATA-ERRADA ──
                     // O modelo às vezes escreve a data errada no marcador AGENDAR
@@ -1965,13 +1852,189 @@ module.exports = async function handler(req, res) {
                         await brianEnviarConfirmacao(instanceName, clinic_id, phone, campoAgendar.nome || lead.nome, campoAgendar.data, campoAgendar.hora);
                       } else {
                         console.log(`[BRIAN-AGENDAR] ⚠️ NÃO agendou (${r.motivo}) — avisa o paciente`);
-                        // se o horário deu problema (ocupado/passado), avisa gentilmente
+                        // se o horário deu problema (ocupado/passado), marca o
+                        // conflito — a resposta original do Brian (que já vinha
+                        // com a confirmação falsa) NÃO será enviada; só a correção.
                         if (r.motivo === 'horário já ocupado' || r.motivo === 'dentista já ocupado nesse horário' || r.motivo === 'horário no passado') {
-                          await responderPaciente(instanceName, clinic_id, phone, 'Ihh, esse horário já está ocupado 😅 Mas me diz: qual outro dia ou período fica bom pra você? Aí já confirmo um horário certinho! 😊', 'BRIAN_AUTO');
+                          agendamentoConflito = true;
                         }
                       }
                     }
-                  } else if (campoLead && campoLead.nome) {
+                  }
+
+                  // 1) decide como responder: em ÁUDIO (se temVoz e deu certo) ou em TEXTO
+                  if (agendamentoConflito) {
+                    await responderPaciente(instanceName, clinic_id, phone, 'Ihh, esse horário já está ocupado 😅 Mas me diz: qual outro dia ou período fica bom pra você? Aí já confirmo um horário certinho! 😊', 'BRIAN_AUTO');
+                  } else if (textoResposta) {
+                    let audioEnviadoComSucesso = false;
+
+                    if (temVoz) {
+                      try {
+                        const vozCfgResp = await fetch(
+                          `${SUPABASE_URL}/rest/v1/brian_config?clinic_id=eq.${clinic_id}&select=voz_tts&limit=1`,
+                          { headers: sbHeaders }
+                        );
+                        const vozCfgArr = vozCfgResp.ok ? await vozCfgResp.json() : [];
+                        const vozEscolhida = vozCfgArr[0]?.voz_tts;
+                        if (vozEscolhida) {
+                          const audioBase64 = await gerarAudioTTS(textoResposta, vozEscolhida);
+                          if (audioBase64) {
+                            const envioOk = await enviarAudioWhatsApp(instanceName, phone, audioBase64);
+                            if (envioOk) {
+                              audioEnviadoComSucesso = true;
+                              console.log(`[BRIAN-VOZ] 🔊 respondeu ${phone} SÓ EM ÁUDIO (voz: ${vozEscolhida}): "${String(textoResposta).slice(0, 60)}"`);
+                              // salva no histórico + storage, pra tocar depois no inbox
+                              try {
+                                const cleanPhoneVoz = String(phone).replace(/\D/g, '');
+                                const numberVoz = cleanPhoneVoz.startsWith('55') ? cleanPhoneVoz : '55' + cleanPhoneVoz;
+                                const nomeArquivo = `tts_${numberVoz}_${Date.now()}.mp3`;
+                                const upload = await fetch(`${SUPABASE_URL}/storage/v1/object/audios/${nomeArquivo}`, {
+                                  method: 'POST',
+                                  headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'audio/mpeg' },
+                                  body: Buffer.from(audioBase64, 'base64'),
+                                });
+                                const mediaUrlTts = upload.ok ? `${SUPABASE_URL}/storage/v1/object/public/audios/${nomeArquivo}` : null;
+                                await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
+                                  method: 'POST',
+                                  headers: { ...sbHeaders, Prefer: 'return=minimal' },
+                                  body: JSON.stringify({
+                                    clinic_id, phone: numberVoz, contact_name: 'BRIAN_AUTO',
+                                    content: textoResposta, type: 'audio', from_me: true, media_url: mediaUrlTts,
+                                    created_at: new Date().toISOString(),
+                                  }),
+                                });
+                              } catch (e) { console.log('[BRIAN-VOZ] erro ao salvar histórico:', e.message); }
+                            } else {
+                              console.log(`[BRIAN-VOZ] falha ao ENVIAR o áudio pelo WhatsApp — caindo pro texto`);
+                            }
+                          } else {
+                            console.log(`[BRIAN-VOZ] falha ao GERAR o áudio — caindo pro texto`);
+                          }
+                        } else {
+                          console.log(`[BRIAN-VOZ] clínica ${clinic_id} sem voz_tts configurada — pulando áudio`);
+                        }
+                      } catch (e) { console.log('[BRIAN-VOZ] falhou:', e.message); }
+                    }
+
+                    // 2) só manda em TEXTO se não mandou em áudio (evita duplicar a mesma
+                    // mensagem nos dois formatos) — se temVoz era false, ou se a voz
+                    // falhou por qualquer motivo, o texto garante a resposta de qualquer jeito
+                    if (!audioEnviadoComSucesso) {
+                      await responderPaciente(instanceName, clinic_id, phone, textoResposta, 'BRIAN_AUTO');
+                      console.log(`[BRIAN-ENVIO] ✅ respondeu ${phone} em texto: "${String(textoResposta).slice(0, 60)}"`);
+                    }
+                  }
+                  // ⚠️ AJUSTE 23/07: bloco else-if fechado aqui de propósito (antes ia
+                  // até depois da simulação/contador/escalonamento) — esses efeitos
+                  // colaterais precisam rodar SEMPRE, mesmo quando deu conflito de
+                  // agendamento (agendamentoConflito=true), não só quando o texto
+                  // principal foi enviado. Por isso viraram incondicionais abaixo.
+
+                    // ── SIMULAÇÃO VISUAL DO SORRISO (se o Brian marcou [[SIMULAR]]) ──
+                    if (simularTipo) {
+                      try {
+                        const simCfgResp = await fetch(
+                          `${SUPABASE_URL}/rest/v1/brian_config?clinic_id=eq.${clinic_id}&select=simulacao_sorriso&limit=1`,
+                          { headers: sbHeaders }
+                        );
+                        const simCfgArr = simCfgResp.ok ? await simCfgResp.json() : [];
+                        const simulacaoAtiva = simCfgArr[0]?.simulacao_sorriso === true;
+                        if (simulacaoAtiva) {
+                          // busca a última FOTO que o paciente mandou nesta conversa
+                          const sufixoSim = String(phone).replace(/\D/g, '').slice(-8);
+                          const fotoResp = await fetch(
+                            `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixoSim}&from_me=eq.false&type=eq.image&select=media_url&order=created_at.desc&limit=1`,
+                            { headers: sbHeaders }
+                          );
+                          const fotoArr = fotoResp.ok ? await fotoResp.json() : [];
+                          const fotoUrl = fotoArr[0]?.media_url;
+                          if (fotoUrl) {
+                            const imgBase64 = await gerarSimulacaoSorriso(fotoUrl, simularTipo);
+                            if (imgBase64) {
+                              const cleanPhoneSim = String(phone).replace(/\D/g, '');
+                              const numberSim = cleanPhoneSim.startsWith('55') ? cleanPhoneSim : '55' + cleanPhoneSim;
+                              const nomeArquivoSim = `sim_${simularTipo}_${numberSim}_${Date.now()}.png`;
+                              const uploadSim = await fetch(`${SUPABASE_URL}/storage/v1/object/midias/${nomeArquivoSim}`, {
+                                method: 'POST',
+                                headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'image/png' },
+                                body: Buffer.from(imgBase64, 'base64'),
+                              });
+                              const mediaUrlSim = uploadSim.ok ? `${SUPABASE_URL}/storage/v1/object/public/midias/${nomeArquivoSim}` : null;
+                              if (mediaUrlSim) {
+                                // ── LEGENDA SEMPRE COM O AVISO — garantido por código, não
+                                // depende do Brian lembrar de escrever isso.
+                                const legendaSim = '✨ Isso é só uma *simulação ilustrativa* pra você ter uma ideia — o resultado real é sempre definido na sua avaliação com a dentista, viu? 💙';
+                                await fetch(`${EVO_URL}/message/sendMedia/${instanceName}`, {
+                                  method: 'POST',
+                                  headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ number: numberSim, mediatype: 'image', media: mediaUrlSim, caption: legendaSim }),
+                                });
+                                await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
+                                  method: 'POST',
+                                  headers: { ...sbHeaders, Prefer: 'return=minimal' },
+                                  body: JSON.stringify({
+                                    clinic_id, phone: numberSim, contact_name: 'BRIAN_AUTO',
+                                    content: legendaSim, type: 'image', from_me: true, media_url: mediaUrlSim,
+                                    created_at: new Date().toISOString(),
+                                  }),
+                                });
+                                console.log(`[BRIAN-SIMULACAO] ✅ enviada (tipo: ${simularTipo}) | phone: ${phone}`);
+                                await logDebug(clinic_id, phone, 'simulacao', 'sucesso', `tipo: ${simularTipo}`);
+                              }
+                            } else {
+                              console.log(`[BRIAN-SIMULACAO] falhou ao gerar imagem | phone: ${phone}`);
+                              await logDebug(clinic_id, phone, 'simulacao', 'falhou', `tipo: ${simularTipo} — API não retornou imagem`);
+                            }
+                          } else {
+                            console.log(`[BRIAN-SIMULACAO] sem foto recente do paciente pra simular | phone: ${phone}`);
+                            await logDebug(clinic_id, phone, 'simulacao', 'pulado', 'Brian marcou SIMULAR mas não achou foto recente do paciente');
+                          }
+                        } else {
+                          await logDebug(clinic_id, phone, 'simulacao', 'pulado', `clínica ${clinic_id} sem simulacao_sorriso ativada`);
+                        }
+                      } catch (e) { console.log('[BRIAN-SIMULACAO] falhou:', e.message); }
+                    }
+
+                    // ── GARANTE O LEAD CEDO (pra follow-up reaquecer quem some sem dar o nome) ──
+                    // Se a pessoa demonstrou interesse (o Brian respondeu), ela já vira lead,
+                    // mesmo sem ter dito o nome. Usa o pushName do WhatsApp como nome provisório.
+                    // Quando ela disser o nome depois, o [[LEAD]] atualiza (brianAcharOuCriarLead não duplica).
+                    if (!campoAgendar) {
+                      const nomeProvisorio = (campoLead && campoLead.nome) || contact_name || null;
+                      await brianAcharOuCriarLead(clinic_id, phone, nomeProvisorio, undefined, undefined, !!(campoLead && campoLead.nome));
+                      // (o status 'contato' já é cuidado pelo handler de from_me, que cobre
+                      //  Brian + humano + inbox — não precisa duplicar aqui)
+                    }
+
+                    // incrementa o contador de mensagens da conversa
+                    const totalDia = await brianIncrementarContador(clinic_id, phone);
+                    // se ESTA resposta atingiu o limite, escala pra equipe (avisa + cria tarefa)
+                    const LIMITE = 12;
+                    if (totalDia >= LIMITE) {
+                      const nomeLead = (campoLead && campoLead.nome) || (campoAgendar && campoAgendar.nome) || '';
+                      const primeiro = String(nomeLead).split(' ')[0] || '';
+                      const aviso = `${primeiro ? primeiro + ', ' : ''}vou pedir pra um especialista da nossa equipe te dar uma atenção mais completa, tá? 😊 Em breve alguém continua seu atendimento por aqui!`;
+                      await responderPaciente(instanceName, clinic_id, phone, aviso, 'BRIAN_AUTO');
+                      await brianEscalar(clinic_id, phone, nomeLead);
+                    }
+
+                  // 1.5) envia os casos (antes/depois) se o Brian sinalizou
+                  if (procCasos) {
+                    await brianEnviarCasos(instanceName, clinic_id, phone, procCasos);
+                  }
+
+                  // 1.6) grava o procedimento de interesse revelado na conversa
+                  // (a própria brianAcharOuCriarLead atualiza se o atual for "Avaliação")
+                  if (procInteresseConversa) {
+                    try {
+                      await brianAcharOuCriarLead(clinic_id, phone, (campoLead && campoLead.nome) || null, 'WhatsApp', procInteresseConversa, true);
+                    } catch (e) { console.log('[BRIAN-PROC] erro ao gravar procedimento:', e.message); }
+                  }
+
+                  // 2) o agendamento em si já foi processado mais acima (antes do
+                  // envio da resposta principal — ver AJUSTE 23/07). Aqui só falta
+                  // o caso de captura de nome SEM agendamento junto.
+                  if (!campoAgendar && campoLead && campoLead.nome) {
                     // 3) só captura de nome (sem agendar) → cria/garante o lead
                     await brianAcharOuCriarLead(clinic_id, phone, campoLead.nome, undefined, undefined, true);
                   }
