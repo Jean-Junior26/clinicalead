@@ -1092,8 +1092,16 @@ module.exports = async function handler(req, res) {
         const temNegacao = /\bn[ao]o?\b|\bnaum\b|\bnem\b/.test(semAcento); // nao, não, naum, nem
         const temIntencaoIr = /(vou|vai|quero|posso|consigo|da|dar|tenho como|poderei|poder)\b.*\b(mais|ir|comparecer)|(\bmais\b)|(\bir\b)|(comparecer)/.test(semAcento)
           || /(vou|vai|quero|posso|consigo|tenho|poderei)/.test(semAcento);
-        // só marca cancelamento por negação se a frase for curta (resposta ao lembrete), evitando falso positivo em conversa longa
-        if (temNegacao && temIntencaoIr && semAcento.length <= 40) ehCancelar = true;
+        // ⚠️ AJUSTE 28/07: limite subiu de 40 pra 90 caracteres. Caso real:
+        // "Hoje não vai dar pra ir tenho um problema familiar" (~50
+        // caracteres) NÃO batia o corte antigo de 40 — a paciente avisou
+        // que não vinha, o Brian até respondeu acolhendo, mas o sistema
+        // nunca marcou remarcar_solicitado na consulta, e o lembrete de
+        // hoje (2h antes) saiu do mesmo jeito, ignorando o aviso dela.
+        // 90 cobre frases naturais com um motivo curto junto (tipo "tenho
+        // um problema familiar"), ainda cortando ANTES de virar uma
+        // conversa longa genérica onde "não" apareceria por acaso.
+        if (temNegacao && temIntencaoIr && semAcento.length <= 90) ehCancelar = true;
       }
       // confirmação NÃO vale se a frase também bate cancelamento (cancelamento vence, é mais seguro)
       const ehConfirmarFinal = ehConfirmar && !ehCancelar;
