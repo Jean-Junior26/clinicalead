@@ -213,6 +213,9 @@ async function renderOrcamentosPage() {
         <h2>Orçamentos</h2>
         <p>${filtrados.length} orçamento${filtrados.length !== 1 ? 's' : ''}${buscaNorm ? ` encontrado${filtrados.length !== 1 ? 's' : ''} pra "${ORCLISTA.busca}"` : (ORCLISTA.inicio ? ' no período' : ' no total')}</p>
       </div>
+      <div class="page-header-actions">
+        <button class="btn btn-primary" onclick="orcAbrirBuscaNovo()"><i class="ti ti-plus"></i> Novo Orçamento</button>
+      </div>
     </div>
     <div style="position:relative;margin-bottom:14px;max-width:360px;">
       <i class="ti ti-search" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:15px;"></i>
@@ -234,6 +237,77 @@ async function renderOrcamentosPage() {
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px;">${filtrosHtml}</div>
     <div>${linhas || '<div style="text-align:center;padding:40px;color:var(--text-muted);font-size:13px;">Nenhum orçamento neste filtro.</div>'}</div>`;
+}
+
+// ── NOVO ORÇAMENTO — busca o paciente (cadastro existente ou novo) ──
+// ⚠️ 28/07: Camaquã (e qualquer clínica nova) só conseguia criar
+// orçamento indo em Leads > abrir o cadastro > aba Orçamentos. Agora
+// dá pra começar direto daqui, buscando quem já tem cadastro — ou
+// indo criar um lead novo se ainda não existir.
+function orcAbrirBuscaNovo() {
+  if (!document.getElementById('modalOrcBusca')) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'modalOrcBusca';
+    overlay.innerHTML = `
+      <div class="modal" style="max-width:440px;width:94vw;">
+        <div class="modal-header">
+          <h3><i class="ti ti-file-invoice" style="margin-right:8px;color:var(--gold);"></i>Novo Orçamento</h3>
+          <button class="btn btn-ghost btn-icon" onclick="closeModal('modalOrcBusca')"><i class="ti ti-x"></i></button>
+        </div>
+        <div class="modal-body">
+          <div style="position:relative;margin-bottom:12px;">
+            <i class="ti ti-search" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:15px;"></i>
+            <input type="text" id="orcBuscaNovoInput" class="form-input" placeholder="Buscar paciente por nome ou telefone..."
+              oninput="orcRenderBuscaNovo(this.value)" style="width:100%;padding:9px 12px 9px 36px;font-size:13px;" autofocus/>
+          </div>
+          <div id="orcBuscaNovoResultados" style="max-height:320px;overflow-y:auto;"></div>
+          <div style="border-top:1px solid var(--border-subtle);margin-top:10px;padding-top:10px;">
+            <button class="btn btn-sm" style="width:100%;" onclick="closeModal('modalOrcBusca');openNewLead();">
+              <i class="ti ti-plus"></i> Não achei — criar paciente novo
+            </button>
+            <p style="font-size:11px;color:var(--text-muted);margin-top:6px;text-align:center;">Depois de salvar o cadastro novo, volta aqui e busca o nome pra criar o orçamento dele.</p>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+  }
+  document.getElementById('orcBuscaNovoInput').value = '';
+  orcRenderBuscaNovo('');
+  document.getElementById('modalOrcBusca').classList.add('open');
+  setTimeout(() => document.getElementById('orcBuscaNovoInput')?.focus(), 100);
+}
+
+function orcRenderBuscaNovo(termo) {
+  const el = document.getElementById('orcBuscaNovoResultados');
+  if (!el) return;
+  const norm = orcNormalizarTexto(termo || '');
+  let leads = STATE.leads || [];
+  if (norm) {
+    leads = leads.filter(l =>
+      orcNormalizarTexto(l.nome).includes(norm) ||
+      (l.telefone || '').replace(/\D/g, '').includes(norm.replace(/\D/g, ''))
+    );
+  }
+  leads = leads.slice(0, 30); // não trava a tela com lista gigante
+
+  if (!leads.length) {
+    el.innerHTML = `<div style="text-align:center;padding:20px;color:var(--text-muted);font-size:13px;">${norm ? 'Nenhum paciente encontrado com esse nome/telefone.' : 'Digite pra buscar um paciente já cadastrado.'}</div>`;
+    return;
+  }
+  el.innerHTML = leads.map(l => `
+    <div class="card" style="padding:10px 12px;margin-bottom:6px;cursor:pointer;display:flex;align-items:center;gap:10px;" onclick="orcEscolherDaBusca('${l.id}')">
+      <div class="avatar" style="${avatarStyle(l.nome)}">${initials(l.nome)}</div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:13px;font-weight:600;">${l.nome}</div>
+        <div style="font-size:11px;color:var(--text-muted);">${l.telefone || '—'}</div>
+      </div>
+    </div>`).join('');
+}
+
+function orcEscolherDaBusca(leadId) {
+  closeModal('modalOrcBusca');
+  abrirOrcamentoDaLista(leadId);
 }
 
 // Abre o orçamento do lead (reaproveita o modal existente) e recarrega a lista ao fechar
