@@ -763,51 +763,23 @@ module.exports = async function handler(req, res) {
 
       const sufixo = String(phone).replace(/\D/g, '').slice(-8);
 
-      // ⚠️ AJUSTE 23/07: essa consulta usava a coluna "phone", que não
-      // existe na tabela leads (é "telefone", como em todo o resto do
-      // arquivo) — o PostgREST rejeitava a query, leadArr virava [], e o
-      // lead nunca era encontrado aqui (as travas de "lead antigo" e "já
-      // teve consulta" abaixo nunca chegavam a rodar de verdade).
-      const leadResp = await fetch(
-        `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinicId}&telefone=ilike.*${sufixo}&select=id,created_at&limit=1`,
-        { headers: sbHeaders }
-      );
-      const leadArr = leadResp.ok ? await leadResp.json() : [];
-      const lead = leadArr[0];
-
-      // lead muito antigo (esfriou) — não transcreve mais
-      if (lead && lead.created_at) {
-        const diasDesdeCriacao = (Date.now() - new Date(lead.created_at).getTime()) / (1000 * 60 * 60 * 24);
-        if (diasDesdeCriacao > DIAS_LEAD_RECENTE) return false;
-      }
-
-      // já teve consulta no passado (já foi atendido fisicamente alguma vez)?
-      // é histórico real de paciente, não depende de status manual do Kanban
-      if (lead) {
-        const hojeISO = new Date().toISOString().split('T')[0];
-        const consultaResp = await fetch(
-          `${SUPABASE_URL}/rest/v1/consultas?clinic_id=eq.${clinicId}&lead_id=eq.${lead.id}&data=lt.${hojeISO}&status=neq.cancelado&select=id&limit=1`,
-          { headers: sbHeaders }
-        );
-        const consultaArr = consultaResp.ok ? await consultaResp.json() : [];
-        if (consultaArr.length > 0) return false;
-      }
+      // ⚠️ AJUSTE 28/07: SIMPLIFICADO por pedido do Jean — antes também
+      // bloqueava transcrição pra "lead muito antigo" e "já teve consulta
+      // no passado", pensado pra economizar chamada de transcrição em
+      // gente que provavelmente não ia mais converter. Só que isso criava
+      // um problema pior: paciente ATIVO na conversa, mandando áudio,
+      // esperando resposta — mas que por acaso já tinha uma consulta
+      // antiga (ex: faltou uma vez, meses atrás) — tomava um "desculpa,
+      // não consigo ouvir áudio" do nada, mesmo o Brian tendo acabado de
+      // transcrever outro áudio dela minutos antes sem problema nenhum.
+      // Regra nova, mais simples e mais previsível: se o Brian está no
+      // comando dessa conversa agora (não foi escalado pra humano, não
+      // foi desligado manualmente), ele ouve — não importa se o lead é
+      // antigo ou já teve consulta no passado. Isso pode custar um pouco
+      // mais em transcrição pra quem não vai converter, mas evita esse
+      // tipo de resposta estranha/inconsistente pro paciente.
 
       // ── HUMANO JÁ ASSUMIU ESSA CONVERSA? ──────────────────────────
-      // ⚠️ AJUSTE 23/07: antes checava se a ÚLTIMA MENSAGEM DA CLÍNICA
-      // tinha contact_name = 'BRIAN_AUTO'. Isso dava falso positivo o
-      // tempo todo: mensagens automáticas (confirmação de agendamento,
-      // lembrete 2h/24h — ver disparar-automacoes) são salvas com
-      // contact_name = NOME DO PACIENTE, não 'BRIAN_AUTO'. Resultado: assim
-      // que qualquer automação mandava uma mensagem — o que é rotina, quase
-      // toda conversa recebe uma confirmação em algum momento — a
-      // transcrição ficava bloqueada pra sempre, achando (errado) que um
-      // humano tinha assumido. Confirmado: 100% das tentativas recentes de
-      // transcrição vieram "pulado" em 3 clínicas diferentes por causa
-      // disso. Agora usa a MESMA fonte de verdade que o resto do sistema
-      // usa pra saber se um humano assumiu: brian_conversa.escalado /
-      // auto_desligado (setado só quando alguém realmente assume ou
-      // desliga o Brian manualmente na conversa — nunca por automação).
       const convResp = await fetch(
         `${SUPABASE_URL}/rest/v1/brian_conversa?clinic_id=eq.${clinicId}&phone=ilike.*${sufixo}&select=escalado,auto_desligado&limit=1`,
         { headers: sbHeaders }
