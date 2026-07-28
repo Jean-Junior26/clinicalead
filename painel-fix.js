@@ -8,26 +8,47 @@
 let PAINEL = { inicio: null, fim: null, atalho: 'tudo' };
 
 // ── Abrir cadastro do paciente em NOVA ABA (link direto) ────
+// ⚠️ AJUSTE 28/07: a aba nova carrega o app do ZERO — sem saber qual
+// clínica você estava vendo, ela caía sempre na primeira da lista
+// (no caso do Jean, a Araguari), então o cadastro do lead certo nunca
+// aparecia. Agora a URL leva também o ID da clínica atual, e a aba
+// nova troca pra ela ANTES de tentar abrir o lead.
 function abrirCadastroNovaAba(leadId) {
   if (!leadId) return;
-  window.open(location.origin + location.pathname + '?lead=' + leadId, '_blank');
+  const clinicId = (typeof currentClinic === 'function' && currentClinic()) ? currentClinic().id : '';
+  window.open(location.origin + location.pathname + '?lead=' + leadId + (clinicId ? '&clinic=' + clinicId : ''), '_blank');
 }
 
-// Ao abrir o app com ?lead=ID na URL, abre o cadastro automaticamente
+// Ao abrir o app com ?lead=ID (e opcionalmente &clinic=ID) na URL,
+// troca pra clínica certa (se informada) e abre o cadastro automaticamente
 (function () {
-  const leadId = new URLSearchParams(location.search).get('lead');
+  const params = new URLSearchParams(location.search);
+  const leadId = params.get('lead');
+  const clinicId = params.get('clinic');
   if (!leadId) return;
   let tentativas = 0;
-  const timer = setInterval(() => {
+  let trocouClinica = false;
+  const timer = setInterval(async () => {
     tentativas++;
-    const pronto = typeof STATE !== 'undefined' && (STATE.leads || []).length && typeof openEditLead === 'function';
-    if (pronto) {
+    const appPronto = typeof STATE !== 'undefined' && (STATE.clinics || []).length && typeof openEditLead === 'function';
+    if (!appPronto) {
+      if (tentativas > 60) clearInterval(timer); // desiste após ~30s (app não carregou)
+      return;
+    }
+    // troca pra clínica certa antes de mexer em leads (só 1x)
+    if (clinicId && !trocouClinica) {
+      trocouClinica = true;
+      const idx = (STATE.clinics || []).findIndex(c => c.id === clinicId);
+      if (idx > -1 && idx !== STATE.currentClinicIdx && typeof switchClinicById === 'function') {
+        await switchClinicById(clinicId);
+      }
+    }
+    const leadsProntos = (STATE.leads || []).length > 0;
+    if (leadsProntos || tentativas > 60) {
       clearInterval(timer);
       openEditLead(leadId);
-      // Limpa o ?lead= da URL pra que o F5 não reabra o cadastro
+      // Limpa o ?lead=/&clinic= da URL pra que o F5 não reabra o cadastro
       history.replaceState(null, '', location.origin + location.pathname);
-    } else if (tentativas > 60) {
-      clearInterval(timer); // desiste após ~30s (app não carregou)
     }
   }, 500);
 })();
