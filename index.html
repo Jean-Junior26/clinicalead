@@ -1862,7 +1862,7 @@ function renderDaySchedule(dateStr) {
         <div class="sched-time" style="color:var(--gold);">${hora}</div>
         <div class="sched-line-col"><div class="sched-dot" style="background:${dotColor};"></div></div>
         <div class="sched-info">
-          <div class="sched-name">${lead?.nome || 'Paciente'}${obsIcone}</div>
+          <div class="sched-name"${lead ? ` style="cursor:pointer;text-decoration:underline;text-decoration-color:transparent;" onmouseover="this.style.textDecorationColor='var(--gold)'" onmouseout="this.style.textDecorationColor='transparent'" onclick="event.stopPropagation();openEditLead('${lead.id}')" title="Abrir cadastro completo"` : ''}>${lead?.nome || 'Paciente'}${obsIcone}</div>
          <div class="sched-proc">${consulta.procedimento || lead?.procedimento || '—'}</div>
           <div class="sched-acts">
             ${badgeHtml(consulta.status === 'confirmado' ? 'agendado' : consulta.status)}
