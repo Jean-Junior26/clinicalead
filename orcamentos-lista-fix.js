@@ -256,10 +256,14 @@ function orcAbrirBuscaNovo() {
           <button class="btn btn-ghost btn-icon" onclick="closeModal('modalOrcBusca')"><i class="ti ti-x"></i></button>
         </div>
         <div class="modal-body">
-          <div style="position:relative;margin-bottom:12px;">
-            <i class="ti ti-search" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:15px;"></i>
-            <input type="text" id="orcBuscaNovoInput" class="form-input" placeholder="Buscar paciente por nome ou telefone..."
-              oninput="orcRenderBuscaNovo(this.value)" style="width:100%;padding:9px 12px 9px 36px;font-size:13px;" autofocus/>
+          <div style="display:flex;gap:8px;margin-bottom:12px;">
+            <div style="position:relative;flex:1;">
+              <i class="ti ti-search" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:15px;"></i>
+              <input type="text" id="orcBuscaNovoInput" class="form-input" placeholder="Buscar paciente por nome ou telefone..."
+                oninput="orcRenderBuscaNovo(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();orcRenderBuscaNovo(this.value);}"
+                style="width:100%;padding:9px 12px 9px 36px;font-size:13px;" autofocus/>
+            </div>
+            <button class="btn btn-sm btn-primary" onclick="orcRenderBuscaNovo(document.getElementById('orcBuscaNovoInput').value)" title="Buscar"><i class="ti ti-search"></i> Buscar</button>
           </div>
           <div id="orcBuscaNovoResultados" style="max-height:320px;overflow-y:auto;"></div>
           <div style="border-top:1px solid var(--border-subtle);margin-top:10px;padding-top:10px;">
@@ -273,7 +277,7 @@ function orcAbrirBuscaNovo() {
     document.body.appendChild(overlay);
   }
   document.getElementById('orcBuscaNovoInput').value = '';
-  orcRenderBuscaNovo('');
+  orcRenderBuscaNovo('__inicial__');
   document.getElementById('modalOrcBusca').classList.add('open');
   setTimeout(() => document.getElementById('orcBuscaNovoInput')?.focus(), 100);
 }
@@ -281,6 +285,14 @@ function orcAbrirBuscaNovo() {
 function orcRenderBuscaNovo(termo) {
   const el = document.getElementById('orcBuscaNovoResultados');
   if (!el) return;
+  // ⚠️ 28/07: estado inicial (modal recém-aberto, campo vazio) mostra uma
+  // mensagem convidando a digitar, em vez de despejar os 30 primeiros
+  // leads em ordem aleatória (que foi confundido com "a busca não
+  // funciona" — a lista parada de sempre, não filtrando nada).
+  if (termo === '__inicial__') {
+    el.innerHTML = `<div style="text-align:center;padding:20px;color:var(--text-muted);font-size:13px;">Digite pra buscar um paciente já cadastrado.</div>`;
+    return;
+  }
   const norm = orcNormalizarTexto(termo || '');
   let leads = STATE.leads || [];
   if (norm) {
