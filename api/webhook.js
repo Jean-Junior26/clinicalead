@@ -1791,7 +1791,14 @@ module.exports = async function handler(req, res) {
                       const histA = histR.ok ? await histR.json() : [];
                       const textoRecente = (histA || []).map(m => String(m.content || '')).join(' ').toLowerCase();
 
-                      const mencionaAmanha = /\bamanh[ãa]\b/.test(textoRecente);
+                      // ⚠️ AJUSTE 28/07: regex antiga só pegava "amanhã"/"amanha"
+                      // escrito certinho. Caso real: paciente escreveu "amaiha"
+                      // (erro de digitação comum, sem o "n") — a trava não
+                      // reconheceu, e o Brian agendou pro dia ERRADO (hoje em vez
+                      // de amanhã), sem correção nenhuma. Regex nova tolera esse
+                      // tipo de erro (qualquer coisa entre "am" e "h[ãa]" no final
+                      // da palavra), cobrindo "amanhã", "amanha", "amaiha", etc.
+                      const mencionaAmanha = /\bam[a-z]{1,4}h[ãa]/i.test(textoRecente);
                       const mencionaHoje = /\bhoje\b/.test(textoRecente);
 
                       if (mencionaAmanha && campoAgendar.data !== amanhaISOcheck) {
