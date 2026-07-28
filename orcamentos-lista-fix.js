@@ -294,11 +294,19 @@ function orcRenderBuscaNovo(termo) {
     return;
   }
   const norm = orcNormalizarTexto(termo || '');
+  const normDigitos = norm.replace(/\D/g, '');
   let leads = STATE.leads || [];
   if (norm) {
+    // ⚠️ 28/07: BUG REAL encontrado — ''.includes('') é SEMPRE true em
+    // JavaScript. Quando a busca não tinha nenhum número (ex: buscar só
+    // pelo nome "nerildo"), normDigitos virava uma string vazia, e
+    // telefone.includes('') batia como verdadeiro pra TODO mundo — por
+    // isso a lista nunca filtrava de verdade, aparecia todo mundo sempre,
+    // não importava o que fosse digitado. Agora só compara telefone
+    // quando realmente sobrou algum dígito na busca.
     leads = leads.filter(l =>
       orcNormalizarTexto(l.nome).includes(norm) ||
-      (l.telefone || '').replace(/\D/g, '').includes(norm.replace(/\D/g, ''))
+      (normDigitos && (l.telefone || '').replace(/\D/g, '').includes(normDigitos))
     );
   }
   leads = leads.slice(0, 30); // não trava a tela com lista gigante
