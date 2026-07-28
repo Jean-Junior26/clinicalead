@@ -1744,9 +1744,35 @@ function renderLeads(filter='all', search='') {
         <button class="btn btn-sm btn-ghost btn-icon" title="WhatsApp" onclick="openSendWA('${l.id}')"><i class="ti ti-brand-whatsapp" style="color:var(--gold);"></i></button>
         <button class="btn btn-sm btn-ghost btn-icon" title="Editar" onclick="openEditLead('${l.id}')"><i class="ti ti-edit"></i></button>
         <button class="btn btn-sm btn-ghost btn-icon" title="Ver" onclick="openLeadDetail('${l.id}')"><i class="ti ti-eye"></i></button>
+        <button class="btn btn-sm btn-ghost btn-icon" title="Excluir" onclick="confirmarExcluirLead('${l.id}', '${(l.nome||'esse lead').replace(/'/g, "\\'")}')"><i class="ti ti-trash" style="color:#d9534f;"></i></button>
       </div></td>
     </tr>`).join('')
     : '<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text-secondary);">Nenhum lead encontrado</td></tr>';
+}
+
+// ⚠️ AJUSTE 28/07: exclusão de lead com confirmação — pedido do Jean pra
+// dar uma limpada na lista sem correr risco de apagar sem querer.
+async function confirmarExcluirLead(leadId, nomeLead) {
+  const confirmado = confirm(`Tem certeza que deseja excluir "${nomeLead}"?\n\nIsso não pode ser desfeito.`);
+  if (!confirmado) return;
+  try {
+    const database = (typeof db !== 'undefined') ? db : (window.supabaseClient || window.sb);
+    const { error } = await database.from('leads').delete().eq('id', leadId);
+    if (error) throw error;
+    if (typeof STATE !== 'undefined' && Array.isArray(STATE.leads)) {
+      STATE.leads = STATE.leads.filter(l => l.id !== leadId);
+    }
+    if (typeof toast === 'function') toast('Lead excluído.', 'success');
+    if (typeof renderLeads === 'function') renderLeads();
+  } catch (e) {
+    console.error('[excluir lead]', e);
+    // erro mais comum: lead tem consulta/orçamento vinculado (chave estrangeira)
+    const mensagemAmigavel = String(e.message || e).includes('foreign key')
+      ? 'Não foi possível excluir — esse lead tem consulta, orçamento ou mensagem vinculada. Cancele/remova esses registros primeiro, ou mude o status pra "cancelado" em vez de excluir.'
+      : 'Erro ao excluir: ' + (e.message || e);
+    if (typeof toast === 'function') toast(mensagemAmigavel, 'error');
+    else alert(mensagemAmigavel);
+  }
 }
 
 // ── AGENDA ────────────────────────────────────
@@ -3597,6 +3623,5 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   <script src="brian-solo-modo-fix.js"></script>
   <script src="brian-solo-followup-fix.js"></script>
   <script src="simulacoes-pagina-fix.js"></script>
-  <script src="/disparos-fix.js"></script>
 </body>
 </html>
