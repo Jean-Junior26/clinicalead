@@ -176,8 +176,12 @@ function tarefasGerar() {
   // Antes olhava só "lead criado há 1h" — mas isso gerava tarefa falsa quando o Brian
   // já tinha criado E respondido o lead. Agora checa a ÚLTIMA mensagem: só é "esfriando"
   // se o lead falou por último e nem o Brian nem um humano respondeu.
+  // ⚠️ AJUSTE 28/07: exclui leads com origem "Prospecção" — são listas importadas em
+  // massa (ex: campanha de Disparos), sem conversa de propósito até a campanha rodar.
+  // Sem essa exclusão, importar uma lista de centenas de leads cria uma tarefa "fazer
+  // primeiro contato" pra CADA UM, inundando a tela de Tarefas sem necessidade.
   leads
-    .filter(l => l.status === 'novo' && l.created_at)
+    .filter(l => l.status === 'novo' && l.created_at && l.origem !== 'Prospecção')
     .forEach(l => {
       const horas = (agora - new Date(l.created_at).getTime()) / 3600000;
       if (horas < 1) return;
