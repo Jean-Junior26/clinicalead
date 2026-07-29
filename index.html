@@ -1484,9 +1484,12 @@ async function loadClinics() {
   let colaboradas = [];
   try {
     // pega os clinic_id onde este usuário é colaborador (por user_id OU email)
-    let cu = await db.from('clinic_users').select('clinic_id').eq('user_id', STATE.user.id);
+    // ⚠️ AJUSTE 28/07: adicionado .eq('ativo', true) — antes o campo "ativo"
+    // existia na tabela mas não era checado aqui, então desativar um
+    // colaborador (em vez de excluir) não tirava o acesso dele de verdade.
+    let cu = await db.from('clinic_users').select('clinic_id').eq('user_id', STATE.user.id).eq('ativo', true);
     if ((!cu.data || !cu.data.length) && STATE.user.email) {
-      cu = await db.from('clinic_users').select('clinic_id').eq('email', STATE.user.email);
+      cu = await db.from('clinic_users').select('clinic_id').eq('email', STATE.user.email).eq('ativo', true);
     }
     const ids = [...new Set((cu.data || []).map(r => r.clinic_id).filter(Boolean))];
     if (ids.length) {
