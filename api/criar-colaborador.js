@@ -62,17 +62,42 @@ export default async function handler(req, res) {
       }),
     });
     const created = await createResp.json();
+    let novoUserId = created?.id || created?.user?.id;
+
     if (!createResp.ok) {
       const msg = created?.msg || created?.error_description || created?.message || 'Erro ao criar usuário';
-      // email já existe?
+      // ⚠️ AJUSTE 28/07: antes, e-mail já existente = erro, fim de linha —
+      // impossível dar acesso a uma clínica NOVA pra um colaborador que já
+      // existia em outra, sem mexer direto no banco. Agora: se o e-mail já
+      // existe, busca o user_id dele de verdade e segue o fluxo normal,
+      // só vinculando (sem criar conta nova nem mexer na senha existente).
       if (String(msg).toLowerCase().includes('already')) {
-        return res.status(409).json({ error: 'Este email já está cadastrado no sistema' });
+        const buscaResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users?email=${encodeURIComponent(String(email).trim().toLowerCase())}`, { headers: adminHeaders });
+        const buscaData = await buscaResp.json();
+        const existente = (buscaData?.users || buscaData || [])[0];
+        if (!buscaResp.ok || !existente?.id) {
+          return res.status(409).json({ error: 'Este email já está cadastrado, mas não consegui encontrar o usuário pra vincular. Fale com o suporte.' });
+        }
+        novoUserId = existente.id;
+      } else {
+        return res.status(400).json({ error: msg });
       }
-      return res.status(400).json({ error: msg });
     }
 
-    const novoUserId = created?.id || created?.user?.id;
     if (!novoUserId) return res.status(500).json({ error: 'Usuário criado mas sem ID retornado' });
+
+    // já tem vínculo com ESSA clínica? evita duplicar — atualiza permissões em vez de inserir de novo
+    const jaVinculadoResp = await fetch(`${SUPABASE_URL}/rest/v1/clinic_users?user_id=eq.${novoUserId}&clinic_id=eq.${clinicId}&select=id`, { headers: adminHeaders });
+    const jaVinculado = await jaVinculadoResp.json();
+    if (jaVinculadoResp.ok && jaVinculado?.length) {
+      const upResp = await fetch(`${SUPABASE_URL}/rest/v1/clinic_users?id=eq.${jaVinculado[0].id}`, {
+        method: 'PATCH',
+        headers: { ...adminHeaders, Prefer: 'return=representation' },
+        body: JSON.stringify({ nome, permissoes: permissoes || {}, ativo: true }),
+      });
+      const atualizado = await upResp.json();
+      return res.status(200).json({ ok: true, colaborador: Array.isArray(atualizado) ? atualizado[0] : atualizado, jaExistia: true });
+    }
 
     // ── 3. Vincula na clinic_users com as permissões ──
     const vincResp = await fetch(`${SUPABASE_URL}/rest/v1/clinic_users`, {
@@ -91,8 +116,6 @@ export default async function handler(req, res) {
 
     if (!vincResp.ok) {
       const errText = await vincResp.text();
-      // rollback: apaga o usuário criado pra não deixar lixo
-      await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${novoUserId}`, { method: 'DELETE', headers: adminHeaders });
       return res.status(400).json({ error: 'Erro ao vincular colaborador: ' + errText });
     }
 
