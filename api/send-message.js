@@ -8,7 +8,16 @@ export default async function handler(req, res) {
   const { instance, phone, message, clinic_id } = req.body;
   if (!instance || !phone || !message) return res.status(400).json({ error: 'Campos obrigatórios: instance, phone, message' });
   const cleanPhone = phone.replace(/\D/g, '');
-  const number = cleanPhone.startsWith('55') ? cleanPhone : '55' + cleanPhone;
+  // ⚠️ AJUSTE 30/07: antes checava "começa com 55?" — isso quebrava pra
+  // QUALQUER número estrangeiro que não começasse por coincidência com 55
+  // (ex: 351... de Portugal virava 55351... um número que não existe em
+  // lugar nenhum, e a mensagem simplesmente nunca saía, sem erro visível
+  // pro usuário). Agora usa o TAMANHO do número pra decidir — mesma lógica
+  // já usada certinho em outras partes do sistema: número brasileiro sem
+  // o código do país tem no máximo 11 dígitos (DDD + 8 ou 9 dígitos); com
+  // 12+ dígitos, já tem código de país (seja 55 do Brasil, seja outro
+  // país) e não deve ser mexido.
+  const number = cleanPhone.length >= 12 ? cleanPhone : '55' + cleanPhone;
 
   try {
     const resp = await fetch(`${EVO_URL}/message/sendText/${instance}`, {
