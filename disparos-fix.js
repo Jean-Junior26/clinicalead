@@ -178,19 +178,14 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label">Contatos (${DISP.contatosSelecionados.size} selecionado${DISP.contatosSelecionados.size !== 1 ? 's' : ''})</label>
+          <label class="form-label">Contatos (<span id="dispContagemSelecionados">${DISP.contatosSelecionados.size}</span> selecionado${DISP.contatosSelecionados.size !== 1 ? 's' : ''})</label>
           <div style="display:flex;gap:8px;margin-bottom:8px;">
             <input type="text" id="dispBuscaContato" class="form-input" placeholder="Buscar por nome ou telefone..." value="${DISP.buscaContato}" oninput="dispBuscarContato(this.value)" style="flex:1;"/>
-            <button class="btn btn-sm" onclick="dispSelecionarTodosVisiveis()">Selecionar todos (${listaVisivel.length})</button>
+            <button class="btn btn-sm" id="dispBtnSelecionarTodos" onclick="dispSelecionarTodosVisiveis()">Selecionar todos (${listaVisivel.length})</button>
             <button class="btn btn-sm" onclick="dispLimparSelecao()">Limpar</button>
           </div>
-          <div style="max-height:280px;overflow-y:auto;border:1px solid var(--border-subtle);border-radius:8px;">
-            ${listaVisivel.map(l => `
-              <label style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border-subtle);cursor:pointer;">
-                <input type="checkbox" ${DISP.contatosSelecionados.has(l.id) ? 'checked' : ''} onchange="dispToggleContato('${l.id}')"/>
-                <span style="flex:1;font-size:13px;">${l.nome || 'Sem nome'}</span>
-                <span style="font-size:11px;color:var(--text-muted);">${l.telefone || ''}</span>
-              </label>`).join('') || '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px;">Nenhum contato encontrado.</div>'}
+          <div id="dispContatosLista" style="max-height:280px;overflow-y:auto;border:1px solid var(--border-subtle);border-radius:8px;">
+            ${htmlListaContatos(listaVisivel)}
           </div>
         </div>
 
@@ -200,6 +195,27 @@
         </div>
       </div>
     `;
+  }
+
+  // ⚠️ AJUSTE 28/07: extraído da renderForm pra poder atualizar SÓ a lista
+  // (não o formulário inteiro) a cada letra digitada na busca — evitava
+  // reconstruir o campo de texto enquanto a pessoa digita nele.
+  function htmlListaContatos(lista) {
+    return lista.map(l => `
+              <label style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border-subtle);cursor:pointer;">
+                <input type="checkbox" ${DISP.contatosSelecionados.has(l.id) ? 'checked' : ''} onchange="dispToggleContato('${l.id}')"/>
+                <span style="flex:1;font-size:13px;">${l.nome || 'Sem nome'}</span>
+                <span style="font-size:11px;color:var(--text-muted);">${l.telefone || ''}</span>
+              </label>`).join('') || '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px;">Nenhum contato encontrado.</div>';
+  }
+
+  function listaFiltrada() {
+    const leads = (typeof STATE !== 'undefined' && Array.isArray(STATE.leads)) ? STATE.leads : [];
+    const buscaNorm = (DISP.buscaContato || '').toLowerCase();
+    const filtrados = buscaNorm
+      ? leads.filter(l => (l.nome || '').toLowerCase().includes(buscaNorm) || (l.telefone || '').includes(buscaNorm))
+      : leads;
+    return filtrados.slice(0, 200);
   }
 
   // ── ações ──
@@ -212,7 +228,16 @@
     render();
   };
   window.dispVoltar = function () { DISP.mostrandoForm = false; render(); };
-  window.dispBuscarContato = function (v) { DISP.buscaContato = v; render(); setTimeout(() => document.getElementById('dispBuscaContato')?.focus(), 0); };
+  window.dispBuscarContato = function (v) {
+    DISP.buscaContato = v; // NÃO chama render() aqui — reconstruiria o campo de
+    // texto no meio da digitação e resetava o cursor pro início (era exatamente
+    // isso que causava "Jean" virar "naeJ": cada letra nova entrava na posição 0).
+    const lista = listaFiltrada();
+    const listaEl = document.getElementById('dispContatosLista');
+    if (listaEl) listaEl.innerHTML = htmlListaContatos(lista);
+    const btnTodos = document.getElementById('dispBtnSelecionarTodos');
+    if (btnTodos) btnTodos.textContent = `Selecionar todos (${lista.length})`;
+  };
   window.dispToggleContato = function (id) {
     if (DISP.contatosSelecionados.has(id)) DISP.contatosSelecionados.delete(id); else DISP.contatosSelecionados.add(id);
   };
