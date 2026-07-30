@@ -10,7 +10,7 @@
 
   function getDb() { return (typeof db !== 'undefined') ? db : (window.supabaseClient || window.sb || null); }
 
-  const DISP = { campanhas: [], mostrandoForm: false, contatosSelecionados: new Set(), buscaContato: '', mediaFile: null, mediaPreviewUrl: null };
+  const DISP = { campanhas: [], mostrandoForm: false, contatosSelecionados: new Set(), buscaContato: '', mediaFile: null, mediaPreviewUrl: null, editandoId: null, prefillNome: '', prefillCopy: 'Oi {nome}! 😊 Aqui é da ClinicaLead...', prefillLimite: 15, prefillMediaUrl: null, prefillMediaTipo: null };
 
   // ── injeta o item de menu + a casca da página ────────────────
   function injetar() {
@@ -91,10 +91,12 @@
       let botoes = '';
       if (c.status === 'rascunho' || c.status === 'pausada') {
         botoes += `<button class="btn btn-sm btn-primary" onclick="dispIniciar('${c.id}')"><i class="ti ti-player-play"></i> ${c.status === 'pausada' ? 'Retomar' : 'Iniciar'}</button>`;
+        botoes += `<button class="btn btn-sm" onclick="dispEditar('${c.id}')"><i class="ti ti-edit"></i> Editar</button>`;
       }
       if (c.status === 'rodando') {
         botoes += `<button class="btn btn-sm" onclick="dispPausar('${c.id}')"><i class="ti ti-player-pause"></i> Pausar</button>`;
       }
+      botoes += `<button class="btn btn-sm" onclick="dispDuplicar('${c.id}')" title="Reaproveita o texto/imagem numa campanha nova, com outra leva de contatos"><i class="ti ti-copy"></i> Rodar de novo</button>`;
       botoes += `<button class="btn btn-sm btn-danger" onclick="dispExcluir('${c.id}')"><i class="ti ti-trash"></i></button>`;
 
       return `
@@ -132,36 +134,34 @@
   }
 
   function renderForm(page) {
-    const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
-    const leads = (typeof STATE !== 'undefined' && Array.isArray(STATE.leads)) ? STATE.leads : [];
-    const buscaNorm = (DISP.buscaContato || '').toLowerCase();
-    const filtrados = buscaNorm
-      ? leads.filter(l => (l.nome || '').toLowerCase().includes(buscaNorm) || (l.telefone || '').includes(buscaNorm))
-      : leads;
-    const listaVisivel = filtrados.slice(0, 200); // não trava a tela
+    const listaVisivel = listaFiltrada();
 
     const previewMedia = DISP.mediaPreviewUrl
       ? (DISP.mediaFile && DISP.mediaFile.type.startsWith('video')
           ? `<video src="${DISP.mediaPreviewUrl}" controls style="max-width:220px;border-radius:8px;margin-top:8px;"></video>`
           : `<img src="${DISP.mediaPreviewUrl}" style="max-width:220px;border-radius:8px;margin-top:8px;"/>`)
-      : '';
+      : (DISP.prefillMediaUrl
+          ? (DISP.prefillMediaTipo === 'video'
+              ? `<video src="${DISP.prefillMediaUrl}" controls style="max-width:220px;border-radius:8px;margin-top:8px;"></video>`
+              : `<img src="${DISP.prefillMediaUrl}" style="max-width:220px;border-radius:8px;margin-top:8px;"/>`)
+          : '');
 
     page.innerHTML = `
       <div class="page-header" style="margin-bottom:16px;">
         <div class="page-header-left">
-          <h2><button class="btn btn-ghost btn-icon" onclick="dispVoltar()"><i class="ti ti-arrow-left"></i></button> Nova Campanha</h2>
+          <h2><button class="btn btn-ghost btn-icon" onclick="dispVoltar()"><i class="ti ti-arrow-left"></i></button> ${DISP.editandoId ? 'Editar Campanha' : 'Nova Campanha'}</h2>
         </div>
       </div>
 
       <div class="card" style="padding:20px;max-width:720px;">
         <div class="form-group">
           <label class="form-label">Nome da campanha (só pra você identificar)</label>
-          <input type="text" id="dispNome" class="form-input" placeholder="Ex: Prospecção GO/MT — leva 1" style="width:100%;"/>
+          <input type="text" id="dispNome" class="form-input" placeholder="Ex: Prospecção GO/MT — leva 1" value="${(DISP.prefillNome || '').replace(/"/g, '&quot;')}" style="width:100%;"/>
         </div>
 
         <div class="form-group">
           <label class="form-label">Texto da mensagem</label>
-          <textarea id="dispCopy" class="form-input" rows="6" style="width:100%;" placeholder="Oi {nome}! ...">Oi {nome}! 😊 Aqui é da ClinicaLead...</textarea>
+          <textarea id="dispCopy" class="form-input" rows="6" style="width:100%;" placeholder="Oi {nome}! ...">${DISP.prefillCopy}</textarea>
           <p style="font-size:11px;color:var(--text-muted);margin-top:4px;">Use <code>{nome}</code> no texto — é trocado automaticamente pelo nome de cada contato.</p>
         </div>
 
@@ -173,7 +173,7 @@
 
         <div class="form-group">
           <label class="form-label">Limite de envio por hora</label>
-          <input type="number" id="dispLimite" class="form-input" value="15" min="1" max="60" style="width:120px;"/>
+          <input type="number" id="dispLimite" class="form-input" value="${DISP.prefillLimite}" min="1" max="60" style="width:120px;"/>
           <p style="font-size:11px;color:var(--text-muted);margin-top:4px;">O envio roda sozinho, aos poucos, respeitando esse limite — não sai tudo de uma vez.</p>
         </div>
 
@@ -190,16 +190,13 @@
         </div>
 
         <div style="display:flex;gap:10px;margin-top:16px;">
-          <button class="btn btn-primary" onclick="dispCriarCampanha()"><i class="ti ti-check"></i> Criar Campanha</button>
+          <button class="btn btn-primary" onclick="dispCriarCampanha()"><i class="ti ti-check"></i> ${DISP.editandoId ? 'Salvar Alterações' : 'Criar Campanha'}</button>
           <button class="btn" onclick="dispVoltar()">Cancelar</button>
         </div>
       </div>
     `;
   }
 
-  // ⚠️ AJUSTE 28/07: extraído da renderForm pra poder atualizar SÓ a lista
-  // (não o formulário inteiro) a cada letra digitada na busca — evitava
-  // reconstruir o campo de texto enquanto a pessoa digita nele.
   function htmlListaContatos(lista) {
     return lista.map(l => `
               <label style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border-subtle);cursor:pointer;">
@@ -221,17 +218,72 @@
   // ── ações ──
   window.dispNovaCampanha = function () {
     DISP.mostrandoForm = true;
+    DISP.editandoId = null;
     DISP.contatosSelecionados = new Set();
     DISP.buscaContato = '';
     DISP.mediaFile = null;
     DISP.mediaPreviewUrl = null;
+    DISP.prefillNome = '';
+    DISP.prefillCopy = 'Oi {nome}! 😊 Aqui é da ClinicaLead...';
+    DISP.prefillLimite = 15;
+    DISP.prefillMediaUrl = null;
+    DISP.prefillMediaTipo = null;
     render();
   };
+
+  // ⚠️ NOVO 28/07: carrega uma campanha existente pra edição — mantém o
+  // mesmo registro (UPDATE em vez de criar outra), reaproveita os contatos
+  // que já estavam selecionados (casando por telefone, já que a fila só
+  // guarda nome/telefone, não o id do lead).
+  window.dispEditar = async function (id) {
+    const sb = getDb();
+    const { data: camp } = await sb.from('disparos_campanhas').select('*').eq('id', id).single();
+    if (!camp) { toast && toast('Não achei essa campanha.', 'error'); return; }
+    const { data: fila } = await sb.from('disparos_fila').select('telefone').eq('campanha_id', id).eq('status', 'pendente');
+    const telefones = new Set((fila || []).map(f => f.telefone));
+    const leads = (typeof STATE !== 'undefined' && Array.isArray(STATE.leads)) ? STATE.leads : [];
+
+    DISP.mostrandoForm = true;
+    DISP.editandoId = id;
+    DISP.contatosSelecionados = new Set(leads.filter(l => telefones.has(l.telefone)).map(l => l.id));
+    DISP.buscaContato = '';
+    DISP.mediaFile = null;
+    DISP.mediaPreviewUrl = null;
+    DISP.prefillNome = camp.nome || '';
+    DISP.prefillCopy = camp.copy || '';
+    DISP.prefillLimite = camp.limite_por_hora || 15;
+    DISP.prefillMediaUrl = camp.media_url || null;
+    DISP.prefillMediaTipo = camp.media_tipo || null;
+    render();
+  };
+
+  // ⚠️ NOVO 28/07: "rodar de novo" — reaproveita texto/imagem/limite de uma
+  // campanha (de qualquer status) numa campanha NOVA, com contatos zerados
+  // (evita reenviar sem querer pra quem já recebeu antes).
+  window.dispDuplicar = async function (id) {
+    const sb = getDb();
+    const { data: camp } = await sb.from('disparos_campanhas').select('*').eq('id', id).single();
+    if (!camp) { toast && toast('Não achei essa campanha.', 'error'); return; }
+
+    DISP.mostrandoForm = true;
+    DISP.editandoId = null; // vira uma campanha NOVA, não sobrescreve a antiga
+    DISP.contatosSelecionados = new Set(); // contatos ficam em branco de propósito
+    DISP.buscaContato = '';
+    DISP.mediaFile = null;
+    DISP.mediaPreviewUrl = null;
+    DISP.prefillNome = (camp.nome || '') + ' (cópia)';
+    DISP.prefillCopy = camp.copy || '';
+    DISP.prefillLimite = camp.limite_por_hora || 15;
+    DISP.prefillMediaUrl = camp.media_url || null;
+    DISP.prefillMediaTipo = camp.media_tipo || null;
+    render();
+    toast && toast('Texto e imagem reaproveitados — seleciona a nova leva de contatos.', 'info');
+  };
+
   window.dispVoltar = function () { DISP.mostrandoForm = false; render(); };
   window.dispBuscarContato = function (v) {
     DISP.buscaContato = v; // NÃO chama render() aqui — reconstruiria o campo de
-    // texto no meio da digitação e resetava o cursor pro início (era exatamente
-    // isso que causava "Jean" virar "naeJ": cada letra nova entrava na posição 0).
+    // texto no meio da digitação e resetava o cursor pro início.
     const lista = listaFiltrada();
     const listaEl = document.getElementById('dispContatosLista');
     if (listaEl) listaEl.innerHTML = htmlListaContatos(lista);
@@ -242,10 +294,7 @@
     if (DISP.contatosSelecionados.has(id)) DISP.contatosSelecionados.delete(id); else DISP.contatosSelecionados.add(id);
   };
   window.dispSelecionarTodosVisiveis = function () {
-    const leads = (typeof STATE !== 'undefined' && Array.isArray(STATE.leads)) ? STATE.leads : [];
-    const buscaNorm = (DISP.buscaContato || '').toLowerCase();
-    const filtrados = buscaNorm ? leads.filter(l => (l.nome || '').toLowerCase().includes(buscaNorm) || (l.telefone || '').includes(buscaNorm)) : leads;
-    filtrados.slice(0, 200).forEach(l => DISP.contatosSelecionados.add(l.id));
+    listaFiltrada().forEach(l => DISP.contatosSelecionados.add(l.id));
     render();
   };
   window.dispLimparSelecao = function () { DISP.contatosSelecionados = new Set(); render(); };
@@ -271,7 +320,10 @@
     if (!clinic) return;
 
     const sb = getDb();
-    let media_url = null, media_tipo = null;
+    // se não escolheu mídia nova, mas está editando/duplicando com mídia
+    // já existente, mantém a mídia antiga em vez de apagar.
+    let media_url = DISP.prefillMediaUrl || null;
+    let media_tipo = DISP.prefillMediaTipo || null;
 
     try {
       if (DISP.mediaFile) {
@@ -286,23 +338,48 @@
         media_tipo = file.type.startsWith('video') ? 'video' : 'image';
       }
 
-      const { data: campanha, error: errCamp } = await sb.from('disparos_campanhas').insert({
-        clinic_id: clinic.id, nome, copy, media_url, media_tipo, limite_por_hora: limite, status: 'rascunho',
-      }).select().single();
-      if (errCamp) throw errCamp;
-
       const leads = (typeof STATE !== 'undefined' && Array.isArray(STATE.leads)) ? STATE.leads : [];
       const selecionados = leads.filter(l => DISP.contatosSelecionados.has(l.id));
-      const linhas = selecionados.map(l => ({ campanha_id: campanha.id, nome: l.nome || null, telefone: l.telefone, status: 'pendente' }));
-      const { error: errFila } = await sb.from('disparos_fila').insert(linhas);
-      if (errFila) throw errFila;
+      const linhas = selecionados.map(l => ({ nome: l.nome || null, telefone: l.telefone, status: 'pendente' }));
 
-      toast && toast('Campanha criada! Clica em "Iniciar" quando quiser começar a mandar.', 'success');
+      let campanhaId = DISP.editandoId;
+
+      if (DISP.editandoId) {
+        // ── EDITANDO: atualiza a campanha existente ──
+        const { error: errUp } = await sb.from('disparos_campanhas').update({
+          nome, copy, media_url, media_tipo, limite_por_hora: limite,
+        }).eq('id', DISP.editandoId);
+        if (errUp) throw errUp;
+
+        // substitui só os PENDENTES (mantém histórico de já enviados/erros)
+        const { error: errDel } = await sb.from('disparos_fila').delete().eq('campanha_id', DISP.editandoId).eq('status', 'pendente');
+        if (errDel) throw errDel;
+
+        const linhasComId = linhas.map(l => ({ ...l, campanha_id: DISP.editandoId }));
+        const { error: errFila } = await sb.from('disparos_fila').insert(linhasComId);
+        if (errFila) throw errFila;
+
+        toast && toast('Campanha atualizada!', 'success');
+      } else {
+        // ── NOVA (ou duplicada): cria do zero ──
+        const { data: campanha, error: errCamp } = await sb.from('disparos_campanhas').insert({
+          clinic_id: clinic.id, nome, copy, media_url, media_tipo, limite_por_hora: limite, status: 'rascunho',
+        }).select().single();
+        if (errCamp) throw errCamp;
+        campanhaId = campanha.id;
+
+        const linhasComId = linhas.map(l => ({ ...l, campanha_id: campanhaId }));
+        const { error: errFila } = await sb.from('disparos_fila').insert(linhasComId);
+        if (errFila) throw errFila;
+
+        toast && toast('Campanha criada! Clica em "Iniciar" quando quiser começar a mandar.', 'success');
+      }
+
       DISP.mostrandoForm = false;
       renderDisparosPage();
     } catch (e) {
-      console.error('[disparos] erro ao criar campanha', e);
-      toast && toast('Erro ao criar campanha: ' + (e.message || e), 'error');
+      console.error('[disparos] erro ao salvar campanha', e);
+      toast && toast('Erro ao salvar campanha: ' + (e.message || e), 'error');
     }
   };
 
