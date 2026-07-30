@@ -534,7 +534,7 @@ async function tarefaAdiar(chave) {
 function tarefaWhats(telefone) {
   const d = String(telefone).replace(/\D/g, '');
   if (!d) return;
-  const n = d.startsWith('55') ? d : '55' + d;
+  const n = d.length >= 12 ? d : '55' + d;
   window.open('https://wa.me/' + n, '_blank');
 }
 
