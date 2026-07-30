@@ -672,7 +672,7 @@ module.exports = async function handler(req, res) {
       if (!casos.length) { console.log(`[BRIAN-CASOS] nenhum caso de "${proc}" pra enviar`); return false; }
 
       const cleanPhone = String(phone).replace(/\D/g, '');
-      const number = cleanPhone.startsWith('55') ? cleanPhone : '55' + cleanPhone;
+      const number = cleanPhone.length >= 12 ? cleanPhone : '55' + cleanPhone;
 
       let enviou = false;
       for (const caso of casos) {
@@ -932,7 +932,7 @@ module.exports = async function handler(req, res) {
   async function enviarAudioWhatsApp(instanceName, phone, audioBase64) {
     try {
       const cleanPhone = String(phone).replace(/\D/g, '');
-      const number = cleanPhone.startsWith('55') ? cleanPhone : '55' + cleanPhone;
+      const number = cleanPhone.length >= 12 ? cleanPhone : '55' + cleanPhone;
       const resp = await fetch(`${EVO_URL}/message/sendWhatsAppAudio/${instanceName}`, {
         method: 'POST',
         headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
@@ -1018,7 +1018,7 @@ module.exports = async function handler(req, res) {
   async function responderPaciente(instanceName, clinicId, phone, message, marcador) {
     try {
       const cleanPhone = String(phone).replace(/\D/g, '');
-      const number = cleanPhone.startsWith('55') ? cleanPhone : '55' + cleanPhone;
+      const number = cleanPhone.length >= 12 ? cleanPhone : '55' + cleanPhone;
       const r = await fetch(`${EVO_URL}/message/sendText/${instanceName}`, {
         method: 'POST',
         headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
@@ -1873,7 +1873,7 @@ module.exports = async function handler(req, res) {
                               // salva no histórico + storage, pra tocar depois no inbox
                               try {
                                 const cleanPhoneVoz = String(phone).replace(/\D/g, '');
-                                const numberVoz = cleanPhoneVoz.startsWith('55') ? cleanPhoneVoz : '55' + cleanPhoneVoz;
+                                const numberVoz = cleanPhoneVoz.length >= 12 ? cleanPhoneVoz : '55' + cleanPhoneVoz;
                                 const nomeArquivo = `tts_${numberVoz}_${Date.now()}.mp3`;
                                 const upload = await fetch(`${SUPABASE_URL}/storage/v1/object/audios/${nomeArquivo}`, {
                                   method: 'POST',
@@ -1939,7 +1939,7 @@ module.exports = async function handler(req, res) {
                             const imgBase64 = await gerarSimulacaoSorriso(fotoUrl, simularTipo);
                             if (imgBase64) {
                               const cleanPhoneSim = String(phone).replace(/\D/g, '');
-                              const numberSim = cleanPhoneSim.startsWith('55') ? cleanPhoneSim : '55' + cleanPhoneSim;
+                              const numberSim = cleanPhoneSim.length >= 12 ? cleanPhoneSim : '55' + cleanPhoneSim;
                               const nomeArquivoSim = `sim_${simularTipo}_${numberSim}_${Date.now()}.png`;
                               const uploadSim = await fetch(`${SUPABASE_URL}/storage/v1/object/midias/${nomeArquivoSim}`, {
                                 method: 'POST',
@@ -2167,7 +2167,7 @@ async function handleGerarSimulacao(req, res, cfg) {
     let enviado = false;
     if (phone && instance_name && EVO_KEY) {
       const cleanPhone = String(phone).replace(/\D/g, '');
-      const number = cleanPhone.startsWith('55') ? cleanPhone : '55' + cleanPhone;
+      const number = cleanPhone.length >= 12 ? cleanPhone : '55' + cleanPhone;
       await fetch(`${EVO_URL}/message/sendMedia/${instance_name}`, {
         method: 'POST',
         headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
@@ -2216,7 +2216,7 @@ async function handleEnviarImagemPronta(req, res, cfg) {
 
     const legendaFinal = caption || '✨ Isso é só uma *simulação ilustrativa* — o resultado real é sempre definido na sua avaliação com a dentista, viu? 💙';
     const cleanPhone = String(phone).replace(/\D/g, '');
-    const number = cleanPhone.startsWith('55') ? cleanPhone : '55' + cleanPhone;
+    const number = cleanPhone.length >= 12 ? cleanPhone : '55' + cleanPhone;
 
     await fetch(`${EVO_URL}/message/sendMedia/${instance_name}`, {
       method: 'POST',
