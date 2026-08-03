@@ -182,6 +182,18 @@
           <button class="btn ${waConectado ? 'btn-primary' : ''}" onclick="abrirGerenciarNumeros('${c.id}')" style="width:100%;${waConectado ? '' : 'background:var(--bg-elevated);'}">
             <i class="ti ti-${waConectado ? 'qrcode' : 'plus'}"></i> ${waConectado ? 'Gerenciar / Reconectar WhatsApp' : 'Gerenciar números extras'}
           </button>
+
+          <!-- ⚠️ NOVO 01/08: botão da API Oficial (Embedded Signup) —
+          separado do fluxo Evolution/QR Code acima. Mostra o status
+          se essa clínica já usa a API Oficial. -->
+          <div style="margin-top:18px;padding-top:18px;border-top:1px solid var(--border-subtle);">
+            <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px;">
+              ${c.tipo_conexao_whatsapp === 'oficial' ? '✅ Conectado via API Oficial (Meta)' : 'API Oficial do WhatsApp (recomendado — sem risco de banimento)'}
+            </div>
+            <button class="btn btn-primary" id="btnConectarWhatsAppOficial" onclick="iniciarConexaoOficial('${c.id}')" style="width:100%;">
+              <i class="ti ti-brand-whatsapp"></i> ${c.tipo_conexao_whatsapp === 'oficial' ? 'Reconectar API Oficial' : 'Conectar WhatsApp (API Oficial)'}
+            </button>
+          </div>
         </div>
 
       </div>`;
