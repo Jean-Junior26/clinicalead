@@ -1,4 +1,21 @@
 module.exports = async function handler(req, res) {
+  // ════════════════════════════════════════════════════════════
+  // ⚠️ NOVO 01/08 — VERIFICAÇÃO DE WEBHOOK DA META (Cloud API)
+  // Quando você cadastra a Callback URL no painel da Meta, ela manda
+  // um GET com hub.mode/hub.verify_token/hub.challenge — precisa
+  // devolver EXATAMENTE o hub.challenge (texto puro, não JSON) se o
+  // token bater. Sem isso, a Meta recusa cadastrar o webhook.
+  // O Verify Token é escolhido por nós (qualquer texto), só precisa
+  // ser o MESMO no painel da Meta e aqui.
+  // ════════════════════════════════════════════════════════════
+  const META_VERIFY_TOKEN = process.env.META_WEBHOOK_VERIFY_TOKEN || 'clinicalead-verify-2026';
+  if (req.method === 'GET' && req.query && req.query['hub.mode'] === 'subscribe') {
+    if (req.query['hub.verify_token'] === META_VERIFY_TOKEN) {
+      return res.status(200).send(req.query['hub.challenge']);
+    }
+    return res.status(403).send('Token de verificação não bate');
+  }
+
   if (req.method !== 'POST') return res.status(200).json({ ok: true });
 
   const SUPABASE_URL = process.env.SUPABASE_URL || 'https://zcwntpkiispbhjjgidih.supabase.co';
@@ -13,6 +30,70 @@ module.exports = async function handler(req, res) {
     Authorization: `Bearer ${SUPABASE_KEY}`,
     'Content-Type': 'application/json',
   };
+
+  // ════════════════════════════════════════════════════════════
+  // ⚠️ NOVO 01/08 — MENSAGEM CHEGANDO PELA API OFICIAL (Meta)
+  // O formato do corpo é bem diferente do Evolution — detectamos
+  // pelo campo "object" (só a Meta manda isso com esse valor exato).
+  // Por enquanto: SÓ grava no histórico (pra aparecer no Inbox
+  // igualzinho às outras conversas) — o Brian responder
+  // automaticamente por esse caminho é o próximo passo, ainda não
+  // ligado aqui, pra não arriscar nada às pressas.
+  // ════════════════════════════════════════════════════════════
+  if (req.body && req.body.object === 'whatsapp_business_account') {
+    try {
+      const entry = req.body.entry?.[0];
+      const change = entry?.changes?.[0];
+      const value = change?.value;
+      const phoneNumberId = value?.metadata?.phone_number_id;
+      const msg = value?.messages?.[0];
+
+      // sem mensagem de verdade (pode ser só um status de "entregue/lido") — ignora
+      if (!msg || !phoneNumberId) return res.status(200).json({ ok: true, ignorado: 'sem mensagem de texto' });
+
+      // acha a clínica pelo phone_number_id (muito mais confiável que o
+      // "sufixo de telefone" que o Evolution precisa usar)
+      const clinicaResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/clinicas?meta_phone_number_id=eq.${phoneNumberId}&select=id,nome&limit=1`,
+        { headers: sbHeaders }
+      );
+      const clinicaArr = await clinicaResp.json();
+      const clinica = clinicaArr[0];
+      if (!clinica) return res.status(200).json({ ok: true, ignorado: 'phone_number_id não corresponde a nenhuma clínica' });
+
+      const telefoneLead = msg.from; // já vem só com dígitos, com código do país
+      const nomeContato = value?.contacts?.[0]?.profile?.name || null;
+      let conteudo = '';
+      let tipo = 'text';
+      if (msg.type === 'text') { conteudo = msg.text?.body || ''; tipo = 'text'; }
+      else if (msg.type === 'image') { conteudo = '🖼️ Imagem'; tipo = 'image'; }
+      else if (msg.type === 'audio') { conteudo = '🎵 Áudio'; tipo = 'audio'; }
+      else if (msg.type === 'video') { conteudo = '🎬 Vídeo'; tipo = 'video'; }
+      else if (msg.type === 'document') { conteudo = '📄 Documento'; tipo = 'document'; }
+      else { conteudo = `[${msg.type}]`; tipo = msg.type; }
+
+      await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
+        method: 'POST',
+        headers: { ...sbHeaders, Prefer: 'return=minimal,resolution=ignore-duplicates' },
+        body: JSON.stringify({
+          clinic_id: clinica.id,
+          phone: telefoneLead,
+          contact_name: nomeContato,
+          content: conteudo,
+          type: tipo,
+          from_me: false,
+          message_id: msg.id,
+          instance_name: phoneNumberId,
+          created_at: new Date().toISOString(),
+        }),
+      });
+
+      return res.status(200).json({ ok: true, clinica: clinica.nome, gravado: true });
+    } catch (e) {
+      console.error('[META-WEBHOOK] erro:', e.message);
+      return res.status(200).json({ ok: false, erro: e.message }); // sempre 200 pra Meta não ficar re-tentando em loop
+    }
+  }
 
   // ── DESVIO: geração de simulação visual (chamado pela página "Simulações"
   // do CRM, não é webhook do WhatsApp) — reaproveita este mesmo arquivo em
