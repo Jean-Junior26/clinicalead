@@ -1,6 +1,66 @@
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
+  // ⚠️ NOVO 01/08 — finaliza o Embedded Signup: troca o "code" que o
+  // botão do frontend recebeu por um token de acesso de verdade, busca
+  // os dados da WABA/número conectados, e salva tudo no banco. O App
+  // Secret NUNCA aparece no código nem no chat — vem de uma variável
+  // de ambiente configurada direto no painel da Vercel (Settings >
+  // Environment Variables > META_APP_SECRET).
+  if (req.body?.modo === 'finalizar_embedded_signup') {
+    const SUPABASE_URL = process.env.SUPABASE_URL || 'https://zcwntpkiispbhjjgidih.supabase.co';
+    const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
+    const META_APP_ID = '2170841700506560';
+    const META_APP_SECRET = process.env.META_APP_SECRET;
+    const { clinic_id, code } = req.body;
+
+    if (!clinic_id || !code) return res.status(400).json({ error: 'Faltou clinic_id ou code' });
+    if (!META_APP_SECRET) return res.status(500).json({ error: 'META_APP_SECRET não configurado nas variáveis de ambiente da Vercel' });
+
+    try {
+      // 1) troca o code por um token de acesso (curto prazo primeiro)
+      const tokenResp = await fetch(
+        `https://graph.facebook.com/v21.0/oauth/access_token?client_id=${META_APP_ID}&client_secret=${META_APP_SECRET}&code=${code}`
+      );
+      const tokenData = await tokenResp.json();
+      if (!tokenResp.ok) return res.status(400).json({ ok: false, erro: 'Falha ao trocar código por token', detalhe: tokenData });
+      const accessToken = tokenData.access_token;
+
+      // 2) descobre quais WABAs esse token tem acesso (o Embedded Signup
+      // já entrega isso de forma direta, via "debug_token" ou consultando
+      // as contas vinculadas ao usuário do sistema que autorizou)
+      const wabaResp = await fetch(
+        `https://graph.facebook.com/v21.0/me?fields=businesses{owned_whatsapp_business_accounts{id,name,phone_numbers{id,display_phone_number,verified_name}}}&access_token=${accessToken}`
+      );
+      const wabaData = await wabaResp.json();
+      const negocio = wabaData?.businesses?.data?.[0];
+      const waba = negocio?.owned_whatsapp_business_accounts?.data?.[0];
+      const numero = waba?.phone_numbers?.data?.[0];
+
+      if (!waba || !numero) {
+        return res.status(400).json({ ok: false, erro: 'Não encontrei WABA/número vinculado a essa conexão', detalhe: wabaData });
+      }
+
+      // 3) salva no banco
+      const upResp = await fetch(`${SUPABASE_URL}/rest/v1/clinicas?id=eq.${clinic_id}`, {
+        method: 'PATCH',
+        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', Prefer: 'return=representation' },
+        body: JSON.stringify({
+          tipo_conexao_whatsapp: 'oficial',
+          meta_phone_number_id: numero.id,
+          meta_waba_id: waba.id,
+          meta_access_token: accessToken,
+          meta_app_id: META_APP_ID,
+        }),
+      });
+      if (!upResp.ok) return res.status(500).json({ ok: false, erro: 'Falha ao salvar no banco', detalhe: await upResp.text() });
+
+      return res.status(200).json({ ok: true, waba: waba.name, numero: numero.display_phone_number });
+    } catch (e) {
+      return res.status(500).json({ ok: false, erro: 'Erro interno', message: e.message });
+    }
+  }
+
   // ⚠️ AJUSTE 01/08 (parte 2): erro 133010 "Account not registered" — o
   // número aparece "Conectado" no painel visual, mas ainda falta um passo
   // técnico separado (chamada de registro na API) antes de conseguir
