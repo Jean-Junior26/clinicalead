@@ -41,21 +41,40 @@ export default async function handler(req, res) {
         return res.status(400).json({ ok: false, erro: 'Não encontrei WABA/número vinculado a essa conexão', detalhe: wabaData });
       }
 
+      // ⚠️ AJUSTE 01/08: o token que o Embedded Signup devolve pode ter
+      // expiração (ex: 60 dias, dependendo do template usado na
+      // configuração) — NUNCA sobrescreve um token PERMANENTE que já
+      // esteja salvo (gerado manualmente via System User antes). O
+      // Embedded Signup aqui serve só pra IDENTIFICAR/conectar a
+      // WABA/número; quem realmente opera o envio/recebimento continua
+      // sendo o token permanente já validado e funcionando.
+      const clinicaAtualResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/clinicas?id=eq.${clinic_id}&select=meta_access_token`,
+        { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+      );
+      const clinicaAtualArr = await clinicaAtualResp.json();
+      const jaTinhaTokenPermanente = !!(clinicaAtualArr[0]?.meta_access_token);
+
+      const camposParaSalvar = {
+        tipo_conexao_whatsapp: 'oficial',
+        meta_phone_number_id: numero.id,
+        meta_waba_id: waba.id,
+        meta_app_id: META_APP_ID,
+      };
+      if (!jaTinhaTokenPermanente) {
+        // só usa o token do Embedded Signup se AINDA não tiver nenhum salvo
+        camposParaSalvar.meta_access_token = accessToken;
+      }
+
       // 3) salva no banco
       const upResp = await fetch(`${SUPABASE_URL}/rest/v1/clinicas?id=eq.${clinic_id}`, {
         method: 'PATCH',
         headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', Prefer: 'return=representation' },
-        body: JSON.stringify({
-          tipo_conexao_whatsapp: 'oficial',
-          meta_phone_number_id: numero.id,
-          meta_waba_id: waba.id,
-          meta_access_token: accessToken,
-          meta_app_id: META_APP_ID,
-        }),
+        body: JSON.stringify(camposParaSalvar),
       });
       if (!upResp.ok) return res.status(500).json({ ok: false, erro: 'Falha ao salvar no banco', detalhe: await upResp.text() });
 
-      return res.status(200).json({ ok: true, waba: waba.name, numero: numero.display_phone_number });
+      return res.status(200).json({ ok: true, waba: waba.name, numero: numero.display_phone_number, token_preservado: jaTinhaTokenPermanente });
     } catch (e) {
       return res.status(500).json({ ok: false, erro: 'Erro interno', message: e.message });
     }
