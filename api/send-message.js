@@ -1,6 +1,43 @@
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
+  // ⚠️ AJUSTE 01/08 (parte 2): erro 133010 "Account not registered" — o
+  // número aparece "Conectado" no painel visual, mas ainda falta um passo
+  // técnico separado (chamada de registro na API) antes de conseguir
+  // mandar mensagem de verdade. Isso é feito 1 vez só por número, nunca
+  // mais precisa repetir depois que funcionar. PIN de 6 dígitos é
+  // escolhido na hora — só precisa lembrar dele se um dia migrar esse
+  // número de servidor de novo.
+  if (req.body?.modo === 'registrar_numero_oficial') {
+    const SUPABASE_URL = process.env.SUPABASE_URL || 'https://zcwntpkiispbhjjgidih.supabase.co';
+    const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
+    const { clinic_id, pin } = req.body;
+    if (!clinic_id || !pin) return res.status(400).json({ error: 'Faltou clinic_id ou pin (6 dígitos, ex: "123456")' });
+    try {
+      const clinicaResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/clinicas?id=eq.${clinic_id}&select=nome,meta_phone_number_id,meta_access_token`,
+        { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+      );
+      const clinicaArr = await clinicaResp.json();
+      const clinica = clinicaArr[0];
+      if (!clinica) return res.status(404).json({ error: 'Clínica não encontrada' });
+
+      const regResp = await fetch(
+        `https://graph.facebook.com/v21.0/${clinica.meta_phone_number_id}/register`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${clinica.meta_access_token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messaging_product: 'whatsapp', pin: String(pin) }),
+        }
+      );
+      const regData = await regResp.json();
+      if (!regResp.ok) return res.status(400).json({ ok: false, erro: 'Falha ao registrar', detalhe: regData });
+      return res.status(200).json({ ok: true, mensagem: `Número da clínica "${clinica.nome}" registrado com sucesso!`, detalhe: regData });
+    } catch (e) {
+      return res.status(500).json({ ok: false, erro: 'Erro interno', message: e.message });
+    }
+  }
+
   // ⚠️ AJUSTE 01/08: modo de TESTE da API Oficial (Meta), embutido aqui
   // em vez de criar um arquivo novo — o plano Hobby da Vercel só permite
   // 12 funções serverless, e já estávamos no limite. Ativa passando
