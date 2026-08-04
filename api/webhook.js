@@ -386,6 +386,39 @@ module.exports = async function handler(req, res) {
     return proc;
   }
 
+  // ⚠️ NOVO 01/08: busca a foto de perfil do lead via Evolution API (só
+  // funciona pra conexão não-oficial — API Oficial da Meta não permite
+  // acesso a isso). Roda em segundo plano, nunca trava nem quebra o
+  // fluxo principal — se falhar por qualquer motivo, simplesmente não
+  // salva foto nenhuma, sem erro visível pro paciente.
+  async function buscarEAtualizarFotoPerfil(clinic_id, leadId, phone) {
+    try {
+      // já tem foto? não gasta chamada de novo
+      const leadResp = await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}&select=foto_perfil_url`, { headers: sbHeaders });
+      const leadArr = leadResp.ok ? await leadResp.json() : [];
+      if (leadArr[0]?.foto_perfil_url) return; // já tem, não busca de novo
+
+      const clinicaResp = await fetch(`${SUPABASE_URL}/rest/v1/clinicas?id=eq.${clinic_id}&select=whatsapp_instance,tipo_conexao_whatsapp`, { headers: sbHeaders });
+      const clinicaArr = clinicaResp.ok ? await clinicaResp.json() : [];
+      const clinica = clinicaArr[0];
+      if (!clinica?.whatsapp_instance || clinica.tipo_conexao_whatsapp === 'oficial') return; // API Oficial não suporta isso
+
+      const fotoResp = await fetch(`${EVO_URL}/chat/fetchProfilePictureUrl/${clinica.whatsapp_instance}`, {
+        method: 'POST',
+        headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ number: phone }),
+      });
+      if (!fotoResp.ok) return; // sem foto, ou contato não achado — tudo bem, ignora
+      const fotoData = await fotoResp.json();
+      if (!fotoData.profilePictureUrl) return;
+
+      await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}`, {
+        method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
+        body: JSON.stringify({ foto_perfil_url: fotoData.profilePictureUrl }),
+      });
+    } catch (e) { /* best-effort — silencioso de propósito */ }
+  }
+
   async function brianAcharOuCriarLead(clinic_id, phone, nome, origem, procInteresse, nomeConfirmado = false) {
     try {
       const digitos = String(phone).replace(/\D/g, '');
@@ -446,8 +479,10 @@ module.exports = async function handler(req, res) {
           });
           if (patch.nome) console.log(`[BRIAN-LEAD] ✏️ nome atualizado: "${atual}" → "${patch.nome}"`);
           if (patch.procedimento) console.log(`[BRIAN-LEAD] 🎯 procedimento atualizado: "${arr[0].procedimento || ''}" → "${patch.procedimento}"`);
+          buscarEAtualizarFotoPerfil(clinic_id, arr[0].id, digitos).catch(() => {});
           return { id: arr[0].id, nome: patch.nome || atual };
         }
+        buscarEAtualizarFotoPerfil(clinic_id, arr[0].id, digitos).catch(() => {});
         return arr[0];
       }
 
@@ -470,7 +505,9 @@ module.exports = async function handler(req, res) {
       if (!ins.ok) { console.log('[BRIAN-LEAD] falha ao criar lead:', await ins.text()); return null; }
       const criado = await ins.json();
       console.log(`[BRIAN-LEAD] ✅ lead criado: ${novo.nome} (${digitos})`);
-      return Array.isArray(criado) ? criado[0] : criado;
+      const leadCriado = Array.isArray(criado) ? criado[0] : criado;
+      if (leadCriado?.id) buscarEAtualizarFotoPerfil(clinic_id, leadCriado.id, digitos).catch(() => {});
+      return leadCriado;
     } catch (e) { console.log('[BRIAN-LEAD] erro:', e.message); return null; }
   }
 
