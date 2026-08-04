@@ -2853,8 +2853,15 @@ function renderInboxList() {
     const isActive = INBOX.activeChat?.id === c.id;
     const timeStr = formatMsgTime(c.time);
     const ini = c.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+    // ⚠️ NOVO 01/08: foto de perfil quando disponível (só clínicas em
+    // conexão Evolution têm isso — API Oficial da Meta não permite).
+    // Sem foto salva, cai automaticamente nas iniciais de sempre.
+    const fotoUrl = c.lead?.foto_perfil_url;
+    const avatarHtml = fotoUrl
+      ? `<img src="${fotoUrl}" class="inbox-avatar" style="object-fit:cover;" onerror="this.outerHTML='<div class=&quot;inbox-avatar&quot;>${ini}</div>'"/>`
+      : `<div class="inbox-avatar">${ini}</div>`;
     return `<div class="inbox-item ${isActive ? 'active' : ''} ${c.lead ? 'is-lead' : ''}" onclick="openChat('${c.id}')">
-      <div class="inbox-avatar">${ini}</div>
+      ${avatarHtml}
       <div class="inbox-item-info">
         <div class="inbox-item-name">
           ${c.name}
