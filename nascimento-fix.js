@@ -30,6 +30,7 @@ saveNewLead = async function () {
   const newLead = {
     clinic_id: currentClinic().id,
     nome,
+    nome_confirmado: true, // ⚠️ 06/08: mesma correção — nome digitado manualmente aqui é confirmado, não provisório
     telefone: document.getElementById('nlPhone').value,
     procedimento,
     origem: document.getElementById('nlSource').value,
@@ -50,8 +51,9 @@ saveNewLead = async function () {
 // ── Edição: salvar com a data ────────────────────────────────
 saveEditLead = async function () {
   const id = document.getElementById('editLeadId').value;
+  const nomeDigitado = document.getElementById('editLeadName').value;
   const updates = {
-    nome: document.getElementById('editLeadName').value,
+    nome: nomeDigitado,
     telefone: document.getElementById('editLeadPhone').value,
     procedimento: document.getElementById('editLeadProc').value,
     valor: parseFloat(document.getElementById('editLeadValue').value) || null,
@@ -60,6 +62,15 @@ saveEditLead = async function () {
     observacoes: document.getElementById('editLeadObs').value,
     data_nascimento: document.getElementById('editLeadNascimento')?.value || null,
   };
+  // ⚠️ CORREÇÃO 06/08: esse arquivo (nascimento-fix.js) SUBSTITUI inteira a
+  // função saveEditLead original — e a substituição tinha esquecido de marcar
+  // nome_confirmado=true. Sem isso, o nome digitado aqui salvava certinho no
+  // banco, mas ficava marcado como "não confirmado" — e a próxima mensagem
+  // recebida pelo WhatsApp (via webhook.js) via essa marcação como sinal de
+  // "nome ainda provisório, pode substituir", trocando de volta pro nome
+  // salvo no contato do WhatsApp da pessoa. Casos reais: Elaíde e José
+  // Bonifácio — nome editado manualmente "voltava" pro nome do WhatsApp.
+  if (nomeDigitado && nomeDigitado.trim()) updates.nome_confirmado = true;
   const { error } = await db.from('leads').update(updates).eq('id', id);
   if (error) { toast('Erro ao salvar: ' + error.message, 'error'); return; }
   const l = STATE.leads.find(x => x.id === id);
