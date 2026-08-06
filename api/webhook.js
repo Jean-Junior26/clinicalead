@@ -1130,6 +1130,7 @@ module.exports = async function handler(req, res) {
                   }
 
                   let agendamentoConflito = false;
+                  let agendamentoMsgErro = '';
                   if (campoAgendar && campoAgendar.data && campoAgendar.hora) {
                     try {
                       const fmtBRcheck = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' });
@@ -1186,15 +1187,37 @@ module.exports = async function handler(req, res) {
                       if (r.ok && !r.jaAgendado) {
                         await brianEnviarConfirmacao(instanceName, clinic_id, phone, campoAgendar.nome || lead.nome, campoAgendar.data, campoAgendar.hora);
                       } else if (!r.ok) {
-                        if (r.motivo === 'horário já ocupado' || r.motivo === 'dentista já ocupado nesse horário' || r.motivo === 'horário no passado') {
-                          agendamentoConflito = true;
+                        // ⚠️ CORREÇÃO 06/08: antes só tratava 3 motivos específicos de
+                        // falha (horário ocupado, dentista ocupado, horário no passado)
+                        // — qualquer OUTRO motivo (fora da grade do dia, clínica fechada
+                        // naquele dia, dados incompletos, erro de inserção, etc.) ficava
+                        // SEM tratamento nenhum: o código simplesmente seguia adiante e
+                        // mandava a resposta normal do Brian (que geralmente já soa como
+                        // confirmação, por ele ter sido instruído a fechar com
+                        // confiança) — criando uma "confirmação fantasma": o paciente
+                        // lia como se tivesse agendado, mas nada foi criado no banco.
+                        // Caso real: Jean pediu sábado 10h, Brian respondeu confirmando
+                        // com confiança, mas a consulta nunca foi criada (bem provável
+                        // 10h não estar na grade cadastrada daquele dia). Agora QUALQUER
+                        // motivo de falha vira aviso real pro paciente — nunca mais uma
+                        // falha vira silêncio disfarçado de sucesso.
+                        agendamentoConflito = true;
+                        await logDebug(clinic_id, phone, 'agendar', 'falhou', `motivo: ${r.motivo} | data=${campoAgendar.data} hora=${campoAgendar.hora}`);
+                        if (r.motivo === 'horário já ocupado' || r.motivo === 'dentista já ocupado nesse horário') {
+                          agendamentoMsgErro = 'Ihh, esse horário já está ocupado 😅 Mas me diz: qual outro dia ou período fica bom pra você? Aí já confirmo um horário certinho! 😊';
+                        } else if (r.motivo === 'horário no passado') {
+                          agendamentoMsgErro = 'Opa, esse horário já passou 😅 Me fala outro dia/horário que funcione melhor pra você que já reservo certinho!';
+                        } else if (String(r.motivo || '').includes('fechad') || String(r.motivo || '').includes('grade')) {
+                          agendamentoMsgErro = 'Ah, nesse dia/horário específico a gente não atende 😅 Me fala outro dia ou período que fica melhor pra você, que já vejo um horário certinho!';
+                        } else {
+                          agendamentoMsgErro = 'Opa, tive um probleminha técnico aqui pra confirmar esse horário 😅 Pode me falar de novo o dia e horário que você prefere? Já ajusto certinho!';
                         }
                       }
                     }
                   }
 
                   if (agendamentoConflito) {
-                    await responderPaciente(instanceName, clinic_id, phone, 'Ihh, esse horário já está ocupado 😅 Mas me diz: qual outro dia ou período fica bom pra você? Aí já confirmo um horário certinho! 😊', 'BRIAN_AUTO');
+                    await responderPaciente(instanceName, clinic_id, phone, agendamentoMsgErro, 'BRIAN_AUTO');
                   } else if (textoResposta) {
                     let audioEnviadoComSucesso = false;
 
