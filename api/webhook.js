@@ -1,12 +1,6 @@
 module.exports = async function handler(req, res) {
   // ════════════════════════════════════════════════════════════
-  // ⚠️ NOVO 01/08 — VERIFICAÇÃO DE WEBHOOK DA META (Cloud API)
-  // Quando você cadastra a Callback URL no painel da Meta, ela manda
-  // um GET com hub.mode/hub.verify_token/hub.challenge — precisa
-  // devolver EXATAMENTE o hub.challenge (texto puro, não JSON) se o
-  // token bater. Sem isso, a Meta recusa cadastrar o webhook.
-  // O Verify Token é escolhido por nós (qualquer texto), só precisa
-  // ser o MESMO no painel da Meta e aqui.
+  // ⚠️ VERIFICAÇÃO DE WEBHOOK DA META (Cloud API)
   // ════════════════════════════════════════════════════════════
   const META_VERIFY_TOKEN = process.env.META_WEBHOOK_VERIFY_TOKEN || 'clinicalead-verify-2026';
   if (req.method === 'GET' && req.query && req.query['hub.mode'] === 'subscribe') {
@@ -32,13 +26,7 @@ module.exports = async function handler(req, res) {
   };
 
   // ════════════════════════════════════════════════════════════
-  // ⚠️ NOVO 01/08 — MENSAGEM CHEGANDO PELA API OFICIAL (Meta)
-  // O formato do corpo é bem diferente do Evolution — detectamos
-  // pelo campo "object" (só a Meta manda isso com esse valor exato).
-  // Por enquanto: SÓ grava no histórico (pra aparecer no Inbox
-  // igualzinho às outras conversas) — o Brian responder
-  // automaticamente por esse caminho é o próximo passo, ainda não
-  // ligado aqui, pra não arriscar nada às pressas.
+  // ⚠️ MENSAGEM CHEGANDO PELA API OFICIAL (Meta Cloud API)
   // ════════════════════════════════════════════════════════════
   if (req.body && req.body.object === 'whatsapp_business_account') {
     try {
@@ -51,8 +39,7 @@ module.exports = async function handler(req, res) {
       // sem mensagem de verdade (pode ser só um status de "entregue/lido") — ignora
       if (!msg || !phoneNumberId) return res.status(200).json({ ok: true, ignorado: 'sem mensagem de texto' });
 
-      // acha a clínica pelo phone_number_id (muito mais confiável que o
-      // "sufixo de telefone" que o Evolution precisa usar)
+      // acha a clínica pelo phone_number_id
       const clinicaResp = await fetch(
         `${SUPABASE_URL}/rest/v1/clinicas?meta_phone_number_id=eq.${phoneNumberId}&select=id,nome&limit=1`,
         { headers: sbHeaders }
@@ -61,7 +48,7 @@ module.exports = async function handler(req, res) {
       const clinica = clinicaArr[0];
       if (!clinica) return res.status(200).json({ ok: true, ignorado: 'phone_number_id não corresponde a nenhuma clínica' });
 
-      const telefoneLead = msg.from; // já vem só com dígitos, com código do país
+      const telefoneLead = msg.from; // já vem só com dígitos
       const nomeContato = value?.contacts?.[0]?.profile?.name || null;
       let conteudo = '';
       let tipo = 'text';
@@ -72,6 +59,7 @@ module.exports = async function handler(req, res) {
       else if (msg.type === 'document') { conteudo = '📄 Documento'; tipo = 'document'; }
       else { conteudo = `[${msg.type}]`; tipo = msg.type; }
 
+      // 1. Grava a mensagem no histórico de mensagens
       await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
         method: 'POST',
         headers: { ...sbHeaders, Prefer: 'return=minimal,resolution=ignore-duplicates' },
@@ -88,57 +76,46 @@ module.exports = async function handler(req, res) {
         }),
       });
 
+      // 2. CORREÇÃO: Garante a criação/atualização do Lead para aparecer no Inbox do CRM
+      const procDaMsg = (tipo === 'text') ? extrairProcedimentoDaMsg(conteudo) : null;
+      await brianAcharOuCriarLead(clinica.id, telefoneLead, nomeContato, 'WhatsApp Meta', procDaMsg, false);
+
       return res.status(200).json({ ok: true, clinica: clinica.nome, gravado: true });
     } catch (e) {
       console.error('[META-WEBHOOK] erro:', e.message);
-      return res.status(200).json({ ok: false, erro: e.message }); // sempre 200 pra Meta não ficar re-tentando em loop
+      return res.status(200).json({ ok: false, erro: e.message }); // sempre 200 pra Meta não ficar tentando em loop
     }
   }
 
-  // ── DESVIO: geração de simulação visual (chamado pela página "Simulações"
-  // do CRM, não é webhook do WhatsApp) — reaproveita este mesmo arquivo em
-  // vez de criar um arquivo novo em api/, porque o plano Hobby da Vercel
-  // tem limite de 12 Serverless Functions (já estávamos no limite).
+  // ── DESVIO: geração de simulação visual (chamado pela página "Simulações")
   if (req.body && req.body.action === 'gerar_simulacao') {
     return await handleGerarSimulacao(req, res, { SUPABASE_URL, SUPABASE_KEY, EVO_URL, EVO_KEY, sbHeaders });
   }
 
-  // ── DESVIO: envia uma imagem JÁ PRONTA (ex: a montagem antes/depois
-  // desenhada no canvas do navegador) — sem gerar nada novo na IA, só
-  // sobe e manda. Evita gastar uma chamada de IA extra ao reenviar.
+  // ── DESVIO: envia uma imagem JÁ PRONTA
   if (req.body && req.body.action === 'enviar_imagem_pronta') {
     return await handleEnviarImagemPronta(req, res, { SUPABASE_URL, SUPABASE_KEY, EVO_URL, EVO_KEY, sbHeaders });
   }
 
-  // ── DESVIO: detecta a região (boca, nariz, orelha...) na foto, via IA
-  // de visão — usado pra recortar só o pedaço certo antes de editar,
-  // evitando que a IA de imagem mexa no rosto inteiro.
+  // ── DESVIO: detecta a região na foto
   if (req.body && req.body.action === 'detectar_regiao') {
     return await handleDetectarRegiao(req, res);
   }
 
   // ════════════════════════════════════════════════════════════
   // BRIAN 2.3.a — CÉREBRO DA DECISÃO (NÃO ENVIA NADA AINDA)
-  // Checa as 7 travas e retorna se o Brian DEVERIA responder.
-  // Nesta etapa só LOGAMOS a decisão (pra você validar sem risco).
   // ════════════════════════════════════════════════════════════
   async function brianDecide(clinic_id, phone, content, instanceName, fromMe, isGroup) {
     const motivo = (ok, razao) => ({ responder: ok, razao });
     try {
-      // ── Anti-loop: nunca responde a própria mensagem ──
       if (fromMe) return motivo(false, 'mensagem da própria clínica (from_me)');
-
-      // ── Trava 3a: não responde grupos ──
       if (isGroup) return motivo(false, 'é grupo de WhatsApp');
-
-      // só texto faz sentido pro Brian responder
       if (!content || !String(content).trim()) return motivo(false, 'sem conteúdo de texto');
 
       const digitos = String(phone).replace(/\D/g, '');
       const sufixo = digitos.slice(-8);
       if (sufixo.length < 8) return motivo(false, 'telefone inválido');
 
-      // ── CONTATO PROTEGIDO (família/amigo) — Brian NUNCA responde ──
       try {
         const protR = await fetch(
           `${SUPABASE_URL}/rest/v1/contatos_protegidos?clinic_id=eq.${clinic_id}&select=phone`,
@@ -149,13 +126,9 @@ module.exports = async function handler(req, res) {
           const protegido = (prot || []).some(p => String(p.phone).replace(/\D/g, '').slice(-8) === sufixo);
           if (protegido) return motivo(false, 'contato protegido (pessoal) — Brian não responde');
         }
-      } catch (e) { /* se falhar, segue o fluxo normal */ }
+      } catch (e) { }
 
-      // ── Anti-loop EXTRA: não responde números que são instâncias conectadas ──
-      // (se o número que mandou for outra instância da própria clínica/sistema, ignora —
-      //  senão dois números conectados ficariam se respondendo em loop infinito).
       try {
-        // checa se o sufixo bate com alguma instância registrada (nome costuma conter o número)
         const instAllResp = await fetch(
           `${SUPABASE_URL}/rest/v1/instancias?select=instance_name`,
           { headers: sbHeaders }
@@ -165,7 +138,7 @@ module.exports = async function handler(req, res) {
           const ehInstancia = (instAll || []).some(i => String(i.instance_name || '').replace(/\D/g, '').includes(sufixo));
           if (ehInstancia) return motivo(false, 'número é uma instância conectada (anti-loop)');
         }
-      } catch (e) { /* se falhar, segue (outras travas protegem) */ }
+      } catch (e) { }
       const cfgResp = await fetch(
         `${SUPABASE_URL}/rest/v1/brian_config?clinic_id=eq.${clinic_id}&select=auto_ativo,auto_so_fora_horario,auto_modo,horario_funcionamento,palavras_anuncio,brian_liberado,escopo&limit=1`,
         { headers: sbHeaders }
@@ -173,13 +146,9 @@ module.exports = async function handler(req, res) {
       const cfgArr = cfgResp.ok ? await cfgResp.json() : [];
       const cfg = cfgArr[0];
 
-      // ── Trava 7: liberado pelo admin? ──
       if (!cfg || cfg.brian_liberado !== true) return motivo(false, 'clínica não liberada pelo admin');
-
-      // ── Trava 1: chave geral do automático ligada? ──
       if (cfg.auto_ativo !== true) return motivo(false, 'atendimento automático desligado (chave geral)');
 
-      // ── Trava 4: conversa com Brian desligado? (vence a geral) ──
       const convResp = await fetch(
         `${SUPABASE_URL}/rest/v1/brian_conversa?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixo}&select=auto_desligado,humano_respondeu_em,msgs_contador,contador_data,escalado&limit=1`,
         { headers: sbHeaders }
@@ -188,32 +157,19 @@ module.exports = async function handler(req, res) {
       const conv = convArr[0];
       if (conv && conv.auto_desligado === true) return motivo(false, 'Brian desligado nesta conversa (chave por conversa)');
 
-      // ── Trava 8: limite de mensagens por conversa (anti-abuso / protege saldo) ──
-      // Brian responde no máximo LIMITE_MSGS por conversa por dia. Reseta a cada 24h.
       const LIMITE_MSGS = 12;
       const hojeBRT = new Date(Date.now() - 3 * 3600 * 1000).toISOString().split('T')[0];
       if (conv) {
-        // se o contador é de hoje e já bateu o limite → não responde (escala)
         const contadorHoje = (conv.contador_data === hojeBRT) ? (conv.msgs_contador || 0) : 0;
         if (contadorHoje >= LIMITE_MSGS) {
           return motivo(false, `limite de ${LIMITE_MSGS} mensagens atingido na conversa (escalado pra equipe)`);
         }
       }
 
-      // ── Trava 2 (horário): depende do MODO de atendimento ──
-      //   'sempre' (Ágil)   = responde a qualquer hora (recuo do humano cuida do resto)
-      //   'fora'  (Cauteloso) = só responde fora do horário de funcionamento
-      // Compatibilidade: se auto_modo não existir, cai no comportamento antigo (auto_so_fora_horario).
       const modo = cfg.auto_modo || (cfg.auto_so_fora_horario === false ? 'sempre' : 'fora');
       if (modo !== 'sempre') {
         const dentro = dentroDoHorario(cfg.horario_funcionamento);
         if (dentro) {
-          // ── EXCEÇÃO: CONVERSA ASSUMIDA PELO BRIAN (resgate do vácuo) ──
-          // Se a última mensagem da CLÍNICA nesta conversa foi do próprio Brian
-          // (BRIAN_AUTO) nas últimas 6h, ele já assumiu este atendimento (a
-          // equipe não respondeu a tempo) e CONTINUA respondendo dentro do
-          // horário — até um humano entrar (a Trava 5 abaixo devolve pra equipe
-          // assim que alguém da clínica responder manualmente).
           let brianAssumiu = false;
           try {
             const seisHoras = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
@@ -223,35 +179,18 @@ module.exports = async function handler(req, res) {
             );
             const uArrR = ultR.ok ? await ultR.json() : [];
             brianAssumiu = !!(uArrR[0] && uArrR[0].contact_name === 'BRIAN_AUTO');
-          } catch (e) { /* na dúvida, comportamento padrão (recua) */ }
+          } catch (e) { }
           if (!brianAssumiu) return motivo(false, 'dentro do horário de atendimento (modo Cauteloso: humano assume)');
-          console.log(`[BRIAN-RESGATE] conversa assumida pelo Brian — continua respondendo dentro do horário | ...${sufixo}`);
         }
       }
 
-      // ── Trava 5: humano respondeu recentemente? (recua) ──
-      // Janela de recuo: se um humano da equipe respondeu nos últimos X minutos,
-      // o Brian recua (não atropela o atendimento humano). Ajuste MIN_RECUO_HUMANO
-      // conforme necessário: menor = Brian volta mais rápido (lead não fica no vácuo),
-      // maior = mais respeito ao atendimento humano em andamento.
-      const MIN_RECUO_HUMANO = 30; // minutos
+      const MIN_RECUO_HUMANO = 30;
       const janelaRecuo = new Date(Date.now() - MIN_RECUO_HUMANO * 60 * 1000).toISOString();
       const humResp = await fetch(
         `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixo}&from_me=eq.true&created_at=gte.${janelaRecuo}&select=content,contact_name,created_at&order=created_at.desc&limit=5`,
         { headers: sbHeaders }
       );
       const humArr = humResp.ok ? await humResp.json() : [];
-      // mensagens automáticas conhecidas (não contam como "humano")
-      // ⚠️ AJUSTE 25/07: lista expandida — estava curta demais e deixava passar
-      // várias mensagens automáticas de verdade (confirmação de agendamento,
-      // follow-ups de "dias sem resposta", indicação, reativação) como se
-      // fossem um humano da equipe respondendo. Caso real: follow-up "Passei
-      // aqui pra saber se ficou alguma dúvida sobre o que conversamos..."
-      // não batia com nenhuma frase da lista antiga, então o Brian achou que
-      // um humano tinha assumido e ficou 30min calado, ignorando a resposta
-      // do lead logo em seguida. Esse tipo de detecção por palavra-chave
-      // sempre vai ser um pouco frágil (o texto muda com variações do
-      // template), mas uma lista mais ampla cobre a maioria dos casos reais.
       const marcadoresAuto = [
         'confirma sua presença', 'lembrar que', 'sua consulta está', 'está *confirmada*',
         'parabéns', 'avaliação gratuita', 'passei aqui', 'ficou alguma dúvida',
@@ -264,19 +203,14 @@ module.exports = async function handler(req, res) {
       const normMsg = (x) => String(x || '').trim().toLowerCase();
       const conteudoAtual = normMsg(content);
       const humanoAtivo = humArr.some(m => {
-        // IMPORTANTE: ignora as RESPOSTAS DO PRÓPRIO BRIAN (marcadas como BRIAN_AUTO),
-        // senão o Brian acha que "o humano respondeu" sendo que foi ele mesmo.
         if (m.contact_name === 'BRIAN_AUTO') return false;
         const c = normMsg(m.content);
-        // ignora a PRÓPRIA mensagem recém-chegada (alguns sistemas/testes a salvam como from_me)
         if (c === conteudoAtual) return false;
-        // ignora mensagens automáticas (lembrete, follow-up, etc.)
         if (marcadoresAuto.some(mk => c.includes(mk))) return false;
-        return true; // sobrou uma mensagem real da clínica = humano ativo
+        return true;
       });
       if (humanoAtivo) return motivo(false, 'humano respondeu recentemente (Brian recua)');
 
-      // ── Trava 6: saldo disponível? ──
       const saldoResp = await fetch(
         `${SUPABASE_URL}/rest/v1/brian_saldo?clinic_id=eq.${clinic_id}&select=incluso_mes,usado_mes,extra_comprado,extra_usado&limit=1`,
         { headers: sbHeaders }
@@ -286,8 +220,6 @@ module.exports = async function handler(req, res) {
       const disp = s ? ((s.incluso_mes || 0) - (s.usado_mes || 0)) + ((s.extra_comprado || 0) - (s.extra_usado || 0)) : 0;
       if (disp <= 0) return motivo(false, 'sem saldo de mensagens');
 
-      // ── Trava 3b: número novo só responde se mencionar palavra-chave ──
-      // "novo" = sem consulta e sem histórico longo. Checa se já é lead conhecido.
       const leadResp = await fetch(
         `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinic_id}&telefone=ilike.*${sufixo}&select=id,status&limit=1`,
         { headers: sbHeaders }
@@ -295,12 +227,6 @@ module.exports = async function handler(req, res) {
       const leadArr = leadResp.ok ? await leadResp.json() : [];
       const jaEhLead = leadArr.length > 0;
 
-      // ── Trava 9 (escopo "somente leads"): Brian não atende quem já é paciente ──
-      // Modo 'somente_leads': o Brian foca em captar/qualificar quem ainda não é
-      // paciente. Status 'compareceu' e 'fechado' marcam paciente conhecido —
-      // seja importado em massa (importar-pacientes-fix.js) ou fechado pelo Brian
-      // no funil normal. Nesses casos ele fica quieto e deixa pra equipe humana,
-      // que atende pelo mesmo número.
       if (cfg.escopo === 'somente_leads' && jaEhLead) {
         const statusPaciente = ['compareceu', 'fechado'];
         if (statusPaciente.includes(leadArr[0].status)) {
@@ -309,7 +235,6 @@ module.exports = async function handler(req, res) {
       }
 
       if (!jaEhLead) {
-        // número novo: precisa mencionar palavra-chave (da clínica OU padrão de intenção)
         const norm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
         const txt = norm(content);
         const padrao = ['preco', 'preço', 'valor', 'valores', 'quanto custa', 'quanto fica', 'quanto', 'custa',
@@ -327,54 +252,37 @@ module.exports = async function handler(req, res) {
         const todasPalavras = [...padrao, ...daClinica];
         let bateu = todasPalavras.some(p => p && txt.includes(p));
 
-        // FILOSOFIA: na dúvida, RESPONDE. Um lead real que manda "oi" e é ignorado
-        // some pra sempre. O custo de responder "Olá, como posso ajudar?" é mínimo;
-        // perder um lead é muito pior. Então saudações e mensagens normais são atendidas.
-        // A trava só vale pra RUÍDO óbvio (mensagem sem nada útil), não pra "oi".
         if (!bateu) {
           const limpo = txt.trim();
-          // ruído real: vazio, só pontuação/emoji/números soltos, ou link cru sem texto
           const soPontuacaoOuEmoji = !/[a-z0-9á-ú]/i.test(limpo);
           const soNumeros = /^\d+$/.test(limpo.replace(/\s/g, ''));
           const soLink = /^https?:\/\/\S+$/i.test(limpo);
           const ehRuido = soPontuacaoOuEmoji || soNumeros || soLink || limpo.length < 2;
-          // se NÃO é ruído (ou seja, é uma mensagem humana de verdade, inclusive "oi"), responde
           if (!ehRuido) bateu = true;
         }
 
         if (!bateu) return motivo(false, 'número novo enviou apenas ruído (sem texto útil)');
       }
 
-      // ── Passou em todas as travas! ──
       return motivo(true, jaEhLead ? 'lead conhecido, fora do horário, com saldo' : 'número novo com palavra-chave de interesse');
     } catch (e) {
       return motivo(false, 'erro na decisão: ' + (e.message || ''));
     }
   }
 
-  // helper: está dentro do horário de funcionamento agora? (BRT)
   function dentroDoHorario(horario) {
     try {
-      if (!horario || typeof horario !== 'object') return false; // sem horário cadastrado = sempre "fora" (Brian pode assumir)
-      const agora = new Date(Date.now() - 3 * 3600 * 1000); // BRT
+      if (!horario || typeof horario !== 'object') return false;
+      const agora = new Date(Date.now() - 3 * 3600 * 1000);
       const dias = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'];
       const diaKey = dias[agora.getUTCDay()];
       const faixa = horario[diaKey];
-      if (!faixa || !faixa.abre || !faixa.fecha) return false; // dia fechado = fora do horário
+      if (!faixa || !faixa.abre || !faixa.fecha) return false;
       const hhmm = `${String(agora.getUTCHours()).padStart(2, '0')}:${String(agora.getUTCMinutes()).padStart(2, '0')}`;
       return hhmm >= faixa.abre && hhmm <= faixa.fecha;
     } catch (e) { return false; }
   }
 
-  // ════════════════════════════════════════════════════════════
-  // BRIAN FASE 3 PARTE 3 — CRIAR LEAD E AGENDAR DE VERDADE
-  // ════════════════════════════════════════════════════════════
-
-  // Acha o lead pelo telefone; se não existe, cria. Retorna o lead {id, nome} ou null.
-  // Extrai o procedimento de interesse da mensagem padrão de ANÚNCIO.
-  // Leads de tráfego chegam com "Olá! Quero saber mais sobre X!" — o X é
-  // exatamente o procedimento da campanha. Capturamos na criação do lead
-  // (senão essa informação valiosa se perde e o lead fica só "Avaliação").
   function extrairProcedimentoDaMsg(texto) {
     const t = String(texto || '').trim();
     const m = t.match(/quero saber mais sobre\s+(.{2,60}?)[!.?\s]*$/i)
@@ -386,29 +294,23 @@ module.exports = async function handler(req, res) {
     return proc;
   }
 
-  // ⚠️ NOVO 01/08: busca a foto de perfil do lead via Evolution API (só
-  // funciona pra conexão não-oficial — API Oficial da Meta não permite
-  // acesso a isso). Roda em segundo plano, nunca trava nem quebra o
-  // fluxo principal — se falhar por qualquer motivo, simplesmente não
-  // salva foto nenhuma, sem erro visível pro paciente.
   async function buscarEAtualizarFotoPerfil(clinic_id, leadId, phone) {
     try {
-      // já tem foto? não gasta chamada de novo
       const leadResp = await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${leadId}&select=foto_perfil_url`, { headers: sbHeaders });
       const leadArr = leadResp.ok ? await leadResp.json() : [];
-      if (leadArr[0]?.foto_perfil_url) return; // já tem, não busca de novo
+      if (leadArr[0]?.foto_perfil_url) return;
 
       const clinicaResp = await fetch(`${SUPABASE_URL}/rest/v1/clinicas?id=eq.${clinic_id}&select=whatsapp_instance,tipo_conexao_whatsapp`, { headers: sbHeaders });
       const clinicaArr = clinicaResp.ok ? await clinicaResp.json() : [];
       const clinica = clinicaArr[0];
-      if (!clinica?.whatsapp_instance || clinica.tipo_conexao_whatsapp === 'oficial') return; // API Oficial não suporta isso
+      if (!clinica?.whatsapp_instance || clinica.tipo_conexao_whatsapp === 'oficial') return;
 
       const fotoResp = await fetch(`${EVO_URL}/chat/fetchProfilePictureUrl/${clinica.whatsapp_instance}`, {
         method: 'POST',
         headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
         body: JSON.stringify({ number: phone }),
       });
-      if (!fotoResp.ok) return; // sem foto, ou contato não achado — tudo bem, ignora
+      if (!fotoResp.ok) return;
       const fotoData = await fotoResp.json();
       if (!fotoData.profilePictureUrl) return;
 
@@ -416,7 +318,7 @@ module.exports = async function handler(req, res) {
         method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
         body: JSON.stringify({ foto_perfil_url: fotoData.profilePictureUrl }),
       });
-    } catch (e) { /* best-effort — silencioso de propósito */ }
+    } catch (e) { }
   }
 
   async function brianAcharOuCriarLead(clinic_id, phone, nome, origem, procInteresse, nomeConfirmado = false) {
@@ -424,16 +326,7 @@ module.exports = async function handler(req, res) {
       const digitos = String(phone).replace(/\D/g, '');
       const sufixo = digitos.slice(-8);
       const nomeLimpo = (nome || '').trim();
-      // 1) já existe?
-      // ⚠️ AJUSTE 12/07: antes buscava com "ilike.*sufixo" comparando
-      // direto contra o texto salvo — se o telefone estivesse cadastrado
-      // COM formatação (ex: "(17) 97603-3342"), o traço/parênteses no
-      // meio quebravam a comparação e o sistema achava que era gente
-      // nova, criando um lead DUPLICADO (achamos 23 casos assim numa
-      // clínica só). Agora: busca um conjunto de candidatos com um
-      // filtro mais largo (só os últimos 4 dígitos, que bate mesmo com
-      // formatação no meio), e compara de verdade em código, ignorando
-      // qualquer formatação dos dois lados.
+
       const sufixoCurto = digitos.slice(-4);
       const rCand = await fetch(
         `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinic_id}&telefone=ilike.*${sufixoCurto}&select=id,nome,procedimento,telefone,nome_confirmado&limit=100`,
@@ -444,30 +337,12 @@ module.exports = async function handler(req, res) {
       const arr = achado ? [achado] : [];
       if (arr[0] && arr[0].id) {
         const patch = {};
-        // se chegou um nome REAL e o atual ainda não foi CONFIRMADO pela pessoa
-        // na conversa, atualiza.
-        // ⚠️ AJUSTE 22/07: antes decidia "é provisório?" contando palavras do nome
-        // atual (< 2 palavras = provisório). Isso falhava quando o nome salvo era
-        // o nome/apelido do CONTATO do WhatsApp (ex: "Luh Mattos" — 2 palavras,
-        // mas é o pushName, não o nome real dito na conversa). Como já tinha
-        // "sobrenome", o sistema achava que já era definitivo e NUNCA deixava o
-        // nome verdadeiro que a pessoa informou (ex: "Luciane dos Santos Mattos",
-        // via marcador [[LEAD]]) sobrescrever. Agora usa nome_confirmado — o
-        // único jeito de um nome virar "definitivo" é a própria pessoa ter dito
-        // na conversa (nomeConfirmado=true lá na chamada), não a contagem de
-        // palavras do que veio do perfil do WhatsApp.
         const atual = (arr[0].nome || '').trim();
         const ehProvisorio = !atual || atual === 'Lead WhatsApp' || !arr[0].nome_confirmado;
         const nomeNovoEhReal = nomeLimpo && nomeLimpo !== 'Lead WhatsApp' && nomeLimpo.split(/\s+/).length >= 1;
         if (ehProvisorio && nomeNovoEhReal && nomeLimpo !== atual) patch.nome = nomeLimpo;
-        // ⚠️ AJUSTE 12/07: marca nome_confirmado só quando o nome veio de
-        // verdade da pessoa dizendo na conversa (marcador [[LEAD]]), nunca
-        // quando é só o nome/apelido salvo no WhatsApp dela (nomeProvisorio).
-        // Mensagens automáticas (lembrete, reativação) só usam o nome
-        // quando esse campo é true — evita "Oi, Louco!" em mensagem automática.
         if (nomeConfirmado && nomeLimpo && !arr[0].nome_confirmado) patch.nome_confirmado = true;
-        // se chegou um procedimento de interesse e o atual é o placeholder "Avaliação"
-        // (ou vazio), atualiza — assim o lead ganha o interesse real (lentes, implante...)
+
         const procAtual = (arr[0].procedimento || '').trim().toLowerCase();
         if (procInteresse && (!procAtual || procAtual === 'avaliação' || procAtual === 'avaliacao')) {
           patch.procedimento = procInteresse;
@@ -477,8 +352,6 @@ module.exports = async function handler(req, res) {
             method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
             body: JSON.stringify(patch),
           });
-          if (patch.nome) console.log(`[BRIAN-LEAD] ✏️ nome atualizado: "${atual}" → "${patch.nome}"`);
-          if (patch.procedimento) console.log(`[BRIAN-LEAD] 🎯 procedimento atualizado: "${arr[0].procedimento || ''}" → "${patch.procedimento}"`);
           buscarEAtualizarFotoPerfil(clinic_id, arr[0].id, digitos).catch(() => {});
           return { id: arr[0].id, nome: patch.nome || atual };
         }
@@ -486,7 +359,6 @@ module.exports = async function handler(req, res) {
         return arr[0];
       }
 
-      // 2) não existe → cria (com o procedimento de interesse, se veio do anúncio)
       const novo = {
         clinic_id,
         nome: nomeLimpo || 'Lead WhatsApp',
@@ -502,18 +374,14 @@ module.exports = async function handler(req, res) {
         headers: { ...sbHeaders, Prefer: 'return=representation' },
         body: JSON.stringify(novo),
       });
-      if (!ins.ok) { console.log('[BRIAN-LEAD] falha ao criar lead:', await ins.text()); return null; }
+      if (!ins.ok) return null;
       const criado = await ins.json();
-      console.log(`[BRIAN-LEAD] ✅ lead criado: ${novo.nome} (${digitos})`);
       const leadCriado = Array.isArray(criado) ? criado[0] : criado;
       if (leadCriado?.id) buscarEAtualizarFotoPerfil(clinic_id, leadCriado.id, digitos).catch(() => {});
       return leadCriado;
-    } catch (e) { console.log('[BRIAN-LEAD] erro:', e.message); return null; }
+    } catch (e) { return null; }
   }
 
-  // Move o lead pra status 'contato' (em atendimento) quando a clínica responde —
-  // seja o Brian, um humano pelo WhatsApp, ou pelo Inbox do sistema.
-  // Só muda se o lead ainda está 'novo' — não rebaixa quem já avançou (agendado/etc).
   async function marcarLeadEmAtendimento(clinic_id, phone) {
     try {
       const sufixo = String(phone).replace(/\D/g, '').slice(-8);
@@ -525,21 +393,15 @@ module.exports = async function handler(req, res) {
       const arr = r.ok ? await r.json() : [];
       const lead = arr[0];
       if (!lead || !lead.id) return;
-      // só promove de 'novo' pra 'contato' (não mexe em agendado/confirmado/fechado/etc)
       if (lead.status === 'novo') {
         await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${lead.id}`, {
           method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
           body: JSON.stringify({ status: 'contato' }),
         });
-        console.log(`[BRIAN-LEAD] 📞 lead movido pra 'contato' (em atendimento): ${lead.id}`);
       }
-    } catch (e) { console.log('[BRIAN-LEAD] erro ao marcar em atendimento:', e.message); }
+    } catch (e) { }
   }
 
-  // Resolve o dentista_id a partir de um NOME (vindo do direcionamento do Brian).
-  // O Brian decide o nome do dentista (lendo o direcionamento no template) e manda
-  // no marcador [[AGENDAR|...|dentista=Nome]]. Aqui casamos esse nome com a tabela
-  // dentistas da clínica. Se a clínica não tem dentistas, retorna null (sem dentista).
   async function brianResolverDentista(clinic_id, nomeDentista) {
     try {
       const r = await fetch(
@@ -547,103 +409,64 @@ module.exports = async function handler(req, res) {
         { headers: sbHeaders }
       );
       const lista = r.ok ? await r.json() : [];
-      if (!lista.length) return null; // clínica sem dentistas → consulta sem dentista (compatível)
+      if (!lista.length) return null;
 
       const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
       const alvo = norm(nomeDentista);
 
       if (alvo) {
-        // 1) match exato; 2) match por "contém" (ex.: "Ana" casa "Dra. Ana Paula")
         let achou = lista.find(d => norm(d.nome) === alvo);
         if (!achou) achou = lista.find(d => norm(d.nome).includes(alvo) || alvo.includes(norm(d.nome)));
         if (achou) return achou.id;
       }
-      // se não casou nome (ou Brian não mandou nome): usa o PRIMEIRO dentista como padrão
-      // (evita consulta sem dentista numa clínica que tem dentistas cadastrados)
       return lista[0].id;
-    } catch (e) { console.log('[BRIAN-DENTISTA] erro ao resolver:', e.message); return null; }
+    } catch (e) { return null; }
   }
 
-  // Cria a consulta ocupando o horário. Travas: data/hora válidas, não no passado,
-  // horário existe na grade e está LIVRE (anti-duplo-agendamento). Retorna true se criou.
   async function brianCriarConsulta(clinic_id, lead_id, data, hora, dentista_id, telefonePaciente) {
     try {
       if (!lead_id || !data || !hora) return { ok: false, motivo: 'dados incompletos' };
-      // formato data AAAA-MM-DD e hora HH:MM
       if (!/^\d{4}-\d{2}-\d{2}$/.test(data) || !/^\d{2}:\d{2}$/.test(hora)) {
         return { ok: false, motivo: 'formato inválido' };
       }
-      // trava: não agendar no passado (BRT)
       const agoraBRT = new Date(Date.now() - 3 * 3600 * 1000);
       const hojeISO = agoraBRT.toISOString().split('T')[0];
       const horaAgora = `${String(agoraBRT.getUTCHours()).padStart(2, '0')}:${String(agoraBRT.getUTCMinutes()).padStart(2, '0')}`;
       if (data < hojeISO || (data === hojeISO && hora <= horaAgora)) {
         return { ok: false, motivo: 'horário no passado' };
       }
-      // trava: o horário está na grade DAQUELE DIA DA SEMANA (agenda_padrao)?
-      // calcula o dia da semana da data (0=domingo ... 6=sábado)
       const diaSemana = new Date(`${data}T12:00:00`).getDay();
 
-      // 0) EXCEÇÃO pra essa data específica (feriado/fechado)?
       const exR = await fetch(`${SUPABASE_URL}/rest/v1/agenda_excecoes?clinic_id=eq.${clinic_id}&data=eq.${data}&select=fechado,horarios&limit=1`, { headers: sbHeaders });
       const exA = exR.ok ? await exR.json() : [];
       if (exA.length) {
         const ex = exA[0];
-        if (ex.fechado !== false) {
-          return { ok: false, motivo: 'clínica fechada nesse dia (feriado/exceção)' };
-        }
-        // dia com horário especial: valida contra ele
+        if (ex.fechado !== false) return { ok: false, motivo: 'clínica fechada nesse dia (feriado/exceção)' };
         const gradeEx = Array.isArray(ex.horarios) ? ex.horarios : [];
-        if (gradeEx.length && !gradeEx.includes(hora)) {
-          return { ok: false, motivo: 'horário fora da grade especial do dia' };
-        }
-        // se passou na exceção, pula a checagem de padrão
+        if (gradeEx.length && !gradeEx.includes(hora)) return { ok: false, motivo: 'horário fora da grade especial do dia' };
       } else {
-        // tenta a agenda-padrão
         const padR = await fetch(`${SUPABASE_URL}/rest/v1/agenda_padrao?clinic_id=eq.${clinic_id}&dia_semana=eq.${diaSemana}&select=horarios,ativo&limit=1`, { headers: sbHeaders });
         const padA = padR.ok ? await padR.json() : [];
         if (padA.length) {
           const row = padA[0];
-          if (row.ativo === false) {
-            return { ok: false, motivo: 'clínica fechada nesse dia' };
-          }
+          if (row.ativo === false) return { ok: false, motivo: 'clínica fechada nesse dia' };
           const gradeDia = Array.isArray(row.horarios) ? row.horarios : [];
-          if (gradeDia.length && !gradeDia.includes(hora)) {
-            return { ok: false, motivo: 'horário fora da grade do dia' };
-          }
+          if (gradeDia.length && !gradeDia.includes(hora)) return { ok: false, motivo: 'horário fora da grade do dia' };
         } else {
-          // fallback: agenda-padrão não configurada → usa a grade antiga (agenda_config)
           const cfgR = await fetch(`${SUPABASE_URL}/rest/v1/agenda_config?clinic_id=eq.${clinic_id}&select=horarios&limit=1`, { headers: sbHeaders });
           const cfgA = cfgR.ok ? await cfgR.json() : [];
           const grade = (cfgA[0] && Array.isArray(cfgA[0].horarios)) ? cfgA[0].horarios : [];
-          if (grade.length && !grade.includes(hora)) {
-            return { ok: false, motivo: 'horário fora da grade' };
-          }
+          if (grade.length && !grade.includes(hora)) return { ok: false, motivo: 'horário fora da grade' };
         }
       }
-      // trava ANTI-DUPLO-AGENDAMENTO: já tem consulta nesse dia+hora (não cancelada)?
-      // Se há dentista, a trava é POR DENTISTA (mesmo horário livre pra dentistas diferentes).
+
       let ocupUrl = `${SUPABASE_URL}/rest/v1/consultas?clinic_id=eq.${clinic_id}&data=eq.${data}&hora=eq.${hora}&status=neq.cancelado&select=id,dentista_id,lead_id`;
-      if (dentista_id) {
-        // só conflita se for o MESMO dentista nesse horário
-        ocupUrl += `&dentista_id=eq.${dentista_id}`;
-      }
+      if (dentista_id) ocupUrl += `&dentista_id=eq.${dentista_id}`;
       const ocupR = await fetch(ocupUrl, { headers: sbHeaders });
       const ocupA = ocupR.ok ? await ocupR.json() : [];
-      // Se o horário está ocupado, checa DE QUEM é. Se for a consulta do
-      // PRÓPRIO lead (o Brian processou 2x a mesma intenção — mensagens
-      // coladas), NÃO é conflito: ele já agendou pra esse paciente. Trata
-      // como sucesso (idempotente) em vez de dizer "ocupado" (bug do fantasma).
+
       if (ocupA.length) {
         let consultaDoProprioLead = ocupA.find(c => c.lead_id === lead_id);
-
-        // ⚠️ REFORÇO 15/07: o match só por lead_id falha se duas mensagens
-        // do MESMO paciente chegarem quase juntas e o servidor processar em
-        // paralelo — cada processo pode criar um lead DUPLICADO pro mesmo
-        // telefone (ambos "acham" que o lead não existe ainda). Nesse caso
-        // o lead_id não bate mesmo sendo o mesmíssimo paciente. Por isso,
-        // se não achou por lead_id, confere por TELEFONE (imune a duplicata
-        // de lead) antes de declarar conflito de verdade.
         if (!consultaDoProprioLead && telefonePaciente && ocupA.length) {
           const sufixoPac = String(telefonePaciente).replace(/\D/g, '').slice(-8);
           const idsLeadsOcupados = [...new Set(ocupA.map(c => c.lead_id).filter(Boolean))];
@@ -657,24 +480,14 @@ module.exports = async function handler(req, res) {
             if (leadMesmoTelefone) {
               const idOcupado = leadMesmoTelefone.id;
               consultaDoProprioLead = ocupA.find(c => c.lead_id === idOcupado);
-              if (consultaDoProprioLead) {
-                console.log(`[BRIAN-AGENDAR] 🔗 lead duplicado detectado (mesmo telefone, lead_id diferente: ${lead_id} vs ${idOcupado}) — tratando como já agendado, não como conflito`);
-              }
             }
           }
         }
 
-        if (consultaDoProprioLead) {
-          return { ok: true, jaAgendado: true, motivo: 'já agendado para este paciente' };
-        }
+        if (consultaDoProprioLead) return { ok: true, jaAgendado: true, motivo: 'já agendado para este paciente' };
         return { ok: false, motivo: dentista_id ? 'dentista já ocupado nesse horário' : 'horário já ocupado' };
       }
 
-      // REMARCAÇÃO INTELIGENTE: se o paciente JÁ tem consulta ativa futura
-      // (agendado/confirmado), isso é uma REMARCAÇÃO — cancela a(s) anterior(es)
-      // antes de criar a nova, pra não ficar com 2 horários na agenda.
-      // (o Brian às vezes oferece um horário, o paciente troca, e sem isso
-      //  ele criava uma 2ª consulta em vez de remarcar.)
       try {
         const hojeRemarca = new Date(Date.now() - 3 * 3600 * 1000).toISOString().split('T')[0];
         const antigasR = await fetch(
@@ -682,10 +495,8 @@ module.exports = async function handler(req, res) {
           { headers: sbHeaders }
         );
         const antigas = antigasR.ok ? await antigasR.json() : [];
-        // cancela todas as consultas futuras ativas que NÃO são exatamente a que
-        // está sendo criada agora (mesma data+hora seria duplicata, já barrada acima)
         for (const ant of antigas) {
-          if (ant.data === data && ant.hora === hora) continue; // é a mesma, ignora
+          if (ant.data === data && ant.hora === hora) continue;
           await fetch(`${SUPABASE_URL}/rest/v1/consultas?id=eq.${ant.id}`, {
             method: 'PATCH',
             headers: { ...sbHeaders, Prefer: 'return=minimal' },
@@ -694,13 +505,9 @@ module.exports = async function handler(req, res) {
               observacoes: `Remarcado pelo Brian IA (era ${ant.data} ${ant.hora})`,
             }),
           });
-          console.log(`[BRIAN-REMARCAR] cancelou consulta antiga ${ant.id} (${ant.data} ${ant.hora}) → nova ${data} ${hora}`);
         }
-      } catch (eRemarca) {
-        console.error('[BRIAN-REMARCAR] erro ao cancelar antiga (segue criando a nova):', eRemarca.message);
-      }
+      } catch (eRemarca) { }
 
-      // cria a consulta (ocupa o slot na hora)
       const nova = {
         clinic_id, lead_id, data, hora,
         status: 'agendado',
@@ -708,14 +515,13 @@ module.exports = async function handler(req, res) {
         observacoes: 'Agendado automaticamente pelo Brian IA',
         created_at: new Date().toISOString(),
       };
-      if (dentista_id) nova.dentista_id = dentista_id; // atribui o dentista direcionado
+      if (dentista_id) nova.dentista_id = dentista_id;
       const ins = await fetch(`${SUPABASE_URL}/rest/v1/consultas`, {
         method: 'POST',
         headers: { ...sbHeaders, Prefer: 'return=minimal' },
         body: JSON.stringify(nova),
       });
       if (!ins.ok) return { ok: false, motivo: 'falha ao inserir: ' + (await ins.text()) };
-      // atualiza o lead pra 'agendado'
       await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${lead_id}`, {
         method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
         body: JSON.stringify({ status: 'agendado' }),
@@ -724,13 +530,10 @@ module.exports = async function handler(req, res) {
     } catch (e) { return { ok: false, motivo: e.message }; }
   }
 
-  // Incrementa o contador de mensagens da conversa (reseta por dia).
-  // Retorna o novo total do dia.
   async function brianIncrementarContador(clinic_id, phone) {
     try {
       const sufixo = String(phone).replace(/\D/g, '').slice(-8);
       const hojeBRT = new Date(Date.now() - 3 * 3600 * 1000).toISOString().split('T')[0];
-      // lê o atual
       const r = await fetch(
         `${SUPABASE_URL}/rest/v1/brian_conversa?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixo}&select=phone,msgs_contador,contador_data&limit=1`,
         { headers: sbHeaders }
@@ -741,29 +544,23 @@ module.exports = async function handler(req, res) {
       if (atual && atual.contador_data === hojeBRT) novoTotal = (atual.msgs_contador || 0) + 1;
 
       if (atual) {
-        // atualiza (usa o phone exato que está no banco)
         await fetch(`${SUPABASE_URL}/rest/v1/brian_conversa?clinic_id=eq.${clinic_id}&phone=eq.${encodeURIComponent(atual.phone)}`, {
           method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
           body: JSON.stringify({ msgs_contador: novoTotal, contador_data: hojeBRT }),
         });
       } else {
-        // cria o registro da conversa com o contador
         await fetch(`${SUPABASE_URL}/rest/v1/brian_conversa`, {
           method: 'POST', headers: { ...sbHeaders, Prefer: 'return=minimal' },
           body: JSON.stringify({ clinic_id, phone: String(phone).replace(/\D/g, ''), msgs_contador: 1, contador_data: hojeBRT }),
         });
       }
       return novoTotal;
-    } catch (e) { console.log('[BRIAN-CONTADOR] erro:', e.message); return 0; }
+    } catch (e) { return 0; }
   }
 
-  // Escala a conversa pra equipe: marca escalado=true na brian_conversa.
-  // A tarefa pro dashboard é GERADA dinamicamente pelo tarefas-fix.js a partir
-  // desse flag (não escrevemos em tarefas_resolvidas, que é só controle de resolvidas).
   async function brianEscalar(clinic_id, phone, nomeLead) {
     try {
       const sufixo = String(phone).replace(/\D/g, '').slice(-8);
-      // marca a conversa como escalada (+ registra quando, pra ordenar a tarefa)
       const r = await fetch(`${SUPABASE_URL}/rest/v1/brian_conversa?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixo}&select=phone&limit=1`, { headers: sbHeaders });
       const arr = r.ok ? await r.json() : [];
       if (arr[0]) {
@@ -772,22 +569,19 @@ module.exports = async function handler(req, res) {
           body: JSON.stringify({ escalado: true, escalado_em: new Date().toISOString() }),
         });
       }
-      console.log(`[BRIAN-ESCALOU] 🆘 conversa ${phone} escalada pra equipe (tarefa gerada no dashboard)`);
-    } catch (e) { console.log('[BRIAN-ESCALAR] erro:', e.message); }
+    } catch (e) { }
   }
 
-  // Envia 1-2 imagens de casos do procedimento via Evolution (sendMedia)
   async function brianEnviarCasos(instanceName, clinic_id, phone, procedimento) {
     try {
       if (!instanceName || !procedimento) return false;
       const proc = String(procedimento).trim();
-      // busca casos ativos desse procedimento (limita a 2)
       const r = await fetch(
         `${SUPABASE_URL}/rest/v1/brian_casos?clinic_id=eq.${clinic_id}&ativo=eq.true&procedimento=ilike.*${encodeURIComponent(proc)}*&select=imagem_url,legenda&order=ordem.asc&limit=2`,
         { headers: sbHeaders }
       );
       const casos = r.ok ? await r.json() : [];
-      if (!casos.length) { console.log(`[BRIAN-CASOS] nenhum caso de "${proc}" pra enviar`); return false; }
+      if (!casos.length) return false;
 
       const cleanPhone = String(phone).replace(/\D/g, '');
       const number = cleanPhone.length >= 12 ? cleanPhone : '55' + cleanPhone;
@@ -795,39 +589,29 @@ module.exports = async function handler(req, res) {
       let enviou = false;
       for (const caso of casos) {
         try {
-          // legenda: usa a da clínica, ou um texto padrão que explica que é caso real
           const legenda = caso.legenda || `✨ Olha esse resultado real de ${proc} que fizemos! 😍`;
           await fetch(`${EVO_URL}/message/sendMedia/${instanceName}`, {
             method: 'POST',
             headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              number,
-              mediatype: 'image',
-              mimetype: 'image/jpeg',
-              media: caso.imagem_url,
-              caption: legenda,
-              fileName: 'caso.jpg',
+              number, mediatype: 'image', mimetype: 'image/jpeg', media: caso.imagem_url, caption: legenda, fileName: 'caso.jpg',
             }),
           });
-          // registra no inbox (como mensagem do Brian)
           await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
             method: 'POST',
             headers: { ...sbHeaders, Prefer: 'return=minimal' },
             body: JSON.stringify({
               clinic_id, phone: number, contact_name: 'BRIAN_AUTO',
-              content: legenda, type: 'image', from_me: true,
-              media_url: caso.imagem_url, created_at: new Date().toISOString(),
+              content: legenda, type: 'image', from_me: true, media_url: caso.imagem_url, created_at: new Date().toISOString(),
             }),
           });
           enviou = true;
-          console.log(`[BRIAN-CASOS] ✅ enviou caso de "${proc}"`);
-        } catch (e) { console.log('[BRIAN-CASOS] erro ao enviar 1 caso:', e.message); }
+        } catch (e) { }
       }
       return enviou;
-    } catch (e) { console.log('[BRIAN-CASOS] erro:', e.message); return false; }
+    } catch (e) { return false; }
   }
 
-  // Monta e envia a confirmação de agendamento (com endereço/mapa da clínica)
   async function brianEnviarConfirmacao(instanceName, clinic_id, phone, nome, data, hora) {
     try {
       let endereco = '', linkMapa = '', nomeClinica = '';
@@ -848,25 +632,8 @@ module.exports = async function handler(req, res) {
       if (linkMapa) msg += `\n🗺️ *Como chegar:* ${linkMapa}`;
       msg += `\n\nQualquer coisa que precisar, é só me chamar por aqui. Até breve! 🦷💛`;
       if (instanceName) await responderPaciente(instanceName, clinic_id, phone, msg, 'BRIAN_AUTO');
-    } catch (e) { console.log('[BRIAN-CONFIRMA] erro:', e.message); }
+    } catch (e) { }
   }
-
-  // ── Só vale a pena transcrever dentro da JANELA DE ATENDIMENTO DO BRIAN ──
-  // IMPORTANTE: não dá pra confiar no status do Kanban ('compareceu'/
-  // 'fechado') pra saber se já é paciente — muitas clínicas usam o
-  // ClinicaLead só pela IA e nunca mexem no Kanban manualmente, então o
-  // card fica preso em 'novo'/'contato' pra sempre, mesmo anos depois.
-  // Em vez disso, usa sinais que são gerados AUTOMATICAMENTE, sem
-  // depender de ninguém arrastar card nenhum:
-  //   1) já existe alguma CONSULTA no passado pra esse telefone? Se sim,
-  //      a pessoa já foi atendida fisicamente pelo menos uma vez — não é
-  //      mais "lead novo chegando", é paciente com histórico real.
-  //   2) o lead é recente (criado há poucos dias)? Lead muito antigo sem
-  //      consulta nenhuma provavelmente esfriou — não vale mais gastar
-  //      transcrevendo áudio dele.
-  //   3) quem respondeu por último foi o Brian (ou ninguém ainda)? Se um
-  //      humano já assumiu a conversa, para.
-  const DIAS_LEAD_RECENTE = 3;
 
   async function deveTentarTranscrever(clinicId, phone, fromMe) {
     if (fromMe) return false;
@@ -880,54 +647,29 @@ module.exports = async function handler(req, res) {
       if (!cfg || cfg.brian_liberado !== true || cfg.auto_ativo !== true) return false;
 
       const sufixo = String(phone).replace(/\D/g, '').slice(-8);
-
-      // ⚠️ AJUSTE 28/07: SIMPLIFICADO por pedido do Jean — antes também
-      // bloqueava transcrição pra "lead muito antigo" e "já teve consulta
-      // no passado", pensado pra economizar chamada de transcrição em
-      // gente que provavelmente não ia mais converter. Só que isso criava
-      // um problema pior: paciente ATIVO na conversa, mandando áudio,
-      // esperando resposta — mas que por acaso já tinha uma consulta
-      // antiga (ex: faltou uma vez, meses atrás) — tomava um "desculpa,
-      // não consigo ouvir áudio" do nada, mesmo o Brian tendo acabado de
-      // transcrever outro áudio dela minutos antes sem problema nenhum.
-      // Regra nova, mais simples e mais previsível: se o Brian está no
-      // comando dessa conversa agora (não foi escalado pra humano, não
-      // foi desligado manualmente), ele ouve — não importa se o lead é
-      // antigo ou já teve consulta no passado. Isso pode custar um pouco
-      // mais em transcrição pra quem não vai converter, mas evita esse
-      // tipo de resposta estranha/inconsistente pro paciente.
-
-      // ── HUMANO JÁ ASSUMIU ESSA CONVERSA? ──────────────────────────
       const convResp = await fetch(
         `${SUPABASE_URL}/rest/v1/brian_conversa?clinic_id=eq.${clinicId}&phone=ilike.*${sufixo}&select=escalado,auto_desligado&limit=1`,
         { headers: sbHeaders }
       );
       const convArr = convResp.ok ? await convResp.json() : [];
       const conv = convArr[0];
-      if (conv && (conv.escalado === true || conv.auto_desligado === true)) return false; // humano assumiu ou Brian foi desligado nesta conversa
+      if (conv && (conv.escalado === true || conv.auto_desligado === true)) return false;
 
       return true;
-    } catch (e) { return false; } // na dúvida, NÃO transcreve (evita gasto indevido)
+    } catch (e) { return false; }
   }
 
-  // ── Baixa mídia descriptografada do Evolution e salva no Storage
   async function baixarEsalvarMidia(msgCompleta, instanceName, phone, tipo, nomeOriginal) {
     try {
-      // v2.3.7: precisa do objeto message COMPLETO (não só a key), senão "Message not found"
       const r = await fetch(`${EVO_URL}/chat/getBase64FromMediaMessage/${instanceName}`, {
         method: 'POST',
         headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: msgCompleta, convertToMp4: false }),
       });
-      if (!r.ok) {
-        const errTxt = await r.text();
-        return null;
-      }
+      if (!r.ok) return null;
       const data = await r.json();
       const base64 = data.base64;
-      if (!base64) {
-        return null;
-      }
+      if (!base64) return null;
 
       const config = {
         audio:    { bucket: 'audios', ext: 'ogg',  mime: 'audio/ogg' },
@@ -949,32 +691,14 @@ module.exports = async function handler(req, res) {
 
       const upload = await fetch(`${SUPABASE_URL}/storage/v1/object/${cfg.bucket}/${fileName}`, {
         method: 'POST',
-        headers: {
-          apikey: SUPABASE_KEY,
-          Authorization: `Bearer ${SUPABASE_KEY}`,
-          'Content-Type': cfg.mime,
-        },
+        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': cfg.mime },
         body: binary,
       });
-      if (!upload.ok) {
-        const upErr = await upload.text();
-        return null;
-      }
-      const finalUrl = `${SUPABASE_URL}/storage/v1/object/public/${cfg.bucket}/${fileName}`;
-      return finalUrl;
-    } catch (e) {
-      return null;
-    }
+      if (!upload.ok) return null;
+      return `${SUPABASE_URL}/storage/v1/object/public/${cfg.bucket}/${fileName}`;
+    } catch (e) { return null; }
   }
 
-  // ── Gera áudio de voz de verdade a partir do texto (OpenAI TTS) ──
-  // Usado quando o Brian marca [[VOZ]] em momentos estratégicos. Voz
-  // 'nova' (feminina) ou 'onyx' (masculina), configurada por clínica em
-  // brian_config.voz_tts. Custo muito baixo (~US$15/milhão de caracteres,
-  // uma resposta curta de 1-2 frases custa frações de centavo).
-  // ── Prompts de edição por tipo de simulação — sempre preservando o
-  // resto da foto (rosto, lábios, gengiva, luz) intacto, só mexendo nos
-  // dentes. Pedido de forma bem específica pra reduzir chance de artefato.
   const PREFIXO_PRECISO = "This is a precise, localized photo edit, not a new image. ";
   const SUFIXO_PRESERVAR = " Apply ONLY this specific change. Do NOT change, regenerate, or reinterpret the person's facial identity, bone structure, face shape, eyes, eyebrows, skin tone, expression, hair, pose, background, or lighting (unless explicitly part of the change above). Everything else must remain pixel-for-pixel identical to the original photo.";
   const PROMPTS_SIMULACAO = {
@@ -993,9 +717,6 @@ module.exports = async function handler(req, res) {
     toxina_botulinica: PREFIXO_PRECISO + "Moderately smooth and soften fine lines and wrinkles on the forehead and around the eyes, as if from botulinum toxin treatment — natural, relaxed expression, not frozen or overly smoothed. A believable, noticeable improvement in skin smoothness without looking artificial." + SUFIXO_PRESERVAR,
   };
 
-  // ── Gera a simulação visual do sorriso (edição de imagem via IA) ──
-  // Recebe a URL da foto que o paciente mandou + o tipo de transformação,
-  // devolve o base64 da imagem editada, ou null se falhar por qualquer motivo.
   async function gerarSimulacaoSorriso(fotoUrl, tipo) {
     const OPENAI_KEY = process.env.OPENAI_API_KEY;
     const prompt = PROMPTS_SIMULACAO[tipo];
@@ -1011,18 +732,18 @@ module.exports = async function handler(req, res) {
       form.append('image[]', fotoBlob, 'sorriso.jpg');
       form.append('prompt', prompt);
       form.append('size', '1024x1024');
-      form.append('quality', 'high'); // investindo em qualidade máxima - custo ainda irrelevante pro volume
-      form.append('input_fidelity', 'high'); // preserva rosto/identidade - recomendado pela OpenAI pra fotos de pessoa
+      form.append('quality', 'high');
+      form.append('input_fidelity', 'high');
 
       const resp = await fetch('https://api.openai.com/v1/images/edits', {
         method: 'POST',
         headers: { Authorization: `Bearer ${OPENAI_KEY}` },
         body: form,
       });
-      if (!resp.ok) { console.log('[SIMULACAO] erro na API:', resp.status); return null; }
+      if (!resp.ok) return null;
       const data = await resp.json();
       return data?.data?.[0]?.b64_json || null;
-    } catch (e) { console.log('[SIMULACAO] falhou:', e.message); return null; }
+    } catch (e) { return null; }
   }
 
   async function gerarAudioTTS(texto, voz) {
@@ -1033,20 +754,19 @@ module.exports = async function handler(req, res) {
         method: 'POST',
         headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'gpt-4o-mini-tts', // modelo mais novo, aceita instrução de tom (menos robótico)
+          model: 'gpt-4o-mini-tts',
           voice: voz,
           input: texto,
           instructions: 'Fale em português do Brasil, de forma calorosa, gentil e natural — como uma pessoa brasileira simpática conversando por WhatsApp, nunca como um robô ou locutor formal. Ritmo tranquilo, tom acolhedor, com leve entonação emotiva quando o texto pedir (acolhimento, alegria).',
           response_format: 'mp3',
         }),
       });
-      if (!resp.ok) { console.log('[TTS] erro ao gerar áudio:', resp.status); return null; }
+      if (!resp.ok) return null;
       const buffer = await resp.arrayBuffer();
       return Buffer.from(buffer).toString('base64');
-    } catch (e) { console.log('[TTS] falhou:', e.message); return null; }
+    } catch (e) { return null; }
   }
 
-  // ── Envia o áudio gerado como nota de voz de verdade pelo WhatsApp ──
   async function enviarAudioWhatsApp(instanceName, phone, audioBase64) {
     try {
       const cleanPhone = String(phone).replace(/\D/g, '');
@@ -1057,16 +777,9 @@ module.exports = async function handler(req, res) {
         body: JSON.stringify({ number, audio: audioBase64, encoding: true }),
       });
       return resp.ok ? await resp.json() : null;
-    } catch (e) { console.log('[TTS-ENVIO] falhou:', e.message); return null; }
+    } catch (e) { return null; }
   }
 
-  // ── Transcreve áudio via Whisper (OpenAI) — assim o Brian consegue
-  // "entender" o que o paciente falou, em vez de só saber "mandou um
-  // áudio". Custo baixíssimo (~R$0,01-0,02 por áudio). Se a chave não
-  // estiver configurada ou a transcrição falhar, retorna null — quem
-  // chama trata o fallback (mantém o texto genérico "🎵 Áudio").
-  // ── Registra um evento de diagnóstico (visível no console da conversa) ──
-  // Best-effort: nunca trava o fluxo principal se der erro.
   async function logDebug(clinicId, phone, evento, status, detalhes) {
     try {
       await fetch(`${SUPABASE_URL}/rest/v1/brian_debug_log`, {
@@ -1074,7 +787,7 @@ module.exports = async function handler(req, res) {
         headers: { ...sbHeaders, Prefer: 'return=minimal' },
         body: JSON.stringify({ clinic_id: clinicId, phone, evento, status, detalhes, created_at: new Date().toISOString() }),
       });
-    } catch (e) { /* log é best-effort, não bloqueia nada */ }
+    } catch (e) { }
   }
 
   async function transcreverAudioWhisper(msgCompleta, instanceName) {
@@ -1096,41 +809,25 @@ module.exports = async function handler(req, res) {
       const form = new FormData();
       form.append('file', blob, 'audio.ogg');
       form.append('model', 'whisper-1');
-      form.append('response_format', 'verbose_json'); // pra receber no_speech_prob por trecho
-      form.append('language', 'pt'); // acelera e melhora precisão (já sabemos que é português)
+      form.append('response_format', 'verbose_json');
+      form.append('language', 'pt');
 
       const whisperResp = await fetch('https://api.openai.com/v1/audio/transcriptions', {
         method: 'POST',
         headers: { Authorization: `Bearer ${OPENAI_KEY}` },
         body: form,
       });
-      if (!whisperResp.ok) {
-        console.log('[TRANSCRICAO] Whisper retornou erro:', whisperResp.status);
-        return null;
-      }
+      if (!whisperResp.ok) return null;
       const whisperData = await whisperResp.json();
       const texto = (whisperData.text || '').trim();
 
-      // ── FILTRO ANTI-MÚSICA/RUÍDO/TV ──
-      // O Whisper "transcreve" qualquer coisa, inclusive letra de música,
-      // som de TV, ou ruído de fundo — o que faria o Brian responder a
-      // algo que a pessoa nunca disse de verdade. O campo no_speech_prob
-      // (por trecho) indica a chance de aquele trecho NÃO ser fala real.
-      // Se a média ficar alta, descarta a transcrição inteira (cai no
-      // fallback "🎵 Áudio" — Brian não é acionado pra esse áudio).
       const segmentos = whisperData.segments || [];
       if (segmentos.length > 0) {
         const mediaNoSpeech = segmentos.reduce((s, seg) => s + (seg.no_speech_prob || 0), 0) / segmentos.length;
-        if (mediaNoSpeech > 0.5) {
-          console.log(`[TRANSCRICAO] descartada — provável não-fala (música/ruído/TV), no_speech_prob médio: ${mediaNoSpeech.toFixed(2)}`);
-          return null;
-        }
+        if (mediaNoSpeech > 0.5) return null;
       }
       return texto || null;
-    } catch (e) {
-      console.log('[TRANSCRICAO] falhou:', e.message);
-      return null;
-    }
+    } catch (e) { return null; }
   }
 
   async function responderPaciente(instanceName, clinicId, phone, message, marcador) {
@@ -1153,47 +850,28 @@ module.exports = async function handler(req, res) {
           message_id: sentId, created_at: new Date().toISOString(),
         }),
       });
-    } catch (e) {
-      console.error('[webhook] Erro ao responder paciente:', e.message);
-    }
+    } catch (e) { }
   }
 
   async function processarConfirmacao(clinic_id, phone, content, instanceName) {
     try {
       if (!clinic_id || !phone || !content) return;
       const resp = String(content).trim().toLowerCase();
-      // Normaliza: tira acentos pra "não"/"nao" e variações caírem na mesma regra
       const semAcento = resp.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-      // versão sem pontuação no fim (pra "claro!", "sim.", "ok!" também baterem)
       const semPont = semAcento.replace(/[!.,;:)\s]+$/g, '').replace(/^[\s(]+/g, '');
 
-      // ── CONFIRMAÇÃO: detecção robusta a erros de português (sim, siim, sin, simm, ss, claro...) ──
       const listaConfirmar = ['1', '1️⃣', 'sim', 'confirmar', 'confirmo', 'confirmado', 'confirmada', 'ok', 'okay', 'okk', 'pode ser', 'vou', 'vou sim', 'estarei', 'estarei la', 'isso', 'isso mesmo', 'claro', 'com certeza', 'certo', 'positivo', 'beleza', 'blz', 'show', 'ss', 'sss'].includes(semPont);
-      // variações digitadas/erradas: "sim", "siim", "siiim", "simm", "sin", "ssim", "s" sozinho
       const confirmaRegex = /^(s+i+m+|si+n|s+i+|ss+i+m+|s)$/.test(semPont.replace(/\s+/g, ''));
       const ehConfirmar = listaConfirmar || confirmaRegex;
 
-      // ── CANCELAMENTO: detecção por PALAVRA-CHAVE (robusto a erros de português) ──
-      // 1) Raízes que indicam cancelamento direto (contém em qualquer lugar da frase)
       const raizesCancelar = ['cancel', 'desmarc', 'desist'];
       let ehCancelar = raizesCancelar.some(r => semAcento.includes(r));
-      // 2) Negação + intenção de não ir (ex: "nao vou mais", "nao vai dar", "nao tenho como ir", "nao quero mais")
       if (!ehCancelar) {
-        const temNegacao = /\bn[ao]o?\b|\bnaum\b|\bnem\b/.test(semAcento); // nao, não, naum, nem
+        const temNegacao = /\bn[ao]o?\b|\bnaum\b|\bnem\b/.test(semAcento);
         const temIntencaoIr = /(vou|vai|quero|posso|consigo|da|dar|tenho como|poderei|poder)\b.*\b(mais|ir|comparecer)|(\bmais\b)|(\bir\b)|(comparecer)/.test(semAcento)
           || /(vou|vai|quero|posso|consigo|tenho|poderei)/.test(semAcento);
-        // ⚠️ AJUSTE 28/07: limite subiu de 40 pra 90 caracteres. Caso real:
-        // "Hoje não vai dar pra ir tenho um problema familiar" (~50
-        // caracteres) NÃO batia o corte antigo de 40 — a paciente avisou
-        // que não vinha, o Brian até respondeu acolhendo, mas o sistema
-        // nunca marcou remarcar_solicitado na consulta, e o lembrete de
-        // hoje (2h antes) saiu do mesmo jeito, ignorando o aviso dela.
-        // 90 cobre frases naturais com um motivo curto junto (tipo "tenho
-        // um problema familiar"), ainda cortando ANTES de virar uma
-        // conversa longa genérica onde "não" apareceria por acaso.
         if (temNegacao && temIntencaoIr && semAcento.length <= 90) ehCancelar = true;
       }
-      // confirmação NÃO vale se a frase também bate cancelamento (cancelamento vence, é mais seguro)
       const ehConfirmarFinal = ehConfirmar && !ehCancelar;
 
       const ehRemarcar = ['2', '2️⃣', 'nao', 'não', 'remarcar', 'reagendar', 'nao posso', 'não posso', 'nao vou', 'não vou'].includes(resp)
@@ -1201,25 +879,19 @@ module.exports = async function handler(req, res) {
       const digitos = String(phone).replace(/\D/g, '');
       const sufixo = digitos.slice(-8);
       if (sufixo.length < 8) return;
-      // Busca TODOS os leads com esse telefone (pode haver DUPLICADOS com o
-      // telefone escrito em formatos diferentes — ex: "(17) 99217-1699" e
-      // "5517992171699"). Procurar em todos evita a confirmação falhar quando
-      // a consulta está vinculada a um lead duplicado.
+
       const leadResp = await fetch(
         `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinic_id}&telefone=ilike.*${sufixo}&select=id,nome`,
         { headers: sbHeaders }
       );
       if (!leadResp.ok) return;
       const leadsEnc = await leadResp.json();
-      if (!leadsEnc.length) return; // número não é lead conhecido
+      if (!leadsEnc.length) return;
       const leadIds = leadsEnc.map(l => l.id);
-      // usa o primeiro como "lead principal" pro nome na mensagem
       const lead = leadsEnc[0];
       const hojeBRT = new Date(Date.now() - 3 * 3600 * 1000).toISOString().split('T')[0];
       const amanhaBRT = new Date(Date.now() - 3 * 3600 * 1000 + 24 * 3600 * 1000).toISOString().split('T')[0];
-      // Busca as consultas próximas (hoje/amanhã) de TODOS os leads com esse
-      // telefone (cobre o caso de lead duplicado). Traz várias pra escolher a
-      // MAIS RELEVANTE (a que a pessoa está respondendo).
+
       const leadIdsFiltro = leadIds.map(id => `"${id}"`).join(',');
       const consResp = await fetch(
         `${SUPABASE_URL}/rest/v1/consultas?lead_id=in.(${leadIdsFiltro})&clinic_id=eq.${clinic_id}&status=in.(agendado,confirmado)&data=in.(${hojeBRT},${amanhaBRT})&select=id,data,hora,lembrete_24h,status,lead_id&limit=10`,
@@ -1227,11 +899,8 @@ module.exports = async function handler(req, res) {
       );
       if (!consResp.ok) return;
       const consultasEnc = await consResp.json();
-      if (!consultasEnc.length) return; // sem consulta próxima: só salva a mensagem
+      if (!consultasEnc.length) return;
 
-      // Escolhe a consulta mais relevante:
-      // 1º) a que tem lembrete_24h mais RECENTE (foi a última lembrada)
-      // 2º) se nenhuma tem lembrete, a mais próxima no tempo (data+hora asc)
       const comLembrete = consultasEnc.filter(c => c.lembrete_24h);
       let consulta;
       if (comLembrete.length) {
@@ -1242,48 +911,27 @@ module.exports = async function handler(req, res) {
         consulta = consultasEnc[0];
       }
 
-      // ── TRAVA ANTI-CONSULTA-VENCIDA (o bug da Elaide) ──
-      // Não trata como confirmação/cancelamento se a consulta escolhida JÁ PASSOU.
-      // Ex: consulta hoje 09:30; a paciente responde "ok" de tarde numa conversa
-      // qualquer → antes, o CRM confirmava uma consulta vencida (constrangedor).
-      // Só confirma consulta cujo horário ainda está no FUTURO (com folga de 15min
-      // pra cobrir quem confirma em cima da hora). Se já passou, pula a consulta
-      // vencida e tenta achar uma FUTURA na lista; se não houver, ignora.
       function dataHoraNoFuturo(c) {
         if (!c || !c.data) return false;
         const horaC = (c.hora || '00:00').slice(0, 5);
-        // monta o Date da consulta em horário de Brasília (UTC-3)
         const dtConsulta = new Date(`${c.data}T${horaC}:00-03:00`);
         if (isNaN(dtConsulta)) return false;
-        // válida se falta pra consulta (ou passou no máx. 15 min — tolerância)
         return dtConsulta.getTime() > (Date.now() - 15 * 60 * 1000);
       }
       if (!dataHoraNoFuturo(consulta)) {
-        // a mais relevante já venceu — procura alguma FUTURA na lista
         const futuras = consultasEnc
           .filter(dataHoraNoFuturo)
           .sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora));
         if (futuras.length) {
           consulta = futuras[0];
         } else {
-          // nenhuma consulta futura pra confirmar → é só um "ok" de conversa, ignora
-          console.log('[webhook] confirmação ignorada: nenhuma consulta futura (evita confirmar vencida)');
           return;
         }
       }
 
-      // ── JANELA DE CONTEXTO (anti-conversa-aleatória) ──
-      // Só trata como resposta a lembrete se:
-      //  (1) a mensagem é CURTA (resposta objetiva, não conversa), E
-      //  (2) a clínica enviou um lembrete/confirmação pra esse número
-      //      nas últimas 18h (fonte: tabela mensagens, from_me=true).
-      // Isso evita disparar gatilho em conversa aleatória.
-
-      // (1) mensagem curta
       const respCurta = resp.length <= 25;
-      if (!respCurta) return; // mensagem longa = conversa, não resposta
+      if (!respCurta) return;
 
-      // (2) houve lembrete/confirmação recente pra esse número?
       const dezoitoHorasAtras = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
       const numeroDigitos = String(phone).replace(/\D/g, '');
       const sufixoNum = numeroDigitos.slice(-8);
@@ -1295,7 +943,6 @@ module.exports = async function handler(req, res) {
         );
         if (msgResp.ok) {
           const msgs = await msgResp.json();
-          // frases que marcam um lembrete/confirmação enviado pela clínica
           const marcadores = ['confirma sua presença', 'confirma sua presenca', 'sua consulta',
             'lembrar que', 'consulta está', 'consulta esta', 'confirmar', 'remarcar',
             'te esperamos', 'sua presença', 'sua presenca', 'sua avaliação', 'sua avaliacao',
@@ -1308,30 +955,21 @@ module.exports = async function handler(req, res) {
             return marcadores.some(mk => c.includes(mk));
           });
         }
-      } catch (e) { /* em erro, não processa (mais seguro) */ }
+      } catch (e) { }
 
-      if (!houveLembreteRecente) return; // sem lembrete recente = conversa aleatória, ignora
+      if (!houveLembreteRecente) return;
 
-      if (!consulta || !consulta.data) return; // sem data válida, não processa (evita crash)
+      if (!consulta || !consulta.data) return;
       const [ano, mes, dia] = String(consulta.data).split('-');
       const dataFmt = `${dia}/${mes}`;
       const horaFmt = (consulta.hora || '').slice(0, 5);
       const primeiroNome = ((lead && lead.nome) || '').split(' ')[0] || '';
       if (ehConfirmarFinal) {
-        // ── REGRA ANTI-RECONFIRMAÇÃO ──
-        // Se a consulta JÁ está com status 'confirmado', não confirma de novo
-        // nem reenvia a mensagem. Ex: paciente confirmou ontem; hoje manda "ok"
-        // numa conversa qualquer → não deve receber "consulta confirmada!" de novo.
-        // Só processa a confirmação se a consulta ainda está 'agendado' (aguardando).
-        if (consulta.status === 'confirmado') {
-          console.log('[webhook] confirmação ignorada: consulta já estava confirmada (não reenvia)');
-          return;
-        }
+        if (consulta.status === 'confirmado') return;
         await fetch(`${SUPABASE_URL}/rest/v1/consultas?id=eq.${consulta.id}`, {
           method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
           body: JSON.stringify({ status: 'confirmado' }),
         });
-        // Busca endereco/mapa da clinica para a mensagem de boas-vindas
         let endereco = '', linkMapa = '';
         try {
           const clinicaResp = await fetch(
@@ -1352,7 +990,6 @@ module.exports = async function handler(req, res) {
         boasVindas += `\n\nAté breve! 🦷`;
         if (instanceName) await responderPaciente(instanceName, clinic_id, phone, boasVindas);
       } else if (ehCancelar) {
-        // NÃO cancela a consulta — só marca o pedido pra equipe reverter (tarefa urgente no CRC)
         await fetch(`${SUPABASE_URL}/rest/v1/consultas?id=eq.${consulta.id}`, {
           method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
           body: JSON.stringify({ cancelar_solicitado: true }),
@@ -1365,9 +1002,7 @@ module.exports = async function handler(req, res) {
         });
         if (instanceName) await responderPaciente(instanceName, clinic_id, phone, `Sem problema, ${primeiroNome}! 😊\n\nNossa equipe vai entrar em contato em breve para encontrarmos um novo horário para você.`);
       }
-    } catch (e) {
-      console.error('[webhook] Erro em processarConfirmacao:', e.message);
-    }
+    } catch (e) { }
   }
 
   let body = req.body;
@@ -1384,7 +1019,6 @@ module.exports = async function handler(req, res) {
     const instanceName = body?.instance || body?.instanceName || null;
     let clinic_id = null;
     if (instanceName) {
-      // 1) Procura o número PRINCIPAL (clinicas.whatsapp_instance)
       const clinicResp = await fetch(
         `${SUPABASE_URL}/rest/v1/clinicas?whatsapp_instance=eq.${encodeURIComponent(instanceName)}&select=id&limit=1`,
         { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
@@ -1393,7 +1027,6 @@ module.exports = async function handler(req, res) {
         const clinics = await clinicResp.json();
         if (clinics?.length > 0) clinic_id = clinics[0].id;
       }
-      // 2) Se não achou, procura nos números EXTRAS (tabela instancias)
       if (!clinic_id) {
         const instResp = await fetch(
           `${SUPABASE_URL}/rest/v1/instancias?instance_name=eq.${encodeURIComponent(instanceName)}&select=clinic_id&limit=1`,
@@ -1411,15 +1044,7 @@ module.exports = async function handler(req, res) {
     const insertados = [];
     const erros = [];
 
-    // ── TRAVA ANTI-ÓRFÃO ──
-    // Se a instância não bateu com nenhuma clínica cadastrada (nem principal
-    // nem extra), NÃO processa nada. Sem isso, o código seguia em frente com
-    // clinic_id = null e criava leads/mensagens órfãos — que além de lixo no
-    // banco, quebravam a checagem de duplicata (o PostgREST não casa
-    // "clinic_id=eq.null" contra uma linha com clinic_id nulo, então cada
-    // mensagem daquela instância desconhecida virava um lead novo, sempre).
     if (instanceName && !clinic_id) {
-      console.log(`[WEBHOOK] ⚠️ instância "${instanceName}" não corresponde a nenhuma clínica cadastrada — evento ignorado (nada foi gravado)`);
       return res.status(200).json({ ok: true, ignorado: 'instancia_nao_cadastrada', instance: instanceName });
     }
 
@@ -1431,12 +1056,6 @@ module.exports = async function handler(req, res) {
         if (!jid || jid.includes('status@broadcast') || jid.includes('@g.us')) continue;
         const phone = jid.replace('@s.whatsapp.net', '').replace('@c.us', '');
 
-        // ── TRAVA DE NÚMEROS PERMITIDOS (clínicas de teste) ──
-        // Se a clínica tiver telefones_permitidos configurado, qualquer
-        // mensagem de um número FORA dessa lista é ignorada por completo
-        // pra fins de automação (não vira lead, Brian não responde, nunca
-        // entra na régua de follow-up) — protege contatos pessoais reais
-        // que por acaso mandem mensagem pro mesmo número usado em teste.
         if (!fromMe && clinic_id) {
           let deveBloquear = false;
           try {
@@ -1451,11 +1070,8 @@ module.exports = async function handler(req, res) {
               const permitido = listaPermitida.some(p => String(p).replace(/\D/g, '').slice(-8) === sufixoMsg);
               if (!permitido) deveBloquear = true;
             }
-          } catch (e) { console.log('[TRAVA-TESTE] erro na checagem (seguindo normalmente):', e.message); }
-          if (deveBloquear) {
-            console.log(`[TRAVA-TESTE] 🔒 número ${phone} fora da lista permitida da clínica ${clinic_id} — ignorado`);
-            continue;
-          }
+          } catch (e) { }
+          if (deveBloquear) continue;
         }
 
         const contact_name = fromMe ? null : (msg?.pushName || null);
@@ -1476,7 +1092,7 @@ module.exports = async function handler(req, res) {
         }
 
         let content = '';
-        let transcricaoFalhou = false; // true quando tentamos transcrever mas não deu certo (música/ruído/erro)
+        let transcricaoFalhou = false;
         let type = 'text';
         let media_url = null;
         const m = msg?.message || {};
@@ -1491,9 +1107,6 @@ module.exports = async function handler(req, res) {
         } else if (m.audioMessage) {
           content = '🎵 Áudio'; type = 'audio';
           if (message_id && instanceName) media_url = await baixarEsalvarMidia(msg, instanceName, phone, 'audio');
-          // transcreve via Whisper SÓ se valer a pena (Brian ativo nesta
-          // clínica e nenhum humano respondendo ativamente agora) — evita
-          // gastar transcrevendo áudio de conversa que já é 100% humana
           const valiaAPenaTranscrever = await deveTentarTranscrever(clinic_id, phone, fromMe);
           if (valiaAPenaTranscrever) {
             const transcricao = await transcreverAudioWhisper(msg, instanceName);
@@ -1501,11 +1114,11 @@ module.exports = async function handler(req, res) {
               content = transcricao;
               await logDebug(clinic_id, phone, 'transcricao', 'sucesso', transcricao.slice(0, 200));
             } else {
-              transcricaoFalhou = true; // tentou mas não conseguiu (música/ruído/erro)
-              await logDebug(clinic_id, phone, 'transcricao', 'falhou', 'Whisper não retornou texto (música/ruído/TV ou erro na API — ver logs do Vercel pra detalhe exato)');
+              transcricaoFalhou = true;
+              await logDebug(clinic_id, phone, 'transcricao', 'falhou', 'Whisper não retornou texto');
             }
           } else {
-            await logDebug(clinic_id, phone, 'transcricao', 'pulado', 'Fora do escopo do Brian (paciente já conquistado, lead antigo, humano ativo, ou Brian desligado nesta clínica)');
+            await logDebug(clinic_id, phone, 'transcricao', 'pulado', 'Fora do escopo do Brian');
           }
         } else if (m.videoMessage) {
           content = m.videoMessage?.caption || '🎥 Vídeo'; type = 'video';
@@ -1524,15 +1137,6 @@ module.exports = async function handler(req, res) {
           content = '[mídia]'; type = 'unknown';
         }
 
-        // ── TRAVA ANTI-ECO (evita duplicar disparos) ──────────────
-        // Quando a clínica ENVIA uma mensagem (disparo em massa, Brian,
-        // resposta), ela já é gravada no banco pelo código de envio —
-        // porém SEM message_id. Segundos depois, o WhatsApp devolve o
-        // "echo" dessa mesma mensagem pelo webhook, agora COM message_id.
-        // A trava por message_id não pega (a original não tinha id), então
-        // a mensagem duplicava. Aqui: se for from_me e já existir a MESMA
-        // mensagem (mesmo telefone + conteúdo) gravada nos últimos 60s,
-        // não grava de novo — é o eco do próprio envio.
         if (fromMe && content && content.trim()) {
           try {
             const sufEco = phone.replace(/\D/g, '').slice(-8);
@@ -1545,12 +1149,11 @@ module.exports = async function handler(req, res) {
               const jaTem = await ecoResp.json();
               const norm = (s) => String(s || '').trim().replace(/\s+/g, ' ');
               if ((jaTem || []).some(x => norm(x.content) === norm(content))) {
-                console.log(`[ANTI-ECO] 🔁 eco de disparo ignorado (${phone}): "${content.slice(0, 40)}..."`);
                 insertados.push(phone);
                 continue;
               }
             }
-          } catch (e) { /* na dúvida, segue e grava (não perde mensagem) */ }
+          } catch (e) { }
         }
 
         const payload = { clinic_id, phone, contact_name, content, type, from_me: fromMe, media_url, message_id, created_at, instance_name: instanceName };
@@ -1567,80 +1170,45 @@ module.exports = async function handler(req, res) {
         }
         if (!fromMe && type === 'text') await processarConfirmacao(clinic_id, phone, content, instanceName);
 
-        // ── RESPOSTA DA CLÍNICA (humano OU Brian) → move lead pra "em atendimento" ──
-        // Qualquer mensagem que SAI da clínica (from_me) significa que alguém respondeu
-        // o lead — seja o Brian, o WhatsApp do celular, ou o Inbox do sistema. Então o
-        // lead deixa de ser "novo/sem contato" e vai pra "contato" (em atendimento).
-        // Só promove de 'novo' (não rebaixa quem já avançou). Cobre os 3 jeitos de responder.
         if (fromMe) {
           try {
             await marcarLeadEmAtendimento(clinic_id, phone);
-          } catch (e) { console.log('[LEAD-STATUS] erro ao mover pra contato:', e.message); }
+          } catch (e) { }
         }
 
-        // ── GARANTE LEAD PRA TODA MENSAGEM RECEBIDA (nenhum contato fica invisível) ──
-        // Se chega mensagem de um cliente e ainda não existe lead, cria agora — mesmo
-        // que o Brian esteja desligado. Assim toda conversa aparece no funil e gera
-        // tarefa de "aguardando resposta" se ninguém responder. Não duplica (a função
-        // procura antes de criar). Usa o pushName como nome provisório.
         if (!fromMe) {
           try {
-            // extrai o procedimento da mensagem de anúncio ("Quero saber mais sobre X")
             const procDaMsg = (type === 'text' || (type === 'audio' && content && content.trim() !== '🎵 Áudio')) ? extrairProcedimentoDaMsg(content) : null;
             await brianAcharOuCriarLead(clinic_id, phone, contact_name || null, 'WhatsApp', procDaMsg, false);
-          } catch (e) { console.log('[LEAD-AUTO] erro ao garantir lead:', e.message); }
+          } catch (e) { }
         }
 
-        // ── BRIAN 2.3.b — decide e, se aprovado + número de teste, RESPONDE ──
-        // Antes só disparava pra type==='text'. Agora também dispara pra
-        // ÁUDIO TRANSCRITO (quando a transcrição funcionou de verdade —
-        // content diferente do placeholder genérico). Áudio sem transcrição
-        // continua só logado, sem resposta automática (evita o Brian
-        // responder "às cegas" sem saber o que a pessoa falou).
         const ehTextoUtilizavel = type === 'text' || (type === 'audio' && content && content.trim() !== '🎵 Áudio');
 
-        // ── ÁUDIO NÃO ENTENDIDO: avisa em vez de ficar em silêncio ──
-        // Se tentamos transcrever e não deu certo (parecia música, TV, ruído,
-        // ou o Whisper falhou), o Brian não tem o que responder de verdade —
-        // mas ainda assim vale avisar a pessoa, em vez de simplesmente sumir.
         if (!fromMe && transcricaoFalhou && instanceName) {
           try {
             await responderPaciente(instanceName, clinic_id, phone,
               'Oii! Não consegui entender esse áudio direito 😅 pode tentar gravar de novo, ou me escrever? Assim eu te ajudo certinho!',
               'BRIAN_AUTO');
-            console.log(`[BRIAN-VOZ] 🔇 avisou que não entendeu o áudio | phone: ${phone}`);
-          } catch (e) { console.log('[BRIAN-VOZ] erro ao avisar falha de transcrição:', e.message); }
+          } catch (e) { }
         }
 
         if (!fromMe && ehTextoUtilizavel) {
           try {
             const decisao = await brianDecide(clinic_id, phone, content, instanceName, fromMe, false);
-            console.log(`[BRIAN-DECISAO] ${decisao.responder ? '✅ RESPONDERIA' : '⛔ não responde'} | ${phone} | motivo: ${decisao.razao} | msg: "${String(content).slice(0, 40)}"`);
             await logDebug(clinic_id, phone, 'decisao_resposta', decisao.responder ? 'sucesso' : 'pulado', decisao.razao);
 
             if (decisao.responder) {
-              // ── TRAVA DE TESTE: só envia pra números autorizados (modo rollout controlado) ──
-              // Coloque aqui os ÚLTIMOS 8 DÍGITOS dos números liberados pra teste.
-              // Enquanto essa lista existir, o Brian SÓ responde esses números.
-              // Deixe a lista VAZIA ([]) para liberar geral (produção).
-              const NUMEROS_TESTE = []; // VAZIO = produção (responde todos os leads das clínicas LIBERADAS). A liberação é controlada por clínica (brian_liberado) no painel admin.
+              const NUMEROS_TESTE = [];
               const sufixoMsg = String(phone).replace(/\D/g, '').slice(-8);
               const modoTeste = NUMEROS_TESTE.length > 0;
               const liberadoTeste = !modoTeste || NUMEROS_TESTE.includes(sufixoMsg);
 
-              if (!liberadoTeste) {
-                console.log(`[BRIAN-ENVIO] ⏸️ modo teste: ${phone} não está na lista de teste — não envia`);
-              } else {
-                // ── DEBOUNCE: espera o lead terminar de digitar ──
-                // O lead costuma mandar várias mensagens seguidas (linha por linha).
-                // Esperamos DEBOUNCE_MS; se durante a espera chegar uma mensagem MAIS NOVA
-                // desse mesmo lead, ABORTAMOS esta resposta (a execução da msg mais nova
-                // vai responder, já considerando o contexto completo). Assim o Brian
-                // responde UMA vez só, lendo tudo junto, e não queima mensagens à toa.
-                const DEBOUNCE_MS = 10000; // 10 segundos
-                const meuCreatedAt = created_at; // timestamp desta mensagem
+              if (liberadoTeste) {
+                const DEBOUNCE_MS = 10000;
+                const meuCreatedAt = created_at;
                 await new Promise((r) => setTimeout(r, DEBOUNCE_MS));
-                // chegou mensagem mais nova desse lead depois desta?
+
                 try {
                   const sufixoDeb = String(phone).replace(/\D/g, '').slice(-8);
                   const chkResp = await fetch(
@@ -1648,13 +1216,9 @@ module.exports = async function handler(req, res) {
                     { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
                   );
                   const maisNovas = chkResp.ok ? await chkResp.json() : [];
-                  if (maisNovas.length) {
-                    console.log(`[BRIAN-DEBOUNCE] ⏭️ ${phone} mandou msg mais nova — esta execução aborta (a mais nova responde)`);
-                    continue; // pula pro próximo; a mensagem mais nova cuida da resposta
-                  }
-                } catch (e) { /* se a checagem falhar, segue e responde normal */ }
+                  if (maisNovas.length) continue;
+                } catch (e) { }
 
-                console.log(`[BRIAN-ENVIO] 🤖 gerando resposta para ${phone}...`);
                 let respBrian = await fetch(`${SUPABASE_URL}/functions/v1/brian`, {
                   method: 'POST',
                   headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' },
@@ -1662,14 +1226,7 @@ module.exports = async function handler(req, res) {
                 });
                 let dataBrian = respBrian.ok ? await respBrian.json() : null;
 
-                // ── RETRY (1x) — antes, se a IA falhasse (ex: limite de taxa
-                // excedido no free tier, erro momentâneo de rede), o sistema
-                // simplesmente NÃO respondia nada, silenciosamente, sem log
-                // nem aviso. Agora tenta de novo 1 vez após 2s, e se falhar
-                // de novo, registra um log de erro bem visível pra investigar.
                 if (!dataBrian || !dataBrian.ok) {
-                  const motivoFalha1 = dataBrian?.erro || `HTTP ${respBrian.status}`;
-                  console.log(`[BRIAN-ERRO] ⚠️ falhou na 1ª tentativa pra ${phone} (clínica ${clinic_id}): ${motivoFalha1} — tentando de novo em 2s...`);
                   await new Promise(r => setTimeout(r, 2000));
                   try {
                     respBrian = await fetch(`${SUPABASE_URL}/functions/v1/brian`, {
@@ -1678,22 +1235,15 @@ module.exports = async function handler(req, res) {
                       body: JSON.stringify({ action: 'responder_auto', clinic_id, phone, ultima_msg: content }),
                     });
                     dataBrian = respBrian.ok ? await respBrian.json() : null;
-                  } catch (e) { console.log(`[BRIAN-ERRO] retry também falhou (exceção): ${e.message}`); }
-
-                  if (!dataBrian || !dataBrian.ok) {
-                    const motivoFalha2 = dataBrian?.erro || `HTTP ${respBrian.status}`;
-                    console.log(`[BRIAN-ERRO] 🔴 falhou DE NOVO pra ${phone} (clínica ${clinic_id}): ${motivoFalha2} — paciente ficará sem resposta automática nesta mensagem. Verificar manualmente.`);
-                  }
+                  } catch (e) { }
                 }
 
                 let textoResposta = dataBrian && dataBrian.ok ? dataBrian.sugestao : null;
 
                 if (textoResposta && instanceName) {
-                  // ── FASE 3 — detecta marcadores [[LEAD|...]] e [[AGENDAR|...]] ──
-                  let campoLead = null;   // {nome}
-                  let campoAgendar = null; // {data, hora, nome}
+                  let campoLead = null;
+                  let campoAgendar = null;
 
-                  // marcador LEAD (captura do nome → criar lead se novo)
                   const mLead = String(textoResposta).match(/\[\[LEAD\|([^\]]+)\]\]/i);
                   if (mLead) {
                     try {
@@ -1703,12 +1253,10 @@ module.exports = async function handler(req, res) {
                         if (idx > 0) campos[par.slice(0, idx).trim().toLowerCase()] = par.slice(idx + 1).trim();
                       });
                       campoLead = campos;
-                      console.log(`[BRIAN-LEAD] 👤 detectado | phone: ${phone} | nome: ${campos.nome}`);
-                    } catch (e) { console.log('[BRIAN-LEAD] erro ao ler marcador:', e.message); }
+                    } catch (e) { }
                     textoResposta = String(textoResposta).replace(/\s*\[\[LEAD\|[^\]]+\]\]\s*/i, ' ').trim();
                   }
 
-                  // marcador AGENDAR (fechar horário → criar consulta)
                   const mAgendar = String(textoResposta).match(/\[\[AGENDAR\|([^\]]+)\]\]/i);
                   if (mAgendar) {
                     try {
@@ -1718,33 +1266,18 @@ module.exports = async function handler(req, res) {
                         if (idx > 0) campos[par.slice(0, idx).trim().toLowerCase()] = par.slice(idx + 1).trim();
                       });
                       campoAgendar = campos;
-                      console.log(`[BRIAN-AGENDAR] 📅 detectado | phone: ${phone} | data: ${campos.data} | hora: ${campos.hora} | nome: ${campos.nome}`);
-                    } catch (e) { console.log('[BRIAN-AGENDAR] erro ao ler marcador:', e.message); }
+                    } catch (e) { }
                     textoResposta = String(textoResposta).replace(/\s*\[\[AGENDAR\|[^\]]+\]\]\s*/i, ' ').trim();
                   }
 
-                  // ── TRAVA ANTI-NOME-VAZADO-DO-CONTATO ──
-                  // O prompt do Brian PROÍBE explicitamente usar o nome salvo no
-                  // contato do WhatsApp (pushName) como se fosse o nome que a
-                  // pessoa disse na conversa — mas o modelo às vezes ignora essa
-                  // regra e grava esse nome no marcador mesmo assim (aconteceu:
-                  // paciente se apresentou como "Ana Maria" na conversa, mas o
-                  // marcador gravou "Lorivaldo Carrijo" — nome salvo no contato
-                  // do WhatsApp de quem enviava a mensagem). Aqui o SERVIDOR
-                  // confere: se o nome do marcador bate com o contact_name
-                  // (normalizado, sem acento/maiúscula), rejeita e ignora esse
-                  // nome — nunca confia nele pra criar lead nem pra confirmação.
                   const _normNome = (s) => String(s || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
                   if (contact_name && campoLead && campoLead.nome && _normNome(campoLead.nome) === _normNome(contact_name)) {
-                    console.log(`[BRIAN-LEAD] 🚫 nome do marcador [[LEAD]] ("${campoLead.nome}") bate com o nome salvo no contato do WhatsApp — rejeitado por segurança.`);
                     campoLead.nome = null;
                   }
                   if (contact_name && campoAgendar && campoAgendar.nome && _normNome(campoAgendar.nome) === _normNome(contact_name)) {
-                    console.log(`[BRIAN-AGENDAR] 🚫 nome do marcador [[AGENDAR]] ("${campoAgendar.nome}") bate com o nome salvo no contato do WhatsApp — rejeitado por segurança.`);
                     campoAgendar.nome = null;
                   }
 
-                  // marcador CASOS (enviar fotos de antes/depois de um procedimento)
                   let procCasos = null;
                   const mCasos = String(textoResposta).match(/\[\[CASOS\|([^\]]+)\]\]/i);
                   if (mCasos) {
@@ -1755,12 +1288,10 @@ module.exports = async function handler(req, res) {
                         if (idx > 0) campos[par.slice(0, idx).trim().toLowerCase()] = par.slice(idx + 1).trim();
                       });
                       procCasos = campos.procedimento || null;
-                      console.log(`[BRIAN-CASOS] 📸 detectado | phone: ${phone} | procedimento: ${procCasos}`);
-                    } catch (e) { console.log('[BRIAN-CASOS] erro ao ler marcador:', e.message); }
+                    } catch (e) { }
                     textoResposta = String(textoResposta).replace(/\s*\[\[CASOS\|[^\]]+\]\]\s*/i, ' ').trim();
                   }
 
-                  // marcador PROC (interesse revelado na conversa → grava no lead)
                   let procInteresseConversa = null;
                   const mProc = String(textoResposta).match(/\[\[PROC\|([^\]]+)\]\]/i);
                   if (mProc) {
@@ -1771,57 +1302,35 @@ module.exports = async function handler(req, res) {
                         if (idx > 0) campos[par.slice(0, idx).trim().toLowerCase()] = par.slice(idx + 1).trim();
                       });
                       procInteresseConversa = campos.procedimento || null;
-                      console.log(`[BRIAN-PROC] 🎯 detectado | phone: ${phone} | procedimento: ${procInteresseConversa}`);
-                    } catch (e) { console.log('[BRIAN-PROC] erro ao ler marcador:', e.message); }
+                    } catch (e) { }
                     textoResposta = String(textoResposta).replace(/\s*\[\[PROC\|[^\]]+\]\]\s*/i, ' ').trim();
                   }
 
-                  // marcador VOZ (responde também em áudio, em momento estratégico)
                   let temVoz = false;
                   if (/\[\[VOZ\]\]/i.test(String(textoResposta))) {
                     temVoz = true;
-                    console.log(`[BRIAN-VOZ] 🎤 detectado (marcador do modelo) | phone: ${phone}`);
                     textoResposta = String(textoResposta).replace(/\s*\[\[VOZ\]\]\s*/i, ' ').trim();
                   }
 
-                  // ── GATILHOS DETERMINÍSTICOS DE VOZ (garantidos por código) ──
-                  // O marcador [[VOZ]] depende do Claude "lembrar" de incluir, o
-                  // que testamos e nem sempre acontece. Os dois gatilhos abaixo
-                  // NÃO dependem do modelo — são busca de padrão simples, sempre
-                  // funcionam.
-
-                  // 1) medo/trauma na mensagem do paciente
                   if (!temVoz) {
                     const contentNorm = String(content || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
                     const palavrasMedo = ['medo', 'trauma', 'pavor', 'apavorad', 'traumatizad', 'com muito nervos'];
-                    if (palavrasMedo.some(p => contentNorm.includes(p))) {
-                      temVoz = true;
-                      console.log(`[BRIAN-VOZ] 🎤 forçado por palavra-chave de medo/trauma | phone: ${phone}`);
-                    }
+                    if (palavrasMedo.some(p => contentNorm.includes(p))) temVoz = true;
                   }
 
-                  // 2) paciente mandou ÁUDIO nesta mensagem (transcrito com sucesso)
-                  // → responde em voz também, espelhando o canal dela automaticamente
                   if (!temVoz && type === 'audio' && content && content.trim() !== '🎵 Áudio') {
                     temVoz = true;
-                    console.log(`[BRIAN-VOZ] 🎤 forçado por espelhamento (paciente mandou áudio) | phone: ${phone}`);
                   }
 
-                  await logDebug(clinic_id, phone, 'voz', temVoz ? 'sucesso' : 'pulado',
-                    temVoz ? 'Voz será usada nesta resposta' : 'Resposta em texto (nenhum gatilho de voz disparou, ou voz desligada nesta clínica)');
+                  await logDebug(clinic_id, phone, 'voz', temVoz ? 'sucesso' : 'pulado', temVoz ? 'Voz será usada nesta resposta' : 'Resposta em texto');
 
-                  // marcador SIMULAR (simulação visual do sorriso)
                   let simularTipo = null;
                   const mSimular = String(textoResposta).match(/\[\[SIMULAR\|tipo=([a-z_]+)\]\]/i);
                   if (mSimular) {
                     simularTipo = mSimular[1].toLowerCase();
-                    console.log(`[BRIAN-SIMULACAO] 🖼️ detectado | tipo: ${simularTipo} | phone: ${phone}`);
                     textoResposta = String(textoResposta).replace(/\s*\[\[SIMULAR\|tipo=[a-z_]+\]\]\s*/i, ' ').trim();
                   }
 
-                  // 3) OPT-OUT — se a pessoa já disse, em qualquer mensagem anterior
-                  // desta conversa (ou nesta mesma), que não quer/não pode ouvir
-                  // áudio, isso SUPRIME a voz — não importa qual gatilho disparou.
                   if (temVoz) {
                     try {
                       const sufixoOptOut = String(phone).replace(/\D/g, '').slice(-8);
@@ -1834,38 +1343,12 @@ module.exports = async function handler(req, res) {
                       const frasesOptOut = ['nao posso ouvir', 'nao consigo ouvir', 'prefiro texto', 'sem audio',
                         'nao gosto de audio', 'nao curto audio', 'manda por texto', 'so texto', 'sem voz', 'nao manda audio'];
                       const jaPediuTexto = optOutArr.some(m => frasesOptOut.some(f => normalizar(m.content).includes(f)));
-                      if (jaPediuTexto) {
-                        temVoz = false;
-                        console.log(`[BRIAN-VOZ] 🚫 opt-out detectado — suprimindo voz | phone: ${phone}`);
-                      }
-                    } catch (e) { console.log('[BRIAN-VOZ] erro checando opt-out (seguindo com voz):', e.message); }
+                      if (jaPediuTexto) temVoz = false;
+                    } catch (e) { }
                   }
 
-                  // ⚠️ AJUSTE 23/07: bloco de agendamento MOVIDO pra cá — ANTES do
-                  // envio da resposta principal do Brian (antes ficava lá embaixo,
-                  // depois do texto já ter sido mandado). O motivo: o texto que o
-                  // Brian escreve já vem com a frase de confirmação embutida (ex:
-                  // "Deixei reservado sábado às 12h30..."), junto com o marcador
-                  // [[AGENDAR]]. Antes, esse texto era enviado JÁ, e só DEPOIS o
-                  // sistema checava se o horário realmente estava livre no banco —
-                  // se desse conflito (outro paciente pegou o horário nesse meio
-                  // tempo), o paciente recebia DUAS mensagens contraditórias: uma
-                  // confirmando, seguida de "esse horário já está ocupado" (caso
-                  // real: Ana Paula, Uberlândia, 23/07). Agora a checagem roda
-                  // PRIMEIRO — se der conflito, a confirmação falsa nem chega a
-                  // ser enviada, só a mensagem de correção.
                   let agendamentoConflito = false;
                   if (campoAgendar && campoAgendar.data && campoAgendar.hora) {
-                    // ── TRAVA ANTI-DATA-ERRADA ──
-                    // O modelo às vezes escreve a data errada no marcador AGENDAR
-                    // (ex: paciente pede "amanhã" e o Brian grava uma quinta-feira
-                    // de outra semana). Aqui o SERVIDOR recalcula "hoje"/"amanhã"
-                    // de verdade (não confia no modelo) e confere contra as ÚLTIMAS
-                    // mensagens da conversa (não só a que disparou esta resposta,
-                    // já que a palavra "amanhã" pode ter sido dita 1-2 mensagens
-                    // antes, ex: paciente só respondeu "9:30" depois). Se detectar
-                    // menção a "hoje"/"amanhã" e a data do marcador não bater,
-                    // corrige automaticamente ANTES de gravar no banco.
                     try {
                       const fmtBRcheck = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' });
                       const hojeISOcheck = fmtBRcheck.format(new Date());
@@ -1873,7 +1356,7 @@ module.exports = async function handler(req, res) {
                       const amanhaISOcheck = new Date(baseBRTcheck.getTime() + 24 * 3600 * 1000).toISOString().split('T')[0];
 
                       const sufixoCheck = String(phone).replace(/\D/g, '').slice(-8);
-                      const janelaCheck = new Date(Date.now() - 30 * 60 * 1000).toISOString(); // últimos 30min
+                      const janelaCheck = new Date(Date.now() - 30 * 60 * 1000).toISOString();
                       const histR = await fetch(
                         `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixoCheck}&created_at=gte.${encodeURIComponent(janelaCheck)}&select=content&order=created_at.desc&limit=6`,
                         { headers: sbHeaders }
@@ -1881,29 +1364,14 @@ module.exports = async function handler(req, res) {
                       const histA = histR.ok ? await histR.json() : [];
                       const textoRecente = (histA || []).map(m => String(m.content || '')).join(' ').toLowerCase();
 
-                      // ⚠️ AJUSTE 28/07: regex antiga só pegava "amanhã"/"amanha"
-                      // escrito certinho. Caso real: paciente escreveu "amaiha"
-                      // (erro de digitação comum, sem o "n") — a trava não
-                      // reconheceu, e o Brian agendou pro dia ERRADO (hoje em vez
-                      // de amanhã), sem correção nenhuma. Regex nova tolera esse
-                      // tipo de erro (qualquer coisa entre "am" e "h[ãa]" no final
-                      // da palavra), cobrindo "amanhã", "amanha", "amaiha", etc.
                       const mencionaAmanha = /\bam[a-z]{1,4}h[ãa]/i.test(textoRecente);
                       const mencionaHoje = /\bhoje\b/.test(textoRecente);
 
                       if (mencionaAmanha && campoAgendar.data !== amanhaISOcheck) {
-                        console.log(`[BRIAN-AGENDAR] ⚠️ CORREÇÃO ANTI-DATA-ERRADA: conversa menciona "amanhã" mas marcador gravou ${campoAgendar.data} — corrigindo pra ${amanhaISOcheck}`);
                         campoAgendar.data = amanhaISOcheck;
                       } else if (mencionaHoje && !mencionaAmanha && campoAgendar.data !== hojeISOcheck) {
-                        console.log(`[BRIAN-AGENDAR] ⚠️ CORREÇÃO ANTI-DATA-ERRADA: conversa menciona "hoje" mas marcador gravou ${campoAgendar.data} — corrigindo pra ${hojeISOcheck}`);
                         campoAgendar.data = hojeISOcheck;
                       } else {
-                        // ── EXTENSÃO: mesma trava, agora pra nomes de dia da semana ──
-                        // Cobre o caso relatado: paciente/Brian falam "sábado" mas o
-                        // marcador grava uma data que nem é sábado (ex: 27/07/2026,
-                        // que cai numa segunda-feira). Só corrige quando exatamente 1
-                        // dia da semana foi citado na janela recente (se citou mais de
-                        // um — ex: "segunda ou terça" — fica ambíguo, não mexe).
                         const semAcentoRecente = textoRecente.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
                         const DIAS_SEMANA_NOMES = ['domingo', 'segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado'];
                         const diasMencionados = [];
@@ -1915,14 +1383,11 @@ module.exports = async function handler(req, res) {
                           const [ay, am, ad] = campoAgendar.data.split('-').map(Number);
                           const diaSemanaMarcador = new Date(ay, am - 1, ad).getDay();
                           if (diaSemanaMarcador !== diaAlvo) {
-                            // recalcula a PRÓXIMA data real (0 a 7 dias à frente, a
-                            // partir de hoje) cujo dia da semana bate com o mencionado
                             for (let i = 0; i <= 7; i++) {
                               const cand = new Date(baseBRTcheck.getTime() + i * 24 * 3600 * 1000);
                               const candISO = cand.toISOString().split('T')[0];
                               const [cy, cm, cd] = candISO.split('-').map(Number);
                               if (new Date(cy, cm - 1, cd).getDay() === diaAlvo) {
-                                console.log(`[BRIAN-AGENDAR] ⚠️ CORREÇÃO ANTI-DATA-ERRADA: conversa menciona "${DIAS_SEMANA_NOMES[diaAlvo]}" mas marcador gravou ${campoAgendar.data} (dia da semana não bate) — corrigindo pra ${candISO}`);
                                 campoAgendar.data = candISO;
                                 break;
                               }
@@ -1930,36 +1395,15 @@ module.exports = async function handler(req, res) {
                           }
                         }
                       }
-                    } catch (e) { console.log('[BRIAN-AGENDAR] erro na checagem anti-data-errada (segue sem corrigir):', e.message); }
+                    } catch (e) { }
 
                     const lead = await brianAcharOuCriarLead(clinic_id, phone, campoAgendar.nome || (campoLead && campoLead.nome), undefined, undefined, true);
                     if (lead && lead.id) {
-                      // resolve o dentista pelo direcionamento (nome vindo no marcador) ou padrão da clínica
                       const dentistaId = await brianResolverDentista(clinic_id, campoAgendar.dentista || '');
                       const r = await brianCriarConsulta(clinic_id, lead.id, campoAgendar.data, campoAgendar.hora, dentistaId, phone);
-                      if (r.ok && r.jaAgendado) {
-                        // o Brian processou a mesma intenção 2x (mensagens coladas).
-                        // Já estava agendado pra esse paciente nesse horário — não
-                        // cria de novo nem reenvia confirmação (evita o "fantasma").
-                        console.log(`[BRIAN-AGENDAR] ↩️ já estava agendado (${campoAgendar.data} ${campoAgendar.hora}) — ignora duplicata`);
-                      } else if (r.ok) {
-                        console.log(`[BRIAN-AGENDAR] ✅ CONSULTA CRIADA | ${campoAgendar.data} ${campoAgendar.hora} | lead ${lead.id}${dentistaId ? ' | dentista ' + dentistaId : ''}`);
-                        // ⚠️ CORREÇÃO: antes usava lead.nome || campoAgendar.nome — ou
-                        // seja, se o CADASTRO já tinha um nome "real" salvo (2+
-                        // palavras), a confirmação sempre usava ele, mesmo que a
-                        // pessoa falando agora fosse outra (telefone compartilhado
-                        // entre familiares/casal, ou número reaproveitado). Isso
-                        // mandava "Prontinho, Lorivaldo!" pra quem estava confirmado
-                        // como Ana Maria na própria conversa. Agora prioriza o nome
-                        // que ACABOU de ser confirmado nesta conversa (marcador
-                        // [[AGENDAR|nome=...]]), só cai pro nome do cadastro se a IA
-                        // não tiver informado nome nenhum nesta consulta específica.
+                      if (r.ok && !r.jaAgendado) {
                         await brianEnviarConfirmacao(instanceName, clinic_id, phone, campoAgendar.nome || lead.nome, campoAgendar.data, campoAgendar.hora);
-                      } else {
-                        console.log(`[BRIAN-AGENDAR] ⚠️ NÃO agendou (${r.motivo}) — avisa o paciente`);
-                        // se o horário deu problema (ocupado/passado), marca o
-                        // conflito — a resposta original do Brian (que já vinha
-                        // com a confirmação falsa) NÃO será enviada; só a correção.
+                      } else if (!r.ok) {
                         if (r.motivo === 'horário já ocupado' || r.motivo === 'dentista já ocupado nesse horário' || r.motivo === 'horário no passado') {
                           agendamentoConflito = true;
                         }
@@ -1967,7 +1411,6 @@ module.exports = async function handler(req, res) {
                     }
                   }
 
-                  // 1) decide como responder: em ÁUDIO (se temVoz e deu certo) ou em TEXTO
                   if (agendamentoConflito) {
                     await responderPaciente(instanceName, clinic_id, phone, 'Ihh, esse horário já está ocupado 😅 Mas me diz: qual outro dia ou período fica bom pra você? Aí já confirmo um horário certinho! 😊', 'BRIAN_AUTO');
                   } else if (textoResposta) {
@@ -1987,8 +1430,6 @@ module.exports = async function handler(req, res) {
                             const envioOk = await enviarAudioWhatsApp(instanceName, phone, audioBase64);
                             if (envioOk) {
                               audioEnviadoComSucesso = true;
-                              console.log(`[BRIAN-VOZ] 🔊 respondeu ${phone} SÓ EM ÁUDIO (voz: ${vozEscolhida}): "${String(textoResposta).slice(0, 60)}"`);
-                              // salva no histórico + storage, pra tocar depois no inbox
                               try {
                                 const cleanPhoneVoz = String(phone).replace(/\D/g, '');
                                 const numberVoz = cleanPhoneVoz.length >= 12 ? cleanPhoneVoz : '55' + cleanPhoneVoz;
@@ -2008,147 +1449,102 @@ module.exports = async function handler(req, res) {
                                     created_at: new Date().toISOString(),
                                   }),
                                 });
-                              } catch (e) { console.log('[BRIAN-VOZ] erro ao salvar histórico:', e.message); }
-                            } else {
-                              console.log(`[BRIAN-VOZ] falha ao ENVIAR o áudio pelo WhatsApp — caindo pro texto`);
+                              } catch (e) { }
                             }
-                          } else {
-                            console.log(`[BRIAN-VOZ] falha ao GERAR o áudio — caindo pro texto`);
                           }
-                        } else {
-                          console.log(`[BRIAN-VOZ] clínica ${clinic_id} sem voz_tts configurada — pulando áudio`);
                         }
-                      } catch (e) { console.log('[BRIAN-VOZ] falhou:', e.message); }
+                      } catch (e) { }
                     }
 
-                    // 2) só manda em TEXTO se não mandou em áudio (evita duplicar a mesma
-                    // mensagem nos dois formatos) — se temVoz era false, ou se a voz
-                    // falhou por qualquer motivo, o texto garante a resposta de qualquer jeito
                     if (!audioEnviadoComSucesso) {
                       await responderPaciente(instanceName, clinic_id, phone, textoResposta, 'BRIAN_AUTO');
-                      console.log(`[BRIAN-ENVIO] ✅ respondeu ${phone} em texto: "${String(textoResposta).slice(0, 60)}"`);
                     }
                   }
-                  // ⚠️ AJUSTE 23/07: bloco else-if fechado aqui de propósito (antes ia
-                  // até depois da simulação/contador/escalonamento) — esses efeitos
-                  // colaterais precisam rodar SEMPRE, mesmo quando deu conflito de
-                  // agendamento (agendamentoConflito=true), não só quando o texto
-                  // principal foi enviado. Por isso viraram incondicionais abaixo.
 
-                    // ── SIMULAÇÃO VISUAL DO SORRISO (se o Brian marcou [[SIMULAR]]) ──
-                    if (simularTipo) {
-                      try {
-                        const simCfgResp = await fetch(
-                          `${SUPABASE_URL}/rest/v1/brian_config?clinic_id=eq.${clinic_id}&select=simulacao_sorriso&limit=1`,
+                  if (simularTipo) {
+                    try {
+                      const simCfgResp = await fetch(
+                        `${SUPABASE_URL}/rest/v1/brian_config?clinic_id=eq.${clinic_id}&select=simulacao_sorriso&limit=1`,
+                        { headers: sbHeaders }
+                      );
+                      const simCfgArr = simCfgResp.ok ? await simCfgResp.json() : [];
+                      const simulacaoAtiva = simCfgArr[0]?.simulacao_sorriso === true;
+                      if (simulacaoAtiva) {
+                        const sufixoSim = String(phone).replace(/\D/g, '').slice(-8);
+                        const fotoResp = await fetch(
+                          `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixoSim}&from_me=eq.false&type=eq.image&select=media_url&order=created_at.desc&limit=1`,
                           { headers: sbHeaders }
                         );
-                        const simCfgArr = simCfgResp.ok ? await simCfgResp.json() : [];
-                        const simulacaoAtiva = simCfgArr[0]?.simulacao_sorriso === true;
-                        if (simulacaoAtiva) {
-                          // busca a última FOTO que o paciente mandou nesta conversa
-                          const sufixoSim = String(phone).replace(/\D/g, '').slice(-8);
-                          const fotoResp = await fetch(
-                            `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixoSim}&from_me=eq.false&type=eq.image&select=media_url&order=created_at.desc&limit=1`,
-                            { headers: sbHeaders }
-                          );
-                          const fotoArr = fotoResp.ok ? await fotoResp.json() : [];
-                          const fotoUrl = fotoArr[0]?.media_url;
-                          if (fotoUrl) {
-                            const imgBase64 = await gerarSimulacaoSorriso(fotoUrl, simularTipo);
-                            if (imgBase64) {
-                              const cleanPhoneSim = String(phone).replace(/\D/g, '');
-                              const numberSim = cleanPhoneSim.length >= 12 ? cleanPhoneSim : '55' + cleanPhoneSim;
-                              const nomeArquivoSim = `sim_${simularTipo}_${numberSim}_${Date.now()}.png`;
-                              const uploadSim = await fetch(`${SUPABASE_URL}/storage/v1/object/midias/${nomeArquivoSim}`, {
+                        const fotoArr = fotoResp.ok ? await fotoResp.json() : [];
+                        const fotoUrl = fotoArr[0]?.media_url;
+                        if (fotoUrl) {
+                          const imgBase64 = await gerarSimulacaoSorriso(fotoUrl, simularTipo);
+                          if (imgBase64) {
+                            const cleanPhoneSim = String(phone).replace(/\D/g, '');
+                            const numberSim = cleanPhoneSim.length >= 12 ? cleanPhoneSim : '55' + cleanPhoneSim;
+                            const nomeArquivoSim = `sim_${simularTipo}_${numberSim}_${Date.now()}.png`;
+                            const uploadSim = await fetch(`${SUPABASE_URL}/storage/v1/object/midias/${nomeArquivoSim}`, {
+                              method: 'POST',
+                              headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'image/png' },
+                              body: Buffer.from(imgBase64, 'base64'),
+                            });
+                            const mediaUrlSim = uploadSim.ok ? `${SUPABASE_URL}/storage/v1/object/public/midias/${nomeArquivoSim}` : null;
+                            if (mediaUrlSim) {
+                              const legendaSim = '✨ Isso é só uma *simulação ilustrativa* pra você ter uma ideia — o resultado real é sempre definido na sua avaliação com a dentista, viu? 💙';
+                              await fetch(`${EVO_URL}/message/sendMedia/${instanceName}`, {
                                 method: 'POST',
-                                headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'image/png' },
-                                body: Buffer.from(imgBase64, 'base64'),
+                                headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ number: numberSim, mediatype: 'image', media: mediaUrlSim, caption: legendaSim }),
                               });
-                              const mediaUrlSim = uploadSim.ok ? `${SUPABASE_URL}/storage/v1/object/public/midias/${nomeArquivoSim}` : null;
-                              if (mediaUrlSim) {
-                                // ── LEGENDA SEMPRE COM O AVISO — garantido por código, não
-                                // depende do Brian lembrar de escrever isso.
-                                const legendaSim = '✨ Isso é só uma *simulação ilustrativa* pra você ter uma ideia — o resultado real é sempre definido na sua avaliação com a dentista, viu? 💙';
-                                await fetch(`${EVO_URL}/message/sendMedia/${instanceName}`, {
-                                  method: 'POST',
-                                  headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ number: numberSim, mediatype: 'image', media: mediaUrlSim, caption: legendaSim }),
-                                });
-                                await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
-                                  method: 'POST',
-                                  headers: { ...sbHeaders, Prefer: 'return=minimal' },
-                                  body: JSON.stringify({
-                                    clinic_id, phone: numberSim, contact_name: 'BRIAN_AUTO',
-                                    content: legendaSim, type: 'image', from_me: true, media_url: mediaUrlSim,
-                                    created_at: new Date().toISOString(),
-                                  }),
-                                });
-                                console.log(`[BRIAN-SIMULACAO] ✅ enviada (tipo: ${simularTipo}) | phone: ${phone}`);
-                                await logDebug(clinic_id, phone, 'simulacao', 'sucesso', `tipo: ${simularTipo}`);
-                              }
-                            } else {
-                              console.log(`[BRIAN-SIMULACAO] falhou ao gerar imagem | phone: ${phone}`);
-                              await logDebug(clinic_id, phone, 'simulacao', 'falhou', `tipo: ${simularTipo} — API não retornou imagem`);
+                              await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
+                                method: 'POST',
+                                headers: { ...sbHeaders, Prefer: 'return=minimal' },
+                                body: JSON.stringify({
+                                  clinic_id, phone: numberSim, contact_name: 'BRIAN_AUTO',
+                                  content: legendaSim, type: 'image', from_me: true, media_url: mediaUrlSim,
+                                  created_at: new Date().toISOString(),
+                                }),
+                              });
+                              await logDebug(clinic_id, phone, 'simulacao', 'sucesso', `tipo: ${simularTipo}`);
                             }
-                          } else {
-                            console.log(`[BRIAN-SIMULACAO] sem foto recente do paciente pra simular | phone: ${phone}`);
-                            await logDebug(clinic_id, phone, 'simulacao', 'pulado', 'Brian marcou SIMULAR mas não achou foto recente do paciente');
                           }
-                        } else {
-                          await logDebug(clinic_id, phone, 'simulacao', 'pulado', `clínica ${clinic_id} sem simulacao_sorriso ativada`);
                         }
-                      } catch (e) { console.log('[BRIAN-SIMULACAO] falhou:', e.message); }
-                    }
+                      }
+                    } catch (e) { }
+                  }
 
-                    // ── GARANTE O LEAD CEDO (pra follow-up reaquecer quem some sem dar o nome) ──
-                    // Se a pessoa demonstrou interesse (o Brian respondeu), ela já vira lead,
-                    // mesmo sem ter dito o nome. Usa o pushName do WhatsApp como nome provisório.
-                    // Quando ela disser o nome depois, o [[LEAD]] atualiza (brianAcharOuCriarLead não duplica).
-                    if (!campoAgendar) {
-                      const nomeProvisorio = (campoLead && campoLead.nome) || contact_name || null;
-                      await brianAcharOuCriarLead(clinic_id, phone, nomeProvisorio, undefined, undefined, !!(campoLead && campoLead.nome));
-                      // (o status 'contato' já é cuidado pelo handler de from_me, que cobre
-                      //  Brian + humano + inbox — não precisa duplicar aqui)
-                    }
+                  if (!campoAgendar) {
+                    const nomeProvisorio = (campoLead && campoLead.nome) || contact_name || null;
+                    await brianAcharOuCriarLead(clinic_id, phone, nomeProvisorio, undefined, undefined, !!(campoLead && campoLead.nome));
+                  }
 
-                    // incrementa o contador de mensagens da conversa
-                    const totalDia = await brianIncrementarContador(clinic_id, phone);
-                    // se ESTA resposta atingiu o limite, escala pra equipe (avisa + cria tarefa)
-                    const LIMITE = 12;
-                    if (totalDia >= LIMITE) {
-                      const nomeLead = (campoLead && campoLead.nome) || (campoAgendar && campoAgendar.nome) || '';
-                      const primeiro = String(nomeLead).split(' ')[0] || '';
-                      const aviso = `${primeiro ? primeiro + ', ' : ''}vou pedir pra um especialista da nossa equipe te dar uma atenção mais completa, tá? 😊 Em breve alguém continua seu atendimento por aqui!`;
-                      await responderPaciente(instanceName, clinic_id, phone, aviso, 'BRIAN_AUTO');
-                      await brianEscalar(clinic_id, phone, nomeLead);
-                    }
+                  const totalDia = await brianIncrementarContador(clinic_id, phone);
+                  const LIMITE = 12;
+                  if (totalDia >= LIMITE) {
+                    const nomeLead = (campoLead && campoLead.nome) || (campoAgendar && campoAgendar.nome) || '';
+                    const primeiro = String(nomeLead).split(' ')[0] || '';
+                    const aviso = `${primeiro ? primeiro + ', ' : ''}vou pedir pra um especialista da nossa equipe te dar uma atenção mais completa, tá? 😊 Em breve alguém continua seu atendimento por aqui!`;
+                    await responderPaciente(instanceName, clinic_id, phone, aviso, 'BRIAN_AUTO');
+                    await brianEscalar(clinic_id, phone, nomeLead);
+                  }
 
-                  // 1.5) envia os casos (antes/depois) se o Brian sinalizou
                   if (procCasos) {
                     await brianEnviarCasos(instanceName, clinic_id, phone, procCasos);
                   }
 
-                  // 1.6) grava o procedimento de interesse revelado na conversa
-                  // (a própria brianAcharOuCriarLead atualiza se o atual for "Avaliação")
                   if (procInteresseConversa) {
                     try {
                       await brianAcharOuCriarLead(clinic_id, phone, (campoLead && campoLead.nome) || null, 'WhatsApp', procInteresseConversa, true);
-                    } catch (e) { console.log('[BRIAN-PROC] erro ao gravar procedimento:', e.message); }
+                    } catch (e) { }
                   }
 
-                  // 2) o agendamento em si já foi processado mais acima (antes do
-                  // envio da resposta principal — ver AJUSTE 23/07). Aqui só falta
-                  // o caso de captura de nome SEM agendamento junto.
                   if (!campoAgendar && campoLead && campoLead.nome) {
-                    // 3) só captura de nome (sem agendar) → cria/garante o lead
                     await brianAcharOuCriarLead(clinic_id, phone, campoLead.nome, undefined, undefined, true);
                   }
-                } else {
-                  console.log(`[BRIAN-ENVIO] ⚠️ não gerou resposta (${dataBrian ? (dataBrian.erro || 'sem texto') : 'sem retorno'})`);
                 }
               }
             }
-          } catch (e) { console.log('[BRIAN-ENVIO] erro:', e.message); }
+          } catch (e) { }
         }
       } catch (msgErr) {
         erros.push({ erro: msgErr.message });
@@ -2158,50 +1554,6 @@ module.exports = async function handler(req, res) {
   } catch (err) {
     return res.status(500).json({ error: 'Erro interno', message: err.message });
   }
-}
-
-// ============================================================
-// Geração de simulação visual (Simulações do CRM) — chamada via
-// action: 'gerar_simulacao' no início do handler principal, pra não
-// precisar de um arquivo novo em api/ (limite de 12 funções no Hobby).
-// ============================================================
-
-const PROMPTS_SIMULACAO = {
-  clareamento: "Significantly whiten and brighten the teeth — a clear, noticeable improvement of several shades whiter than the original color, removing yellow tones and stains completely. The result should look bright, healthy and vibrant, like a professional in-office whitening treatment — clearly and visibly different from the original color, while still looking like real natural tooth enamel (not glowing, fluorescent, or paper-white)",
-  // ── Variações de INTENSIDADE (escolhidas pela equipe na tela) ──
-  clareamento_natural: "Gently whiten the teeth to a healthy, soft brighter shade — a noticeable but understated improvement, still looking like a naturally brighter version of these same teeth, not a dramatic change. Realistic tooth enamel color, nothing glowing or extreme",
-  clareamento_equilibrado: "Significantly whiten and brighten the teeth — a clear, noticeable improvement of several shades whiter than the original color, removing yellow tones and stains completely. The result should look bright, healthy and vibrant, like a professional in-office whitening treatment — clearly and visibly different from the original color, while still looking like real natural tooth enamel (not glowing, fluorescent, or paper-white)",
-  clareamento_branco: "Dramatically whiten the teeth to a very bright, vivid white — a striking, high-impact transformation, like a premium professional whitening or bleaching treatment result. The color should be noticeably brighter and whiter than a typical natural tooth color, while still maintaining realistic enamel texture and light reflection (not glowing, plastic, or fluorescent)",
-  alinhamento: "Clearly straighten and align ONLY the teeth that are visibly crooked, rotated, or out of position — a genuine, visible correction as if a full course of orthodontic treatment was completed on those specific teeth. CRITICAL: do NOT whiten, brighten, or change the color/shade of ANY teeth (crooked or already-straight) — every tooth must keep its EXACT current color from the original photo, even if yellowed or uneven in color. Do not change teeth that are already well-positioned. Only reposition — never recolor",
-  lentes: "Perform a genuine, clearly visible cosmetic dental veneer transformation: correct the size and proportions of the teeth to be more ideal and harmonious, refine the shape of any uneven or worn teeth to look symmetric and well-proportioned, correct visible misalignments and close visible gaps, and remove chips or irregular edges. Whiten the teeth to a bright, attractive white — clearly and visibly whiter and more uniform than the original, similar to a real cosmetic veneer result from a good dentist. The result must be a REAL, NOTICEABLE improvement (not subtle or barely-there) while still looking like genuine human teeth with natural enamel texture and realistic light reflection — a believable, professional clinical result, not a cartoon smile, denture, or artificial-looking filter",
-  lentes_natural: "Perform a genuine, clearly visible cosmetic dental veneer transformation, favoring a NATURAL result: correct the size and proportions of the teeth to be more ideal and harmonious, refine the shape of any uneven or worn teeth, correct visible misalignments and close visible gaps, and remove chips or irregular edges. Whiten the teeth to a healthy, naturally bright white — noticeably improved but restrained, prioritizing a realistic, natural-looking result over maximum whiteness. Must look like genuine human teeth with natural enamel texture, not a cartoon smile or denture",
-  lentes_equilibrado: "Perform a genuine, clearly visible cosmetic dental veneer transformation: correct the size and proportions of the teeth to be more ideal and harmonious, refine the shape of any uneven or worn teeth to look symmetric and well-proportioned, correct visible misalignments and close visible gaps, and remove chips or irregular edges. Whiten the teeth to a bright, attractive white — clearly and visibly whiter and more uniform than the original, similar to a real cosmetic veneer result from a good dentist. The result must be a REAL, NOTICEABLE improvement (not subtle or barely-there) while still looking like genuine human teeth with natural enamel texture and realistic light reflection — a believable, professional clinical result, not a cartoon smile, denture, or artificial-looking filter",
-  lentes_branco: "Perform a genuine, clearly visible cosmetic dental veneer transformation, favoring a BRIGHT, HIGH-IMPACT result: correct the size and proportions of the teeth to be ideal and harmonious, refine the shape of any uneven or worn teeth to look symmetric and well-proportioned, correct visible misalignments and close visible gaps, and remove chips or irregular edges. Whiten the teeth to a vivid, striking white — noticeably brighter and more uniform than a standard veneer result, similar to a premium/celebrity-style cosmetic veneer treatment. Must still look like genuine human teeth with realistic enamel texture and light reflection — a believable professional result, not a cartoon smile, denture, or plastic-looking filter",
-  protese_parcial: "Fill in ONLY the specific visible gap(s) from missing teeth, adding a replacement tooth/teeth that seamlessly and naturally integrates with the surrounding dentition: match the EXACT current color, shade, translucency and surface texture of this specific person's OWN remaining natural teeth (not an idealized bright white — match their real, current tooth color and condition precisely, even if slightly yellowed, worn, or uneven), match the size and proportions to naturally fill the gap in harmony with neighboring teeth, and blend the base of the new tooth naturally into the gum line — no visible seams, edges, or 'pasted-on' appearance. The new tooth should look like it has always been there, not a distinctly different or artificial-looking addition. CRITICAL: do NOT whiten, straighten, reshape, or otherwise change any of the person's OTHER existing teeth — every other tooth must remain EXACTLY as it appears in the original photo, unchanged. Only the missing tooth gap should be filled; the rest of the smile must stay pixel-identical to the original",
-  protese_total_natural: "Replace the missing/damaged teeth with a COMPLETE, full set of new replacement teeth (as in a full denture or implant-supported prosthesis) — well-proportioned, evenly aligned, and naturally shaped for this person's mouth and face. Use a soft, natural tooth color similar to healthy natural teeth — not brilliant white, a believable natural shade appropriate for the person. The result must look like a real, professional full-mouth restoration — natural enamel texture, realistic light reflection, teeth proportional to the face",
-  protese_total_equilibrado: "Replace the missing/damaged teeth with a COMPLETE, full set of new replacement teeth (as in a full denture or implant-supported prosthesis) — well-proportioned, evenly aligned, and naturally shaped for this person's mouth and face. Use a bright, healthy white tooth color — a pleasant, attractive shade typical of a well-made dental prosthesis, clearly improved but still believable. The result must look like a real, professional full-mouth restoration — natural enamel texture, realistic light reflection",
-  protese_total_branco: "Replace the missing/damaged teeth with a COMPLETE, full set of new replacement teeth (as in a full denture or implant-supported prosthesis) — well-proportioned, evenly aligned, and naturally shaped for this person's mouth and face. Use a vivid, bright white tooth color — a striking, high-impact result typical of a premium full-mouth restoration, noticeably white while still maintaining realistic enamel texture and light reflection (not glowing or plastic-looking)",
-  gengivoplastia: "Moderately adjust ONLY the gum line to be more even and proportional, visibly reducing an excessive or uneven gum display ('gummy smile') for a more balanced smile — a real, noticeable but natural-looking correction, not extreme. CRITICAL: do NOT whiten, straighten, or otherwise change the teeth themselves — they must keep their exact current color, shape and position from the original photo. Only the gum line changes",
-  otomodelacao: "Moderately reshape the ears to sit closer to the head, naturally correcting protruding ears — a believable, non-surgical ear harmonization result. Keep the correction natural and proportional, not exaggerated or overly flattened",
-  rinoplastia: "Refine and reshape the nose to be more balanced and proportional to the rest of the face — a genuine, visible improvement in shape and symmetry, similar to a real rhinoplasty result. Keep the change natural and proportional to this specific person's face — a believable result, not a generic or overly reduced nose",
-  harmonizacao_facial: "Apply subtle, natural facial harmonization — a slightly more defined jawline and slightly more balanced facial proportions. This must be a believable refinement, not a transformation. The person must remain clearly, unmistakably recognizable as the exact same individual — same eyes, same nose, same mouth, same overall facial identity. If in doubt, favor a smaller, more conservative change",
-  preenchimento_labial: "Add natural, moderate fuller volume to the lips — a genuine, visible but proportional improvement, balanced with the rest of the face. Keep the lip shape natural and believable, not exaggerated, overfilled, or artificial-looking",
-  toxina_botulinica: "Moderately smooth and soften fine lines and wrinkles on the forehead and around the eyes, as if from botulinum toxin treatment — natural, relaxed expression, not frozen or overly smoothed. A believable, noticeable improvement in skin smoothness without looking artificial",
-};
-
-const LABELS_SIMULACAO = {
-  clareamento: 'Clareamento', alinhamento: 'Alinhamento', lentes: 'Lentes em resina',
-  clareamento_natural: 'Clareamento (natural)', clareamento_equilibrado: 'Clareamento (equilibrado)', clareamento_branco: 'Clareamento (bem branco)',
-  lentes_natural: 'Lentes em resina (natural)', lentes_equilibrado: 'Lentes em resina (equilibrado)', lentes_branco: 'Lentes em resina (bem branco)',
-  protese_parcial: 'Prótese Parcial', protese_total_natural: 'Prótese Total (natural)', protese_total_equilibrado: 'Prótese Total (equilibrado)', protese_total_branco: 'Prótese Total (bem branco)', gengivoplastia: 'Gengivoplastia', otomodelacao: 'Otomodelação',
-  rinoplastia: 'Rinoplastia', harmonizacao_facial: 'Harmonização facial', preenchimento_labial: 'Preenchimento labial', toxina_botulinica: 'Toxina botulínica',
-};
-
-function montarPromptCombinado(tipos) {
-  const partes = tipos.map(t => PROMPTS_SIMULACAO[t]).filter(Boolean);
-  if (!partes.length) return null;
-  const transformacoes = partes.join('. Also, ');
-  return `This is a precise, localized photo edit, not a new image. ${transformacoes}. Apply ONLY these specific changes. Do NOT change, regenerate, or reinterpret the person's facial identity, bone structure, face shape, eyes, eyebrows, nose (unless explicitly mentioned above), ears (unless explicitly mentioned above), skin tone, expression, hair, pose, background, or lighting. Everything except the specific change(s) described above must remain pixel-for-pixel identical to the original photo.`;
 }
 
 async function handleGerarSimulacao(req, res, cfg) {
@@ -2214,10 +1566,6 @@ async function handleGerarSimulacao(req, res, cfg) {
     return res.status(400).json({ ok: false, erro: 'Selecione ao menos 1 tipo de simulação' });
   }
 
-  // ── TRAVA: só funciona se a clínica tiver simulacao_sorriso = true —
-  // mesma trava que já vale pro Brian automático, agora também aqui na
-  // ferramenta manual. Evita usar em clínica que ainda não foi liberada
-  // (feature ainda em teste/ajuste).
   if (clinic_id) {
     try {
       const simCfgResp = await fetch(
@@ -2256,8 +1604,8 @@ async function handleGerarSimulacao(req, res, cfg) {
     form.append('image[]', fotoBlob, 'foto.jpg');
     form.append('prompt', prompt);
     form.append('size', '1024x1024');
-    form.append('quality', 'high'); // investindo em qualidade máxima - custo ainda irrelevante pro volume
-    form.append('input_fidelity', 'high'); // preserva rosto/identidade - recomendado pela OpenAI pra fotos de pessoa
+    form.append('quality', 'high');
+    form.append('input_fidelity', 'high');
 
     const editResp = await fetch('https://api.openai.com/v1/images/edits', {
       method: 'POST',
@@ -2311,10 +1659,6 @@ async function handleGerarSimulacao(req, res, cfg) {
   }
 }
 
-// ============================================================
-// Envia uma imagem JÁ PRONTA (ex: montagem antes/depois feita no
-// canvas do navegador) — só sobe e manda, sem chamar a IA de novo.
-// ============================================================
 async function handleEnviarImagemPronta(req, res, cfg) {
   const { SUPABASE_URL, SUPABASE_KEY, EVO_URL, EVO_KEY, sbHeaders } = cfg;
   const { clinic_id, imagem_base64, phone, instance_name, caption } = req.body || {};
@@ -2360,14 +1704,6 @@ async function handleEnviarImagemPronta(req, res, cfg) {
   }
 }
 
-// ============================================================
-// Detecta a região certa (boca, nariz, orelha, etc.) na foto usando
-// IA de visão — devolve um retângulo (x, y, largura, altura) em
-// pixels, com uma margem de segurança já aplicada, pronto pra recortar.
-// ============================================================
-
-// mapeia cada tipo de simulação pra descrição da região que a IA de
-// visão precisa localizar
 const REGIOES_POR_TIPO = {
   clareamento: 'mouth and teeth', alinhamento: 'mouth and teeth', lentes: 'mouth and teeth',
   protese_parcial: 'mouth and teeth', protese_total_natural: 'mouth and teeth', protese_total_equilibrado: 'mouth and teeth', protese_total_branco: 'mouth and teeth', gengivoplastia: 'mouth, teeth and gums',
@@ -2415,8 +1751,6 @@ async function handleDetectarRegiao(req, res) {
       return res.status(500).json({ ok: false, erro: 'Resposta de visão em formato inesperado' });
     }
 
-    // adiciona margem de 35% em volta (contexto pra IA de imagem editar
-    // com naturalidade, sem ficar um recorte seco/cortado feio)
     const margemX = bbox.width * 0.35;
     const margemY = bbox.height * 0.35;
     const x = Math.max(0, Math.round(bbox.x - margemX));
