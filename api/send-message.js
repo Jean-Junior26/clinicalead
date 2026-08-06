@@ -171,36 +171,65 @@ export default async function handler(req, res) {
   const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
   const { instance, phone, message, clinic_id } = req.body;
-  if (!instance || !phone || !message) return res.status(400).json({ error: 'Campos obrigatórios: instance, phone, message' });
+  if (!phone || !message) return res.status(400).json({ error: 'Campos obrigatórios: phone, message' });
   const cleanPhone = phone.replace(/\D/g, '');
-  // ⚠️ AJUSTE 30/07: antes checava "começa com 55?" — isso quebrava pra
-  // QUALQUER número estrangeiro que não começasse por coincidência com 55
-  // (ex: 351... de Portugal virava 55351... um número que não existe em
-  // lugar nenhum, e a mensagem simplesmente nunca saía, sem erro visível
-  // pro usuário). Agora usa o TAMANHO do número pra decidir — mesma lógica
-  // já usada certinho em outras partes do sistema: número brasileiro sem
-  // o código do país tem no máximo 11 dígitos (DDD + 8 ou 9 dígitos); com
-  // 12+ dígitos, já tem código de país (seja 55 do Brasil, seja outro
-  // país) e não deve ser mexido.
   const number = cleanPhone.length >= 12 ? cleanPhone : '55' + cleanPhone;
 
   try {
-    const resp = await fetch(`${EVO_URL}/message/sendText/${instance}`, {
-      method: 'POST',
-      headers: { 'apikey': EVO_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ number, text: message }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) return res.status(resp.status).json(data);
+    // ⚠️ NOVO 06/08: resolve a clínica ANTES de decidir o caminho de envio
+    // — antes disso, o envio manual do Inbox só sabia falar com Evolution
+    // (usava direto `instance`), então clínica já migrada pra API Oficial
+    // (sem whatsapp_instance) simplesmente não conseguia mandar mensagem
+    // nenhuma pelo Inbox. Agora verifica o tipo de conexão primeiro.
+    let clinicId = clinic_id || null;
+    let clinicaInfo = null;
+    if (clinicId) {
+      const cResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/clinicas?id=eq.${clinicId}&select=id,tipo_conexao_whatsapp,meta_phone_number_id,meta_access_token`,
+        { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+      );
+      if (cResp.ok) { const cs = await cResp.json(); if (cs?.length) clinicaInfo = cs[0]; }
+    } else if (instance) {
+      const cResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/clinicas?whatsapp_instance=eq.${encodeURIComponent(instance)}&select=id,tipo_conexao_whatsapp,meta_phone_number_id,meta_access_token&limit=1`,
+        { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+      );
+      if (cResp.ok) { const cs = await cResp.json(); if (cs?.length) { clinicaInfo = cs[0]; clinicId = cs[0].id; } }
+    }
 
-    const messageId = data?.key?.id || data?.message?.key?.id || data?.id
-                   || data?.messageId || data?.response?.key?.id || null;
-    console.log('[SEND] message_id capturado:', messageId, '| instance:', instance);
+    let resp, data, messageId;
+
+    if (clinicaInfo?.tipo_conexao_whatsapp === 'oficial' && clinicaInfo.meta_phone_number_id && clinicaInfo.meta_access_token) {
+      // ── API OFICIAL DA META ──
+      resp = await fetch(`https://graph.facebook.com/v21.0/${clinicaInfo.meta_phone_number_id}/messages`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${clinicaInfo.meta_access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messaging_product: 'whatsapp', to: number, type: 'text', text: { body: message } }),
+      });
+      data = await resp.json();
+      if (!resp.ok) return res.status(resp.status).json(data);
+      messageId = data?.messages?.[0]?.id || null;
+    } else {
+      // ── EVOLUTION (como sempre) ──
+      if (!instance) return res.status(400).json({ error: 'Campo obrigatório: instance (clínica não está em modo API Oficial)' });
+      resp = await fetch(`${EVO_URL}/message/sendText/${instance}`, {
+        method: 'POST',
+        headers: { 'apikey': EVO_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ number, text: message }),
+      });
+      data = await resp.json();
+      if (!resp.ok) return res.status(resp.status).json(data);
+      messageId = data?.key?.id || data?.message?.key?.id || data?.id
+                 || data?.messageId || data?.response?.key?.id || null;
+    }
+
+    console.log('[SEND] message_id capturado:', messageId, '| instance:', instance, '| clinicId:', clinicId);
 
     if (SUPABASE_KEY && messageId) {
       try {
-        let clinicId = clinic_id || null;
-        if (!clinicId) {
+        // clinicId já foi resolvido mais acima (antes de decidir o caminho de
+        // envio) — reaproveita aqui, sem duplicar a consulta.
+        if (!clinicId && instance) {
           // 1) Procura o número PRINCIPAL (clinicas.whatsapp_instance)
           const cResp = await fetch(
             `${SUPABASE_URL}/rest/v1/clinicas?whatsapp_instance=eq.${encodeURIComponent(instance)}&select=id&limit=1`,
