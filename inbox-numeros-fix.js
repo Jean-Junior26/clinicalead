@@ -257,14 +257,27 @@ function aplicarFiltroNumero() {
       const text = input?.value?.trim();
       if (!text || typeof INBOX === 'undefined' || !INBOX.activeChat) return;
       const instancia = instanciaParaResponder(INBOX.activeChat);
-      if (!instancia) {
+      const clinicParaCheck = (typeof currentClinic === 'function') ? currentClinic() : null;
+      // ⚠️ CORREÇÃO 06/08: clínica em API Oficial não depende de "instância"
+      // pra rotear o envio (isso agora é feito pelo clinic_id, lá no
+      // backend) — só bloqueia aqui quando for Evolution de verdade e
+      // faltar a instância.
+      if (!instancia && clinicParaCheck?.tipo_conexao_whatsapp !== 'oficial') {
         if (typeof toast === 'function') toast('Conecte o WhatsApp desta clínica primeiro', 'error');
         return;
       }
       input.value = '';
       if (typeof autoResizeInput === 'function') autoResizeInput(input);
       try {
-        await sendWhatsAppMessage(instancia, INBOX.activeChat.phone, text);
+        // ⚠️ CORREÇÃO 06/08: passa o clinic.id junto — sem isso, o roteamento
+        // entre Evolution e API Oficial (lá no backend) ficava dependendo só
+        // da "instância", que pra clínica em API Oficial pode vir errada
+        // (o recebimento salva o Phone Number ID da Meta nesse campo, não um
+        // nome de instância Evolution de verdade). Com o clinic.id, o
+        // backend identifica a clínica direto e roteia certo, ignorando
+        // esse valor de instância que não se aplica.
+        const clinicAtual = (typeof currentClinic === 'function') ? currentClinic() : null;
+        await sendWhatsAppMessage(instancia, INBOX.activeChat.phone, text, clinicAtual?.id);
         INBOX.activeChat.lastMsg = text;
         if (typeof renderInboxList === 'function') renderInboxList();
       } catch (e) {
