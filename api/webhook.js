@@ -75,9 +75,16 @@ module.exports = async function handler(req, res) {
         binarioBaixado = r?.binary || null;
         conteudo = '🎵 Áudio';
         // transcreve — se der certo, o Brian já "ouve" o áudio de verdade
+        // ⚠️ AJUSTE: salva só o texto PURO da transcrição (sem prefixo) —
+        // é o próprio Brian (função textoDe, no lado dele) quem adiciona o
+        // "[Mensagem de voz transcrita]:" sozinho ao montar o histórico.
+        // Adicionar aqui TAMBÉM duplicava o prefixo (um dentro do outro),
+        // deixando o texto estranho pro Brian, que reagia como se o áudio
+        // estivesse confuso/ilegível — mesmo bug já resolvido no Evolution
+        // há tempo, reaproveitando o padrão de lá agora.
         if (binarioBaixado) {
           const transcrito = await transcreverAudioMetaWhisper(binarioBaixado);
-          if (transcrito) conteudo = `[Mensagem de voz transcrita]: ${transcrito}`;
+          if (transcrito) conteudo = transcrito;
         }
       } else if (msg.type === 'video') {
         tipo = 'video';
