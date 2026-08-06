@@ -127,14 +127,13 @@ module.exports = async function handler(req, res) {
       const procDaMsg = (tipo === 'text') ? extrairProcedimentoDaMsg(conteudo) : null;
       await brianAcharOuCriarLead(clinica.id, telefoneLead, nomeContato, 'WhatsApp Meta', procDaMsg, false);
 
-      // ⚠️ NOVO 06/08: chama o Brian pra responder de verdade. Versão
-      // ENXUTA de propósito — não processa os marcadores avançados
-      // ([[AGENDAR]], [[CASOS]], [[SIMULAR]], [[VOZ]]) ainda, só remove
-      // eles do texto antes de mandar (pra não vazar sintaxe técnica pro
-      // paciente). Isso já coloca o Brian conversando de verdade — os
-      // recursos avançados ficam pra uma próxima etapa, portados com
-      // calma, sem risco de misturar bug novo no meio da lógica gigante
-      // que já funciona pro Evolution.
+      // ⚠️ NOVO 06/08: chama o Brian pra responder de verdade, agora usando
+      // a MESMA função de processamento de marcadores que o Evolution já
+      // usa (processarMarcadoresBrian) — ou seja, [[AGENDAR]] (agenda de
+      // verdade), [[LEAD]] (captura nome), [[CASOS]] (manda foto de caso),
+      // [[PROC]] (marca interesse) e [[VOZ]] (responde em áudio) agora
+      // funcionam igual nos dois caminhos. [[SIMULAR]] foi removido de
+      // vez do sistema (decisão do Jean), não existe mais em lugar nenhum.
       try {
         const respBrian = await fetch(`${SUPABASE_URL}/functions/v1/brian`, {
           method: 'POST',
@@ -143,8 +142,7 @@ module.exports = async function handler(req, res) {
         });
         const dataBrian = respBrian.ok ? await respBrian.json() : null;
         if (dataBrian?.ok && dataBrian.sugestao) {
-          const textoLimpo = String(dataBrian.sugestao).replace(/\s*\[\[[^\]]+\]\]\s*/g, ' ').trim();
-          if (textoLimpo) await responderPaciente(null, clinica.id, telefoneLead, textoLimpo, null);
+          await processarMarcadoresBrian(clinica.id, telefoneLead, nomeContato, conteudo, tipo, dataBrian.sugestao, null);
         }
       } catch (eBrian) { console.error('[META-BRIAN] erro:', eBrian.message); }
 
@@ -155,20 +153,10 @@ module.exports = async function handler(req, res) {
     }
   }
 
-  // ── DESVIO: geração de simulação visual (chamado pela página "Simulações")
-  if (req.body && req.body.action === 'gerar_simulacao') {
-    return await handleGerarSimulacao(req, res, { SUPABASE_URL, SUPABASE_KEY, EVO_URL, EVO_KEY, sbHeaders });
-  }
-
-  // ── DESVIO: envia uma imagem JÁ PRONTA
-  if (req.body && req.body.action === 'enviar_imagem_pronta') {
-    return await handleEnviarImagemPronta(req, res, { SUPABASE_URL, SUPABASE_KEY, EVO_URL, EVO_KEY, sbHeaders });
-  }
-
-  // ── DESVIO: detecta a região na foto
-  if (req.body && req.body.action === 'detectar_regiao') {
-    return await handleDetectarRegiao(req, res);
-  }
+  // ⚠️ REMOVIDO 06/08 (decisão do Jean): recurso de simulação visual
+  // desativado por completo — rotas 'gerar_simulacao', 'enviar_imagem_pronta'
+  // e 'detectar_regiao' removidas (eram usadas só pela página "Simulações",
+  // que também deixa de funcionar).
 
   // ════════════════════════════════════════════════════════════
   // BRIAN 2.3.a — CÉREBRO DA DECISÃO (NÃO ENVIA NADA AINDA)
@@ -642,7 +630,7 @@ module.exports = async function handler(req, res) {
 
   async function brianEnviarCasos(instanceName, clinic_id, phone, procedimento) {
     try {
-      if (!instanceName || !procedimento) return false;
+      if (!procedimento) return false;
       const proc = String(procedimento).trim();
       const r = await fetch(
         `${SUPABASE_URL}/rest/v1/brian_casos?clinic_id=eq.${clinic_id}&ativo=eq.true&procedimento=ilike.*${encodeURIComponent(proc)}*&select=imagem_url,legenda&order=ordem.asc&limit=2`,
@@ -654,17 +642,32 @@ module.exports = async function handler(req, res) {
       const cleanPhone = String(phone).replace(/\D/g, '');
       const number = cleanPhone.length >= 12 ? cleanPhone : '55' + cleanPhone;
 
+      // ⚠️ NOVO 06/08: roteamento Evolution vs API Oficial, mesmo padrão
+      // já usado em responderPaciente — checa 1x só, reaproveita nos 2 envios.
+      const clinicaInfo = await buscarCredenciaisOficial(clinic_id);
+      const ehOficial = clinicaInfo?.tipo_conexao_whatsapp === 'oficial' && clinicaInfo.meta_phone_number_id && clinicaInfo.meta_access_token;
+
       let enviou = false;
       for (const caso of casos) {
         try {
           const legenda = caso.legenda || `✨ Olha esse resultado real de ${proc} que fizemos! 😍`;
-          await fetch(`${EVO_URL}/message/sendMedia/${instanceName}`, {
-            method: 'POST',
-            headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              number, mediatype: 'image', mimetype: 'image/jpeg', media: caso.imagem_url, caption: legenda, fileName: 'caso.jpg',
-            }),
-          });
+          if (ehOficial) {
+            await fetch(`https://graph.facebook.com/v21.0/${clinicaInfo.meta_phone_number_id}/messages`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${clinicaInfo.meta_access_token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ messaging_product: 'whatsapp', to: number, type: 'image', image: { link: caso.imagem_url, caption: legenda } }),
+            });
+          } else if (instanceName) {
+            await fetch(`${EVO_URL}/message/sendMedia/${instanceName}`, {
+              method: 'POST',
+              headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                number, mediatype: 'image', mimetype: 'image/jpeg', media: caso.imagem_url, caption: legenda, fileName: 'caso.jpg',
+              }),
+            });
+          } else {
+            continue; // nem oficial nem instância Evolution — não tem como mandar
+          }
           await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
             method: 'POST',
             headers: { ...sbHeaders, Prefer: 'return=minimal' },
@@ -848,53 +851,6 @@ module.exports = async function handler(req, res) {
     } catch (e) { return null; }
   }
 
-  const PREFIXO_PRECISO = "This is a precise, localized photo edit, not a new image. ";
-  const SUFIXO_PRESERVAR = " Apply ONLY this specific change. Do NOT change, regenerate, or reinterpret the person's facial identity, bone structure, face shape, eyes, eyebrows, skin tone, expression, hair, pose, background, or lighting (unless explicitly part of the change above). Everything else must remain pixel-for-pixel identical to the original photo.";
-  const PROMPTS_SIMULACAO = {
-    clareamento: PREFIXO_PRECISO + "Significantly whiten and brighten the teeth — a clear, noticeable improvement of several shades whiter than the original color, removing yellow tones and stains completely. The result should look bright, healthy and vibrant, like a professional in-office whitening treatment — clearly and visibly different from the original color, while still looking like real natural tooth enamel (not glowing, fluorescent, or paper-white)." + SUFIXO_PRESERVAR,
-    alinhamento: PREFIXO_PRECISO + "Clearly straighten and align ONLY the teeth that are visibly crooked, rotated, or out of position — a genuine, visible correction as if a full course of orthodontic treatment was completed on those specific teeth. CRITICAL: do NOT whiten, brighten, or change the color/shade of ANY teeth (crooked or already-straight) — every tooth must keep its EXACT current color from the original photo, even if yellowed or uneven in color. Do not change teeth that are already well-positioned. Only reposition — never recolor." + SUFIXO_PRESERVAR,
-    lentes: PREFIXO_PRECISO + "Perform a genuine, clearly visible cosmetic dental veneer transformation: correct the size and proportions of the teeth to be more ideal and harmonious, refine the shape of any uneven or worn teeth to look symmetric and well-proportioned, correct visible misalignments and close visible gaps, and remove chips or irregular edges. Whiten the teeth to a bright, attractive white — clearly and visibly whiter and more uniform than the original, similar to a real cosmetic veneer result from a good dentist. The result must be a REAL, NOTICEABLE improvement (not subtle or barely-there) while still looking like genuine human teeth with natural enamel texture and realistic light reflection — a believable, professional clinical result, not a cartoon smile, denture, or artificial-looking filter." + SUFIXO_PRESERVAR,
-    protese_parcial: PREFIXO_PRECISO + "Fill in ONLY the specific visible gap(s) from missing teeth, adding a replacement tooth/teeth that seamlessly and naturally integrates with the surrounding dentition: match the EXACT current color, shade, translucency and surface texture of this specific person's OWN remaining natural teeth (not an idealized bright white — match their real, current tooth color and condition precisely, even if slightly yellowed, worn, or uneven), match the size and proportions to naturally fill the gap in harmony with neighboring teeth, and blend the base of the new tooth naturally into the gum line — no visible seams, edges, or 'pasted-on' appearance. The new tooth should look like it has always been there, not a distinctly different or artificial-looking addition. CRITICAL: do NOT whiten, straighten, reshape, or otherwise change any of the person's OTHER existing teeth — every other tooth must remain EXACTLY as it appears in the original photo, unchanged. Only the missing tooth gap should be filled; the rest of the smile must stay pixel-identical to the original." + SUFIXO_PRESERVAR,
-    protese_total_natural: PREFIXO_PRECISO + "Replace the missing/damaged teeth with a COMPLETE, full set of new replacement teeth (as in a full denture or implant-supported prosthesis) — well-proportioned, evenly aligned, and naturally shaped for this person's mouth and face. Use a soft, natural tooth color similar to healthy natural teeth — not brilliant white, a believable natural shade appropriate for the person. The result must look like a real, professional full-mouth restoration — natural enamel texture, realistic light reflection, teeth proportional to the face." + SUFIXO_PRESERVAR,
-    protese_total_equilibrado: PREFIXO_PRECISO + "Replace the missing/damaged teeth with a COMPLETE, full set of new replacement teeth (as in a full denture or implant-supported prosthesis) — well-proportioned, evenly aligned, and naturally shaped for this person's mouth and face. Use a bright, healthy white tooth color — a pleasant, attractive shade typical of a well-made dental prosthesis, clearly improved but still believable. The result must look like a real, professional full-mouth restoration — natural enamel texture, realistic light reflection." + SUFIXO_PRESERVAR,
-    protese_total_branco: PREFIXO_PRECISO + "Replace the missing/damaged teeth with a COMPLETE, full set of new replacement teeth (as in a full denture or implant-supported prosthesis) — well-proportioned, evenly aligned, and naturally shaped for this person's mouth and face. Use a vivid, bright white tooth color — a striking, high-impact result typical of a premium full-mouth restoration, noticeably white while still maintaining realistic enamel texture and light reflection (not glowing or plastic-looking)." + SUFIXO_PRESERVAR,
-    gengivoplastia: PREFIXO_PRECISO + "Moderately adjust ONLY the gum line to be more even and proportional, visibly reducing an excessive or uneven gum display ('gummy smile') for a more balanced smile — a real, noticeable but natural-looking correction, not extreme. CRITICAL: do NOT whiten, straighten, or otherwise change the teeth themselves — they must keep their exact current color, shape and position from the original photo. Only the gum line changes." + SUFIXO_PRESERVAR,
-    otomodelacao: PREFIXO_PRECISO + "Moderately reshape the ears to sit closer to the head, naturally correcting protruding ears — a believable, non-surgical ear harmonization result. Keep the correction natural and proportional, not exaggerated or overly flattened." + SUFIXO_PRESERVAR,
-    rinoplastia: PREFIXO_PRECISO + "Refine and reshape the nose to be more balanced and proportional to the rest of the face — a genuine, visible improvement in shape and symmetry, similar to a real rhinoplasty result. Keep the change natural and proportional to this specific person's face — a believable result, not a generic or overly reduced nose." + SUFIXO_PRESERVAR,
-    harmonizacao_facial: PREFIXO_PRECISO + "Apply subtle, natural facial harmonization — a slightly more defined jawline and slightly more balanced facial proportions. This must be a believable refinement, not a transformation. The person must remain clearly, unmistakably recognizable as the exact same individual — same eyes, same nose, same mouth, same overall facial identity. If in doubt, favor a smaller, more conservative change." + SUFIXO_PRESERVAR,
-    preenchimento_labial: PREFIXO_PRECISO + "Add natural, moderate fuller volume to the lips — a genuine, visible but proportional improvement, balanced with the rest of the face. Keep the lip shape natural and believable, not exaggerated, overfilled, or artificial-looking." + SUFIXO_PRESERVAR,
-    toxina_botulinica: PREFIXO_PRECISO + "Moderately smooth and soften fine lines and wrinkles on the forehead and around the eyes, as if from botulinum toxin treatment — natural, relaxed expression, not frozen or overly smoothed. A believable, noticeable improvement in skin smoothness without looking artificial." + SUFIXO_PRESERVAR,
-  };
-
-  async function gerarSimulacaoSorriso(fotoUrl, tipo) {
-    const OPENAI_KEY = process.env.OPENAI_API_KEY;
-    const prompt = PROMPTS_SIMULACAO[tipo];
-    if (!OPENAI_KEY || !fotoUrl || !prompt) return null;
-    try {
-      const fotoResp = await fetch(fotoUrl);
-      if (!fotoResp.ok) return null;
-      const fotoBuffer = await fotoResp.arrayBuffer();
-      const fotoBlob = new Blob([fotoBuffer], { type: 'image/jpeg' });
-
-      const form = new FormData();
-      form.append('model', 'gpt-image-1.5');
-      form.append('image[]', fotoBlob, 'sorriso.jpg');
-      form.append('prompt', prompt);
-      form.append('size', '1024x1024');
-      form.append('quality', 'high');
-      form.append('input_fidelity', 'high');
-
-      const resp = await fetch('https://api.openai.com/v1/images/edits', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${OPENAI_KEY}` },
-        body: form,
-      });
-      if (!resp.ok) return null;
-      const data = await resp.json();
-      return data?.data?.[0]?.b64_json || null;
-    } catch (e) { return null; }
-  }
-
   async function gerarAudioTTS(texto, voz) {
     const OPENAI_KEY = process.env.OPENAI_API_KEY;
     if (!OPENAI_KEY || !texto || !voz) return null;
@@ -916,10 +872,28 @@ module.exports = async function handler(req, res) {
     } catch (e) { return null; }
   }
 
-  async function enviarAudioWhatsApp(instanceName, phone, audioBase64) {
+  // ⚠️ AJUSTE 06/08: agora recebe clinic_id e roteia Evolution vs API
+  // Oficial. Também recebe a mediaUrl (já devia estar disponível, já que
+  // o áudio é salvo no Storage de qualquer forma) — pra API Oficial,
+  // enviar por LINK é o jeito padrão da Meta (mais simples que subir
+  // base64 direto).
+  async function enviarAudioWhatsApp(instanceName, clinic_id, phone, audioBase64, mediaUrl) {
     try {
       const cleanPhone = String(phone).replace(/\D/g, '');
       const number = cleanPhone.length >= 12 ? cleanPhone : '55' + cleanPhone;
+
+      const clinicaInfo = await buscarCredenciaisOficial(clinic_id);
+      if (clinicaInfo?.tipo_conexao_whatsapp === 'oficial' && clinicaInfo.meta_phone_number_id && clinicaInfo.meta_access_token) {
+        if (!mediaUrl) return null; // API Oficial precisa de link, não manda base64 direto
+        const resp = await fetch(`https://graph.facebook.com/v21.0/${clinicaInfo.meta_phone_number_id}/messages`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${clinicaInfo.meta_access_token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messaging_product: 'whatsapp', to: number, type: 'audio', audio: { link: mediaUrl } }),
+        });
+        return resp.ok ? await resp.json() : null;
+      }
+
+      if (!instanceName) return null;
       const resp = await fetch(`${EVO_URL}/message/sendWhatsAppAudio/${instanceName}`, {
         method: 'POST',
         headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
@@ -1035,6 +1009,281 @@ module.exports = async function handler(req, res) {
         }),
       });
     } catch (e) { }
+  }
+
+  // ⚠️ NOVO 06/08: extraído do fluxo Evolution pra função própria, reusável
+  // pelos dois caminhos (Evolution E API Oficial da Meta) — antes só rodava
+  // se tivesse "instanceName" (só Evolution), agora funciona pros dois
+  // (pra API Oficial, instanceName vem null, e as funções de envio usadas
+  // aqui dentro — responderPaciente, brianEnviarConfirmacao, brianEnviarCasos,
+  // enviarAudioWhatsApp — já sabem decidir sozinhas o caminho certo, olhando
+  // o clinic_id). Processa TODOS os marcadores do Brian: [[LEAD]], [[AGENDAR]],
+  // [[CASOS]], [[PROC]], [[VOZ]] — não inclui mais [[SIMULAR]] (removido).
+  async function processarMarcadoresBrian(clinic_id, phone, contact_name, content, type, textoResposta, instanceName) {
+                  let campoLead = null;
+                  let campoAgendar = null;
+
+                  const mLead = String(textoResposta).match(/\[\[LEAD\|([^\]]+)\]\]/i);
+                  if (mLead) {
+                    try {
+                      const campos = {};
+                      mLead[1].split('|').forEach(par => {
+                        const idx = par.indexOf('=');
+                        if (idx > 0) campos[par.slice(0, idx).trim().toLowerCase()] = par.slice(idx + 1).trim();
+                      });
+                      campoLead = campos;
+                    } catch (e) { }
+                    textoResposta = String(textoResposta).replace(/\s*\[\[LEAD\|[^\]]+\]\]\s*/i, ' ').trim();
+                  }
+
+                  const mAgendar = String(textoResposta).match(/\[\[AGENDAR\|([^\]]+)\]\]/i);
+                  if (mAgendar) {
+                    try {
+                      const campos = {};
+                      mAgendar[1].split('|').forEach(par => {
+                        const idx = par.indexOf('=');
+                        if (idx > 0) campos[par.slice(0, idx).trim().toLowerCase()] = par.slice(idx + 1).trim();
+                      });
+                      campoAgendar = campos;
+                    } catch (e) { }
+                    textoResposta = String(textoResposta).replace(/\s*\[\[AGENDAR\|[^\]]+\]\]\s*/i, ' ').trim();
+                  }
+
+                  const _normNome = (s) => String(s || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                  if (contact_name && campoLead && campoLead.nome && _normNome(campoLead.nome) === _normNome(contact_name)) {
+                    campoLead.nome = null;
+                  }
+                  if (contact_name && campoAgendar && campoAgendar.nome && _normNome(campoAgendar.nome) === _normNome(contact_name)) {
+                    campoAgendar.nome = null;
+                  }
+
+                  let procCasos = null;
+                  const mCasos = String(textoResposta).match(/\[\[CASOS\|([^\]]+)\]\]/i);
+                  if (mCasos) {
+                    try {
+                      const campos = {};
+                      mCasos[1].split('|').forEach(par => {
+                        const idx = par.indexOf('=');
+                        if (idx > 0) campos[par.slice(0, idx).trim().toLowerCase()] = par.slice(idx + 1).trim();
+                      });
+                      procCasos = campos.procedimento || null;
+                    } catch (e) { }
+                    textoResposta = String(textoResposta).replace(/\s*\[\[CASOS\|[^\]]+\]\]\s*/i, ' ').trim();
+                  }
+
+                  let procInteresseConversa = null;
+                  const mProc = String(textoResposta).match(/\[\[PROC\|([^\]]+)\]\]/i);
+                  if (mProc) {
+                    try {
+                      const campos = {};
+                      mProc[1].split('|').forEach(par => {
+                        const idx = par.indexOf('=');
+                        if (idx > 0) campos[par.slice(0, idx).trim().toLowerCase()] = par.slice(idx + 1).trim();
+                      });
+                      procInteresseConversa = campos.procedimento || null;
+                    } catch (e) { }
+                    textoResposta = String(textoResposta).replace(/\s*\[\[PROC\|[^\]]+\]\]\s*/i, ' ').trim();
+                  }
+
+                  let temVoz = false;
+                  if (/\[\[VOZ\]\]/i.test(String(textoResposta))) {
+                    temVoz = true;
+                    textoResposta = String(textoResposta).replace(/\s*\[\[VOZ\]\]\s*/i, ' ').trim();
+                  }
+
+                  if (!temVoz) {
+                    const contentNorm = String(content || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                    const palavrasMedo = ['medo', 'trauma', 'pavor', 'apavorad', 'traumatizad', 'com muito nervos'];
+                    if (palavrasMedo.some(p => contentNorm.includes(p))) temVoz = true;
+                  }
+
+                  if (!temVoz && type === 'audio' && content && content.trim() !== '🎵 Áudio') {
+                    temVoz = true;
+                  }
+
+                  await logDebug(clinic_id, phone, 'voz', temVoz ? 'sucesso' : 'pulado', temVoz ? 'Voz será usada nesta resposta' : 'Resposta em texto');
+                  // ⚠️ REMOVIDO 06/08: recurso de simulação visual desativado
+                  // por decisão do Jean — não executa mais a geração de
+                  // imagem (o quadro que fazia isso foi removido por
+                  // completo, mais abaixo). Continua só REMOVENDO o texto
+                  // do marcador da mensagem, como rede de segurança — caso
+                  // o Brian ainda mande [[SIMULAR|...]] por engano (o prompt
+                  // dele, no painel do Supabase, também precisa ser
+                  // atualizado à parte pra parar de instruir isso), o
+                  // paciente nunca vê a sintaxe técnica crua na mensagem.
+                  textoResposta = String(textoResposta).replace(/\s*\[\[SIMULAR\|tipo=[a-z_]+\]\]\s*/i, ' ').trim();
+
+                  if (temVoz) {
+                    try {
+                      const sufixoOptOut = String(phone).replace(/\D/g, '').slice(-8);
+                      const optOutResp = await fetch(
+                        `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixoOptOut}&from_me=eq.false&select=content&order=created_at.desc&limit=20`,
+                        { headers: sbHeaders }
+                      );
+                      const optOutArr = optOutResp.ok ? await optOutResp.json() : [];
+                      const normalizar = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                      const frasesOptOut = ['nao posso ouvir', 'nao consigo ouvir', 'prefiro texto', 'sem audio',
+                        'nao gosto de audio', 'nao curto audio', 'manda por texto', 'so texto', 'sem voz', 'nao manda audio'];
+                      const jaPediuTexto = optOutArr.some(m => frasesOptOut.some(f => normalizar(m.content).includes(f)));
+                      if (jaPediuTexto) temVoz = false;
+                    } catch (e) { }
+                  }
+
+                  let agendamentoConflito = false;
+                  if (campoAgendar && campoAgendar.data && campoAgendar.hora) {
+                    try {
+                      const fmtBRcheck = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' });
+                      const hojeISOcheck = fmtBRcheck.format(new Date());
+                      const baseBRTcheck = new Date(`${hojeISOcheck}T12:00:00-03:00`);
+                      const amanhaISOcheck = new Date(baseBRTcheck.getTime() + 24 * 3600 * 1000).toISOString().split('T')[0];
+
+                      const sufixoCheck = String(phone).replace(/\D/g, '').slice(-8);
+                      const janelaCheck = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+                      const histR = await fetch(
+                        `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixoCheck}&created_at=gte.${encodeURIComponent(janelaCheck)}&select=content&order=created_at.desc&limit=6`,
+                        { headers: sbHeaders }
+                      );
+                      const histA = histR.ok ? await histR.json() : [];
+                      const textoRecente = (histA || []).map(m => String(m.content || '')).join(' ').toLowerCase();
+
+                      const mencionaAmanha = /\bam[a-z]{1,4}h[ãa]/i.test(textoRecente);
+                      const mencionaHoje = /\bhoje\b/.test(textoRecente);
+
+                      if (mencionaAmanha && campoAgendar.data !== amanhaISOcheck) {
+                        campoAgendar.data = amanhaISOcheck;
+                      } else if (mencionaHoje && !mencionaAmanha && campoAgendar.data !== hojeISOcheck) {
+                        campoAgendar.data = hojeISOcheck;
+                      } else {
+                        const semAcentoRecente = textoRecente.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                        const DIAS_SEMANA_NOMES = ['domingo', 'segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado'];
+                        const diasMencionados = [];
+                        DIAS_SEMANA_NOMES.forEach((nome, idx) => {
+                          if (new RegExp(`\\b${nome}\\b`, 'i').test(semAcentoRecente)) diasMencionados.push(idx);
+                        });
+                        if (diasMencionados.length === 1) {
+                          const diaAlvo = diasMencionados[0];
+                          const [ay, am, ad] = campoAgendar.data.split('-').map(Number);
+                          const diaSemanaMarcador = new Date(ay, am - 1, ad).getDay();
+                          if (diaSemanaMarcador !== diaAlvo) {
+                            for (let i = 0; i <= 7; i++) {
+                              const cand = new Date(baseBRTcheck.getTime() + i * 24 * 3600 * 1000);
+                              const candISO = cand.toISOString().split('T')[0];
+                              const [cy, cm, cd] = candISO.split('-').map(Number);
+                              if (new Date(cy, cm - 1, cd).getDay() === diaAlvo) {
+                                campoAgendar.data = candISO;
+                                break;
+                              }
+                            }
+                          }
+                        }
+                      }
+                    } catch (e) { }
+
+                    const lead = await brianAcharOuCriarLead(clinic_id, phone, campoAgendar.nome || (campoLead && campoLead.nome), undefined, undefined, true);
+                    if (lead && lead.id) {
+                      const dentistaId = await brianResolverDentista(clinic_id, campoAgendar.dentista || '');
+                      const r = await brianCriarConsulta(clinic_id, lead.id, campoAgendar.data, campoAgendar.hora, dentistaId, phone);
+                      if (r.ok && !r.jaAgendado) {
+                        await brianEnviarConfirmacao(instanceName, clinic_id, phone, campoAgendar.nome || lead.nome, campoAgendar.data, campoAgendar.hora);
+                      } else if (!r.ok) {
+                        if (r.motivo === 'horário já ocupado' || r.motivo === 'dentista já ocupado nesse horário' || r.motivo === 'horário no passado') {
+                          agendamentoConflito = true;
+                        }
+                      }
+                    }
+                  }
+
+                  if (agendamentoConflito) {
+                    await responderPaciente(instanceName, clinic_id, phone, 'Ihh, esse horário já está ocupado 😅 Mas me diz: qual outro dia ou período fica bom pra você? Aí já confirmo um horário certinho! 😊', 'BRIAN_AUTO');
+                  } else if (textoResposta) {
+                    let audioEnviadoComSucesso = false;
+
+                    if (temVoz) {
+                      try {
+                        const vozCfgResp = await fetch(
+                          `${SUPABASE_URL}/rest/v1/brian_config?clinic_id=eq.${clinic_id}&select=voz_tts&limit=1`,
+                          { headers: sbHeaders }
+                        );
+                        const vozCfgArr = vozCfgResp.ok ? await vozCfgResp.json() : [];
+                        const vozEscolhida = vozCfgArr[0]?.voz_tts;
+                        if (vozEscolhida) {
+                          const audioBase64 = await gerarAudioTTS(textoResposta, vozEscolhida);
+                          if (audioBase64) {
+                            // ⚠️ AJUSTE 06/08: sobe pro Storage ANTES de mandar (não depois) —
+                            // a API Oficial da Meta precisa de um LINK público pra mandar
+                            // áudio, não aceita base64 direto como o Evolution aceita.
+                            let mediaUrlTts = null;
+                            try {
+                              const cleanPhoneVoz = String(phone).replace(/\D/g, '');
+                              const numberVoz = cleanPhoneVoz.length >= 12 ? cleanPhoneVoz : '55' + cleanPhoneVoz;
+                              const nomeArquivo = `tts_${numberVoz}_${Date.now()}.mp3`;
+                              const upload = await fetch(`${SUPABASE_URL}/storage/v1/object/audios/${nomeArquivo}`, {
+                                method: 'POST',
+                                headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'audio/mpeg' },
+                                body: Buffer.from(audioBase64, 'base64'),
+                              });
+                              mediaUrlTts = upload.ok ? `${SUPABASE_URL}/storage/v1/object/public/audios/${nomeArquivo}` : null;
+                            } catch (e) { }
+
+                            const envioOk = await enviarAudioWhatsApp(instanceName, clinic_id, phone, audioBase64, mediaUrlTts);
+                            if (envioOk) {
+                              audioEnviadoComSucesso = true;
+                              try {
+                                const cleanPhoneVoz = String(phone).replace(/\D/g, '');
+                                const numberVoz = cleanPhoneVoz.length >= 12 ? cleanPhoneVoz : '55' + cleanPhoneVoz;
+                                await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
+                                  method: 'POST',
+                                  headers: { ...sbHeaders, Prefer: 'return=minimal' },
+                                  body: JSON.stringify({
+                                    clinic_id, phone: numberVoz, contact_name: 'BRIAN_AUTO',
+                                    content: textoResposta, type: 'audio', from_me: true, media_url: mediaUrlTts,
+                                    created_at: new Date().toISOString(),
+                                  }),
+                                });
+                              } catch (e) { }
+                            }
+                          }
+                        }
+                      } catch (e) { }
+                    }
+
+                    if (!audioEnviadoComSucesso) {
+                      await responderPaciente(instanceName, clinic_id, phone, textoResposta, 'BRIAN_AUTO');
+                    }
+                  }
+
+                  // ⚠️ REMOVIDO 06/08 (decisão do Jean): bloco inteiro de
+                  // execução da simulação visual (gerava imagem via IA e
+                  // mandava pro paciente) — removido por completo daqui.
+
+                  if (!campoAgendar) {
+                    const nomeProvisorio = (campoLead && campoLead.nome) || contact_name || null;
+                    await brianAcharOuCriarLead(clinic_id, phone, nomeProvisorio, undefined, undefined, !!(campoLead && campoLead.nome));
+                  }
+
+                  const totalDia = await brianIncrementarContador(clinic_id, phone);
+                  const LIMITE = 12;
+                  if (totalDia >= LIMITE) {
+                    const nomeLead = (campoLead && campoLead.nome) || (campoAgendar && campoAgendar.nome) || '';
+                    const primeiro = String(nomeLead).split(' ')[0] || '';
+                    const aviso = `${primeiro ? primeiro + ', ' : ''}vou pedir pra um especialista da nossa equipe te dar uma atenção mais completa, tá? 😊 Em breve alguém continua seu atendimento por aqui!`;
+                    await responderPaciente(instanceName, clinic_id, phone, aviso, 'BRIAN_AUTO');
+                    await brianEscalar(clinic_id, phone, nomeLead);
+                  }
+
+                  if (procCasos) {
+                    await brianEnviarCasos(instanceName, clinic_id, phone, procCasos);
+                  }
+
+                  if (procInteresseConversa) {
+                    try {
+                      await brianAcharOuCriarLead(clinic_id, phone, (campoLead && campoLead.nome) || null, 'WhatsApp', procInteresseConversa, true);
+                    } catch (e) { }
+                  }
+
+                  if (!campoAgendar && campoLead && campoLead.nome) {
+                    await brianAcharOuCriarLead(clinic_id, phone, campoLead.nome, undefined, undefined, true);
+                  }
   }
 
   async function processarConfirmacao(clinic_id, phone, content, instanceName) {
@@ -1426,307 +1675,8 @@ module.exports = async function handler(req, res) {
 
                 let textoResposta = dataBrian && dataBrian.ok ? dataBrian.sugestao : null;
 
-                if (textoResposta && instanceName) {
-                  let campoLead = null;
-                  let campoAgendar = null;
-
-                  const mLead = String(textoResposta).match(/\[\[LEAD\|([^\]]+)\]\]/i);
-                  if (mLead) {
-                    try {
-                      const campos = {};
-                      mLead[1].split('|').forEach(par => {
-                        const idx = par.indexOf('=');
-                        if (idx > 0) campos[par.slice(0, idx).trim().toLowerCase()] = par.slice(idx + 1).trim();
-                      });
-                      campoLead = campos;
-                    } catch (e) { }
-                    textoResposta = String(textoResposta).replace(/\s*\[\[LEAD\|[^\]]+\]\]\s*/i, ' ').trim();
-                  }
-
-                  const mAgendar = String(textoResposta).match(/\[\[AGENDAR\|([^\]]+)\]\]/i);
-                  if (mAgendar) {
-                    try {
-                      const campos = {};
-                      mAgendar[1].split('|').forEach(par => {
-                        const idx = par.indexOf('=');
-                        if (idx > 0) campos[par.slice(0, idx).trim().toLowerCase()] = par.slice(idx + 1).trim();
-                      });
-                      campoAgendar = campos;
-                    } catch (e) { }
-                    textoResposta = String(textoResposta).replace(/\s*\[\[AGENDAR\|[^\]]+\]\]\s*/i, ' ').trim();
-                  }
-
-                  const _normNome = (s) => String(s || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-                  if (contact_name && campoLead && campoLead.nome && _normNome(campoLead.nome) === _normNome(contact_name)) {
-                    campoLead.nome = null;
-                  }
-                  if (contact_name && campoAgendar && campoAgendar.nome && _normNome(campoAgendar.nome) === _normNome(contact_name)) {
-                    campoAgendar.nome = null;
-                  }
-
-                  let procCasos = null;
-                  const mCasos = String(textoResposta).match(/\[\[CASOS\|([^\]]+)\]\]/i);
-                  if (mCasos) {
-                    try {
-                      const campos = {};
-                      mCasos[1].split('|').forEach(par => {
-                        const idx = par.indexOf('=');
-                        if (idx > 0) campos[par.slice(0, idx).trim().toLowerCase()] = par.slice(idx + 1).trim();
-                      });
-                      procCasos = campos.procedimento || null;
-                    } catch (e) { }
-                    textoResposta = String(textoResposta).replace(/\s*\[\[CASOS\|[^\]]+\]\]\s*/i, ' ').trim();
-                  }
-
-                  let procInteresseConversa = null;
-                  const mProc = String(textoResposta).match(/\[\[PROC\|([^\]]+)\]\]/i);
-                  if (mProc) {
-                    try {
-                      const campos = {};
-                      mProc[1].split('|').forEach(par => {
-                        const idx = par.indexOf('=');
-                        if (idx > 0) campos[par.slice(0, idx).trim().toLowerCase()] = par.slice(idx + 1).trim();
-                      });
-                      procInteresseConversa = campos.procedimento || null;
-                    } catch (e) { }
-                    textoResposta = String(textoResposta).replace(/\s*\[\[PROC\|[^\]]+\]\]\s*/i, ' ').trim();
-                  }
-
-                  let temVoz = false;
-                  if (/\[\[VOZ\]\]/i.test(String(textoResposta))) {
-                    temVoz = true;
-                    textoResposta = String(textoResposta).replace(/\s*\[\[VOZ\]\]\s*/i, ' ').trim();
-                  }
-
-                  if (!temVoz) {
-                    const contentNorm = String(content || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-                    const palavrasMedo = ['medo', 'trauma', 'pavor', 'apavorad', 'traumatizad', 'com muito nervos'];
-                    if (palavrasMedo.some(p => contentNorm.includes(p))) temVoz = true;
-                  }
-
-                  if (!temVoz && type === 'audio' && content && content.trim() !== '🎵 Áudio') {
-                    temVoz = true;
-                  }
-
-                  await logDebug(clinic_id, phone, 'voz', temVoz ? 'sucesso' : 'pulado', temVoz ? 'Voz será usada nesta resposta' : 'Resposta em texto');
-
-                  let simularTipo = null;
-                  const mSimular = String(textoResposta).match(/\[\[SIMULAR\|tipo=([a-z_]+)\]\]/i);
-                  if (mSimular) {
-                    simularTipo = mSimular[1].toLowerCase();
-                    textoResposta = String(textoResposta).replace(/\s*\[\[SIMULAR\|tipo=[a-z_]+\]\]\s*/i, ' ').trim();
-                  }
-
-                  if (temVoz) {
-                    try {
-                      const sufixoOptOut = String(phone).replace(/\D/g, '').slice(-8);
-                      const optOutResp = await fetch(
-                        `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixoOptOut}&from_me=eq.false&select=content&order=created_at.desc&limit=20`,
-                        { headers: sbHeaders }
-                      );
-                      const optOutArr = optOutResp.ok ? await optOutResp.json() : [];
-                      const normalizar = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-                      const frasesOptOut = ['nao posso ouvir', 'nao consigo ouvir', 'prefiro texto', 'sem audio',
-                        'nao gosto de audio', 'nao curto audio', 'manda por texto', 'so texto', 'sem voz', 'nao manda audio'];
-                      const jaPediuTexto = optOutArr.some(m => frasesOptOut.some(f => normalizar(m.content).includes(f)));
-                      if (jaPediuTexto) temVoz = false;
-                    } catch (e) { }
-                  }
-
-                  let agendamentoConflito = false;
-                  if (campoAgendar && campoAgendar.data && campoAgendar.hora) {
-                    try {
-                      const fmtBRcheck = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' });
-                      const hojeISOcheck = fmtBRcheck.format(new Date());
-                      const baseBRTcheck = new Date(`${hojeISOcheck}T12:00:00-03:00`);
-                      const amanhaISOcheck = new Date(baseBRTcheck.getTime() + 24 * 3600 * 1000).toISOString().split('T')[0];
-
-                      const sufixoCheck = String(phone).replace(/\D/g, '').slice(-8);
-                      const janelaCheck = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-                      const histR = await fetch(
-                        `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixoCheck}&created_at=gte.${encodeURIComponent(janelaCheck)}&select=content&order=created_at.desc&limit=6`,
-                        { headers: sbHeaders }
-                      );
-                      const histA = histR.ok ? await histR.json() : [];
-                      const textoRecente = (histA || []).map(m => String(m.content || '')).join(' ').toLowerCase();
-
-                      const mencionaAmanha = /\bam[a-z]{1,4}h[ãa]/i.test(textoRecente);
-                      const mencionaHoje = /\bhoje\b/.test(textoRecente);
-
-                      if (mencionaAmanha && campoAgendar.data !== amanhaISOcheck) {
-                        campoAgendar.data = amanhaISOcheck;
-                      } else if (mencionaHoje && !mencionaAmanha && campoAgendar.data !== hojeISOcheck) {
-                        campoAgendar.data = hojeISOcheck;
-                      } else {
-                        const semAcentoRecente = textoRecente.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-                        const DIAS_SEMANA_NOMES = ['domingo', 'segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado'];
-                        const diasMencionados = [];
-                        DIAS_SEMANA_NOMES.forEach((nome, idx) => {
-                          if (new RegExp(`\\b${nome}\\b`, 'i').test(semAcentoRecente)) diasMencionados.push(idx);
-                        });
-                        if (diasMencionados.length === 1) {
-                          const diaAlvo = diasMencionados[0];
-                          const [ay, am, ad] = campoAgendar.data.split('-').map(Number);
-                          const diaSemanaMarcador = new Date(ay, am - 1, ad).getDay();
-                          if (diaSemanaMarcador !== diaAlvo) {
-                            for (let i = 0; i <= 7; i++) {
-                              const cand = new Date(baseBRTcheck.getTime() + i * 24 * 3600 * 1000);
-                              const candISO = cand.toISOString().split('T')[0];
-                              const [cy, cm, cd] = candISO.split('-').map(Number);
-                              if (new Date(cy, cm - 1, cd).getDay() === diaAlvo) {
-                                campoAgendar.data = candISO;
-                                break;
-                              }
-                            }
-                          }
-                        }
-                      }
-                    } catch (e) { }
-
-                    const lead = await brianAcharOuCriarLead(clinic_id, phone, campoAgendar.nome || (campoLead && campoLead.nome), undefined, undefined, true);
-                    if (lead && lead.id) {
-                      const dentistaId = await brianResolverDentista(clinic_id, campoAgendar.dentista || '');
-                      const r = await brianCriarConsulta(clinic_id, lead.id, campoAgendar.data, campoAgendar.hora, dentistaId, phone);
-                      if (r.ok && !r.jaAgendado) {
-                        await brianEnviarConfirmacao(instanceName, clinic_id, phone, campoAgendar.nome || lead.nome, campoAgendar.data, campoAgendar.hora);
-                      } else if (!r.ok) {
-                        if (r.motivo === 'horário já ocupado' || r.motivo === 'dentista já ocupado nesse horário' || r.motivo === 'horário no passado') {
-                          agendamentoConflito = true;
-                        }
-                      }
-                    }
-                  }
-
-                  if (agendamentoConflito) {
-                    await responderPaciente(instanceName, clinic_id, phone, 'Ihh, esse horário já está ocupado 😅 Mas me diz: qual outro dia ou período fica bom pra você? Aí já confirmo um horário certinho! 😊', 'BRIAN_AUTO');
-                  } else if (textoResposta) {
-                    let audioEnviadoComSucesso = false;
-
-                    if (temVoz) {
-                      try {
-                        const vozCfgResp = await fetch(
-                          `${SUPABASE_URL}/rest/v1/brian_config?clinic_id=eq.${clinic_id}&select=voz_tts&limit=1`,
-                          { headers: sbHeaders }
-                        );
-                        const vozCfgArr = vozCfgResp.ok ? await vozCfgResp.json() : [];
-                        const vozEscolhida = vozCfgArr[0]?.voz_tts;
-                        if (vozEscolhida) {
-                          const audioBase64 = await gerarAudioTTS(textoResposta, vozEscolhida);
-                          if (audioBase64) {
-                            const envioOk = await enviarAudioWhatsApp(instanceName, phone, audioBase64);
-                            if (envioOk) {
-                              audioEnviadoComSucesso = true;
-                              try {
-                                const cleanPhoneVoz = String(phone).replace(/\D/g, '');
-                                const numberVoz = cleanPhoneVoz.length >= 12 ? cleanPhoneVoz : '55' + cleanPhoneVoz;
-                                const nomeArquivo = `tts_${numberVoz}_${Date.now()}.mp3`;
-                                const upload = await fetch(`${SUPABASE_URL}/storage/v1/object/audios/${nomeArquivo}`, {
-                                  method: 'POST',
-                                  headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'audio/mpeg' },
-                                  body: Buffer.from(audioBase64, 'base64'),
-                                });
-                                const mediaUrlTts = upload.ok ? `${SUPABASE_URL}/storage/v1/object/public/audios/${nomeArquivo}` : null;
-                                await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
-                                  method: 'POST',
-                                  headers: { ...sbHeaders, Prefer: 'return=minimal' },
-                                  body: JSON.stringify({
-                                    clinic_id, phone: numberVoz, contact_name: 'BRIAN_AUTO',
-                                    content: textoResposta, type: 'audio', from_me: true, media_url: mediaUrlTts,
-                                    created_at: new Date().toISOString(),
-                                  }),
-                                });
-                              } catch (e) { }
-                            }
-                          }
-                        }
-                      } catch (e) { }
-                    }
-
-                    if (!audioEnviadoComSucesso) {
-                      await responderPaciente(instanceName, clinic_id, phone, textoResposta, 'BRIAN_AUTO');
-                    }
-                  }
-
-                  if (simularTipo) {
-                    try {
-                      const simCfgResp = await fetch(
-                        `${SUPABASE_URL}/rest/v1/brian_config?clinic_id=eq.${clinic_id}&select=simulacao_sorriso&limit=1`,
-                        { headers: sbHeaders }
-                      );
-                      const simCfgArr = simCfgResp.ok ? await simCfgResp.json() : [];
-                      const simulacaoAtiva = simCfgArr[0]?.simulacao_sorriso === true;
-                      if (simulacaoAtiva) {
-                        const sufixoSim = String(phone).replace(/\D/g, '').slice(-8);
-                        const fotoResp = await fetch(
-                          `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixoSim}&from_me=eq.false&type=eq.image&select=media_url&order=created_at.desc&limit=1`,
-                          { headers: sbHeaders }
-                        );
-                        const fotoArr = fotoResp.ok ? await fotoResp.json() : [];
-                        const fotoUrl = fotoArr[0]?.media_url;
-                        if (fotoUrl) {
-                          const imgBase64 = await gerarSimulacaoSorriso(fotoUrl, simularTipo);
-                          if (imgBase64) {
-                            const cleanPhoneSim = String(phone).replace(/\D/g, '');
-                            const numberSim = cleanPhoneSim.length >= 12 ? cleanPhoneSim : '55' + cleanPhoneSim;
-                            const nomeArquivoSim = `sim_${simularTipo}_${numberSim}_${Date.now()}.png`;
-                            const uploadSim = await fetch(`${SUPABASE_URL}/storage/v1/object/midias/${nomeArquivoSim}`, {
-                              method: 'POST',
-                              headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'image/png' },
-                              body: Buffer.from(imgBase64, 'base64'),
-                            });
-                            const mediaUrlSim = uploadSim.ok ? `${SUPABASE_URL}/storage/v1/object/public/midias/${nomeArquivoSim}` : null;
-                            if (mediaUrlSim) {
-                              const legendaSim = '✨ Isso é só uma *simulação ilustrativa* pra você ter uma ideia — o resultado real é sempre definido na sua avaliação com a dentista, viu? 💙';
-                              await fetch(`${EVO_URL}/message/sendMedia/${instanceName}`, {
-                                method: 'POST',
-                                headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ number: numberSim, mediatype: 'image', media: mediaUrlSim, caption: legendaSim }),
-                              });
-                              await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
-                                method: 'POST',
-                                headers: { ...sbHeaders, Prefer: 'return=minimal' },
-                                body: JSON.stringify({
-                                  clinic_id, phone: numberSim, contact_name: 'BRIAN_AUTO',
-                                  content: legendaSim, type: 'image', from_me: true, media_url: mediaUrlSim,
-                                  created_at: new Date().toISOString(),
-                                }),
-                              });
-                              await logDebug(clinic_id, phone, 'simulacao', 'sucesso', `tipo: ${simularTipo}`);
-                            }
-                          }
-                        }
-                      }
-                    } catch (e) { }
-                  }
-
-                  if (!campoAgendar) {
-                    const nomeProvisorio = (campoLead && campoLead.nome) || contact_name || null;
-                    await brianAcharOuCriarLead(clinic_id, phone, nomeProvisorio, undefined, undefined, !!(campoLead && campoLead.nome));
-                  }
-
-                  const totalDia = await brianIncrementarContador(clinic_id, phone);
-                  const LIMITE = 12;
-                  if (totalDia >= LIMITE) {
-                    const nomeLead = (campoLead && campoLead.nome) || (campoAgendar && campoAgendar.nome) || '';
-                    const primeiro = String(nomeLead).split(' ')[0] || '';
-                    const aviso = `${primeiro ? primeiro + ', ' : ''}vou pedir pra um especialista da nossa equipe te dar uma atenção mais completa, tá? 😊 Em breve alguém continua seu atendimento por aqui!`;
-                    await responderPaciente(instanceName, clinic_id, phone, aviso, 'BRIAN_AUTO');
-                    await brianEscalar(clinic_id, phone, nomeLead);
-                  }
-
-                  if (procCasos) {
-                    await brianEnviarCasos(instanceName, clinic_id, phone, procCasos);
-                  }
-
-                  if (procInteresseConversa) {
-                    try {
-                      await brianAcharOuCriarLead(clinic_id, phone, (campoLead && campoLead.nome) || null, 'WhatsApp', procInteresseConversa, true);
-                    } catch (e) { }
-                  }
-
-                  if (!campoAgendar && campoLead && campoLead.nome) {
-                    await brianAcharOuCriarLead(clinic_id, phone, campoLead.nome, undefined, undefined, true);
-                  }
+                if (textoResposta) {
+                  await processarMarcadoresBrian(clinic_id, phone, contact_name, content, type, textoResposta, instanceName);
                 }
               }
             }
@@ -1739,213 +1689,5 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({ ok: true, processadas: insertados.length, erros: erros.length });
   } catch (err) {
     return res.status(500).json({ error: 'Erro interno', message: err.message });
-  }
-}
-
-async function handleGerarSimulacao(req, res, cfg) {
-  const { SUPABASE_URL, SUPABASE_KEY, EVO_URL, EVO_KEY, sbHeaders } = cfg;
-  const OPENAI_KEY = process.env.OPENAI_API_KEY;
-  if (!OPENAI_KEY) return res.status(500).json({ ok: false, erro: 'OPENAI_API_KEY ausente nas env vars da Vercel' });
-
-  const { clinic_id, tipos, foto_base64, foto_url, phone, instance_name } = req.body || {};
-  if (!Array.isArray(tipos) || !tipos.length) {
-    return res.status(400).json({ ok: false, erro: 'Selecione ao menos 1 tipo de simulação' });
-  }
-
-  if (clinic_id) {
-    try {
-      const simCfgResp = await fetch(
-        `${SUPABASE_URL}/rest/v1/brian_config?clinic_id=eq.${clinic_id}&select=simulacao_sorriso&limit=1`,
-        { headers: sbHeaders }
-      );
-      const simCfgArr = simCfgResp.ok ? await simCfgResp.json() : [];
-      if (simCfgArr[0]?.simulacao_sorriso !== true) {
-        return res.status(403).json({ ok: false, erro: 'Simulações ainda não liberadas pra essa clínica (recurso em teste).' });
-      }
-    } catch (e) {
-      return res.status(500).json({ ok: false, erro: 'Falha ao checar liberação da clínica' });
-    }
-  }
-
-  const prompt = montarPromptCombinado(tipos);
-  if (!prompt) return res.status(400).json({ ok: false, erro: 'Tipo(s) inválido(s)' });
-  if (!foto_base64 && !foto_url) {
-    return res.status(400).json({ ok: false, erro: 'Envie uma foto (upload ou de uma conversa)' });
-  }
-
-  try {
-    let fotoBuffer;
-    if (foto_base64) {
-      const base64Limpo = foto_base64.replace(/^data:image\/\w+;base64,/, '');
-      fotoBuffer = Buffer.from(base64Limpo, 'base64');
-    } else {
-      const fotoFetch = await fetch(foto_url);
-      if (!fotoFetch.ok) return res.status(500).json({ ok: false, erro: 'Falha ao baixar a foto original' });
-      fotoBuffer = Buffer.from(await fotoFetch.arrayBuffer());
-    }
-    const fotoBlob = new Blob([fotoBuffer], { type: 'image/jpeg' });
-
-    const form = new FormData();
-    form.append('model', 'gpt-image-1.5');
-    form.append('image[]', fotoBlob, 'foto.jpg');
-    form.append('prompt', prompt);
-    form.append('size', '1024x1024');
-    form.append('quality', 'high');
-    form.append('input_fidelity', 'high');
-
-    const editResp = await fetch('https://api.openai.com/v1/images/edits', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${OPENAI_KEY}` },
-      body: form,
-    });
-    if (!editResp.ok) return res.status(500).json({ ok: false, erro: `Falha na API de imagem: ${editResp.status}` });
-    const editData = await editResp.json();
-    const imgBase64 = editData?.data?.[0]?.b64_json;
-    if (!imgBase64) return res.status(500).json({ ok: false, erro: 'API não retornou imagem' });
-
-    const tiposStr = tipos.join('-');
-    const nomeArquivo = `sim_${tiposStr}_${Date.now()}.png`;
-    const upload = await fetch(`${SUPABASE_URL}/storage/v1/object/midias/${nomeArquivo}`, {
-      method: 'POST',
-      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'image/png' },
-      body: Buffer.from(imgBase64, 'base64'),
-    });
-    if (!upload.ok) return res.status(500).json({ ok: false, erro: 'Falha ao salvar imagem gerada' });
-    const mediaUrl = `${SUPABASE_URL}/storage/v1/object/public/midias/${nomeArquivo}`;
-
-    const nomesLegiveis = tipos.map(t => LABELS_SIMULACAO[t] || t).join(' + ');
-    const legenda = `✨ Simulação: *${nomesLegiveis}*\n\nIsso é só uma *simulação ilustrativa* pra você ter uma ideia — o resultado real é sempre definido na sua avaliação com a dentista, viu? 💙`;
-
-    let enviado = false;
-    if (phone && instance_name && EVO_KEY) {
-      const cleanPhone = String(phone).replace(/\D/g, '');
-      const number = cleanPhone.length >= 12 ? cleanPhone : '55' + cleanPhone;
-      await fetch(`${EVO_URL}/message/sendMedia/${instance_name}`, {
-        method: 'POST',
-        headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ number, mediatype: 'image', media: mediaUrl, caption: legenda }),
-      });
-      if (clinic_id) {
-        await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
-          method: 'POST',
-          headers: { ...sbHeaders, Prefer: 'return=minimal' },
-          body: JSON.stringify({
-            clinic_id, phone: number, contact_name: 'EQUIPE',
-            content: legenda, type: 'image', from_me: true, media_url: mediaUrl,
-            created_at: new Date().toISOString(),
-          }),
-        });
-      }
-      enviado = true;
-    }
-
-    return res.status(200).json({ ok: true, media_url: mediaUrl, legenda, enviado });
-  } catch (e) {
-    return res.status(500).json({ ok: false, erro: e.message });
-  }
-}
-
-async function handleEnviarImagemPronta(req, res, cfg) {
-  const { SUPABASE_URL, SUPABASE_KEY, EVO_URL, EVO_KEY, sbHeaders } = cfg;
-  const { clinic_id, imagem_base64, phone, instance_name, caption } = req.body || {};
-  if (!imagem_base64 || !phone || !instance_name) {
-    return res.status(400).json({ ok: false, erro: 'Faltam parâmetros: imagem_base64, phone, instance_name' });
-  }
-  try {
-    const base64Limpo = imagem_base64.replace(/^data:image\/\w+;base64,/, '');
-    const nomeArquivo = `sim_antesdepois_${Date.now()}.png`;
-    const upload = await fetch(`${SUPABASE_URL}/storage/v1/object/midias/${nomeArquivo}`, {
-      method: 'POST',
-      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'image/png' },
-      body: Buffer.from(base64Limpo, 'base64'),
-    });
-    if (!upload.ok) return res.status(500).json({ ok: false, erro: 'Falha ao salvar imagem' });
-    const mediaUrl = `${SUPABASE_URL}/storage/v1/object/public/midias/${nomeArquivo}`;
-
-    const legendaFinal = caption || '✨ Isso é só uma *simulação ilustrativa* — o resultado real é sempre definido na sua avaliação com a dentista, viu? 💙';
-    const cleanPhone = String(phone).replace(/\D/g, '');
-    const number = cleanPhone.length >= 12 ? cleanPhone : '55' + cleanPhone;
-
-    await fetch(`${EVO_URL}/message/sendMedia/${instance_name}`, {
-      method: 'POST',
-      headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ number, mediatype: 'image', media: mediaUrl, caption: legendaFinal }),
-    });
-
-    if (clinic_id) {
-      await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
-        method: 'POST',
-        headers: { ...sbHeaders, Prefer: 'return=minimal' },
-        body: JSON.stringify({
-          clinic_id, phone: number, contact_name: 'EQUIPE',
-          content: legendaFinal, type: 'image', from_me: true, media_url: mediaUrl,
-          created_at: new Date().toISOString(),
-        }),
-      });
-    }
-
-    return res.status(200).json({ ok: true, media_url: mediaUrl });
-  } catch (e) {
-    return res.status(500).json({ ok: false, erro: e.message });
-  }
-}
-
-const REGIOES_POR_TIPO = {
-  clareamento: 'mouth and teeth', alinhamento: 'mouth and teeth', lentes: 'mouth and teeth',
-  protese_parcial: 'mouth and teeth', protese_total_natural: 'mouth and teeth', protese_total_equilibrado: 'mouth and teeth', protese_total_branco: 'mouth and teeth', gengivoplastia: 'mouth, teeth and gums',
-  preenchimento_labial: 'lips and mouth',
-  toxina_botulinica: 'forehead and area around the eyes',
-  otomodelacao: 'ears', rinoplastia: 'nose',
-  harmonizacao_facial: 'jawline and lower face (chin to cheeks)',
-};
-
-async function handleDetectarRegiao(req, res) {
-  const OPENAI_KEY = process.env.OPENAI_API_KEY;
-  if (!OPENAI_KEY) return res.status(500).json({ ok: false, erro: 'OPENAI_API_KEY ausente' });
-
-  const { foto_base64, tipos, largura, altura } = req.body || {};
-  if (!foto_base64 || !Array.isArray(tipos) || !tipos.length || !largura || !altura) {
-    return res.status(400).json({ ok: false, erro: 'Faltam parâmetros: foto_base64, tipos, largura, altura' });
-  }
-
-  const regioes = [...new Set(tipos.map(t => REGIOES_POR_TIPO[t]).filter(Boolean))];
-  if (!regioes.length) return res.status(400).json({ ok: false, erro: 'Tipo(s) sem região mapeada' });
-  const descricaoRegioes = regioes.join(', and, ');
-
-  try {
-    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'text', text: `This image is exactly ${largura}x${altura} pixels. Return ONLY a JSON object (no markdown, no explanation) with keys x, y, width, height representing the SMALLEST rectangle (in pixels, top-left origin) that fully contains ALL of these features together: ${descricaoRegioes}. Example: {"x":120,"y":340,"width":200,"height":150}` },
-            { type: 'image_url', image_url: { url: foto_base64 } },
-          ],
-        }],
-        max_tokens: 100,
-      }),
-    });
-    if (!resp.ok) return res.status(500).json({ ok: false, erro: `Falha na API de visão: ${resp.status}` });
-    const data = await resp.json();
-    const texto = data?.choices?.[0]?.message?.content || '';
-    const jsonLimpo = texto.replace(/```json|```/g, '').trim();
-    const bbox = JSON.parse(jsonLimpo);
-    if (typeof bbox.x !== 'number' || typeof bbox.y !== 'number' || typeof bbox.width !== 'number' || typeof bbox.height !== 'number') {
-      return res.status(500).json({ ok: false, erro: 'Resposta de visão em formato inesperado' });
-    }
-
-    const margemX = bbox.width * 0.35;
-    const margemY = bbox.height * 0.35;
-    const x = Math.max(0, Math.round(bbox.x - margemX));
-    const y = Math.max(0, Math.round(bbox.y - margemY));
-    const width = Math.min(largura - x, Math.round(bbox.width + margemX * 2));
-    const height = Math.min(altura - y, Math.round(bbox.height + margemY * 2));
-
-    return res.status(200).json({ ok: true, x, y, width, height });
-  } catch (e) {
-    return res.status(500).json({ ok: false, erro: e.message });
   }
 }
