@@ -1012,9 +1012,12 @@ module.exports = async function handler(req, res) {
   if (!body || typeof body !== 'object') return res.status(400).json({ error: 'Body vazio' });
 
   try {
-    const rawEvento = body?.event || body?.type || '';
-    const evento = rawEvento.toLowerCase().replace('.', '_');
-    if (evento !== 'messages_upsert') return res.status(200).json({ ok: true, ignorado: rawEvento });
+    // CORREÇÃO: Só exige o evento "messages_upsert" se a requisição NÃO for da Meta Cloud API
+    if (body?.object !== 'whatsapp_business_account') {
+      const rawEvento = body?.event || body?.type || '';
+      const evento = rawEvento.toLowerCase().replace('.', '_');
+      if (evento !== 'messages_upsert') return res.status(200).json({ ok: true, ignorado: rawEvento });
+    }
 
     const instanceName = body?.instance || body?.instanceName || null;
     let clinic_id = null;
