@@ -40,9 +40,18 @@
       return typeof window.sendWhatsAppMessage === 'function';
     }
     const _orig = window.sendWhatsAppMessage;
-    window.sendWhatsAppMessage = async function (instance, phone, message) {
+    // ⚠️ CORREÇÃO 06/08: essa função "embrulha" o envio original só pra
+    // aplicar as variáveis {endereco}/{mapa} — mas o wrapper só aceitava 3
+    // parâmetros, então quando o envio original passou a precisar de um 4º
+    // (clinicId, pra saber rotear entre Evolution e API Oficial), esse
+    // parâmetro se perdia no meio do caminho. Isso fazia toda mensagem
+    // cair no caminho Evolution por engano, mesmo em clínica já migrada
+    // pra API Oficial — e a Evolution rejeitava com "instance does not
+    // exist" (usando o Phone Number ID da Meta como se fosse nome de
+    // instância). Agora aceita e repassa o 4º parâmetro adiante.
+    window.sendWhatsAppMessage = async function (instance, phone, message, clinicId) {
       const nova = aplicarVars(message);
-      return _orig.call(this, instance, phone, nova);
+      return _orig.call(this, instance, phone, nova, clinicId);
     };
     window.sendWhatsAppMessage.__enderecoVars = true;
     console.log('✅ variaveis-endereco-fix.js carregado ({endereco} e {mapa} disponíveis)');
