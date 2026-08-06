@@ -42,9 +42,10 @@ module.exports = async function handler(req, res) {
       // sem mensagem de verdade (pode ser só um status de "entregue/lido") — ignora
       if (!msg || !phoneNumberId) return res.status(200).json({ ok: true, ignorado: 'sem mensagem de texto' });
 
-      // acha a clínica pelo phone_number_id
+      // acha a clínica pelo phone_number_id (já traz o token, precisamos
+      // dele agora pra baixar mídia e pra eventualmente responder)
       const clinicaResp = await fetch(
-        `${SUPABASE_URL}/rest/v1/clinicas?meta_phone_number_id=eq.${phoneNumberId}&select=id,nome&limit=1`,
+        `${SUPABASE_URL}/rest/v1/clinicas?meta_phone_number_id=eq.${phoneNumberId}&select=id,nome,meta_access_token&limit=1`,
         { headers: sbHeaders }
       );
       const clinicaArr = await clinicaResp.json();
@@ -55,14 +56,49 @@ module.exports = async function handler(req, res) {
       const nomeContato = value?.contacts?.[0]?.profile?.name || null;
       let conteudo = '';
       let tipo = 'text';
-      if (msg.type === 'text') { conteudo = msg.text?.body || ''; tipo = 'text'; }
-      else if (msg.type === 'image') { conteudo = '🖼️ Imagem'; tipo = 'image'; }
-      else if (msg.type === 'audio') { conteudo = '🎵 Áudio'; tipo = 'audio'; }
-      else if (msg.type === 'video') { conteudo = '🎬 Vídeo'; tipo = 'video'; }
-      else if (msg.type === 'document') { conteudo = '📄 Documento'; tipo = 'document'; }
-      else { conteudo = `[${msg.type}]`; tipo = msg.type; }
+      let mediaUrl = null;
+      let binarioBaixado = null; // reaproveitado pra transcrição de áudio, evita baixar 2x
 
-      // 1. Grava a mensagem no histórico de mensagens
+      // ⚠️ NOVO 06/08: baixa e salva a mídia de verdade (antes só gravava
+      // um texto genérico tipo "🎵 Áudio", sem o arquivo real).
+      if (msg.type === 'text') {
+        conteudo = msg.text?.body || ''; tipo = 'text';
+      } else if (msg.type === 'image') {
+        tipo = 'image';
+        const r = await baixarEsalvarMidiaMeta(msg.image?.id, clinica.meta_access_token, telefoneLead, 'image', null);
+        mediaUrl = r?.url || null;
+        conteudo = msg.image?.caption || '🖼️ Imagem';
+      } else if (msg.type === 'audio') {
+        tipo = 'audio';
+        const r = await baixarEsalvarMidiaMeta(msg.audio?.id, clinica.meta_access_token, telefoneLead, 'audio', null);
+        mediaUrl = r?.url || null;
+        binarioBaixado = r?.binary || null;
+        conteudo = '🎵 Áudio';
+        // transcreve — se der certo, o Brian já "ouve" o áudio de verdade
+        if (binarioBaixado) {
+          const transcrito = await transcreverAudioMetaWhisper(binarioBaixado);
+          if (transcrito) conteudo = `[Mensagem de voz transcrita]: ${transcrito}`;
+        }
+      } else if (msg.type === 'video') {
+        tipo = 'video';
+        const r = await baixarEsalvarMidiaMeta(msg.video?.id, clinica.meta_access_token, telefoneLead, 'video', null);
+        mediaUrl = r?.url || null;
+        conteudo = msg.video?.caption || '🎬 Vídeo';
+      } else if (msg.type === 'sticker') {
+        tipo = 'sticker';
+        const r = await baixarEsalvarMidiaMeta(msg.sticker?.id, clinica.meta_access_token, telefoneLead, 'sticker', null);
+        mediaUrl = r?.url || null;
+        conteudo = '😊 Figurinha';
+      } else if (msg.type === 'document') {
+        tipo = 'document';
+        const r = await baixarEsalvarMidiaMeta(msg.document?.id, clinica.meta_access_token, telefoneLead, 'document', msg.document?.filename);
+        mediaUrl = r?.url || null;
+        conteudo = msg.document?.filename ? `📄 ${msg.document.filename}` : '📄 Documento';
+      } else {
+        conteudo = `[${msg.type}]`; tipo = msg.type;
+      }
+
+      // 1. Grava a mensagem no histórico de mensagens (agora com media_url de verdade)
       await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
         method: 'POST',
         headers: { ...sbHeaders, Prefer: 'return=minimal,resolution=ignore-duplicates' },
@@ -73,6 +109,7 @@ module.exports = async function handler(req, res) {
           content: conteudo,
           type: tipo,
           from_me: false,
+          media_url: mediaUrl,
           message_id: msg.id,
           instance_name: phoneNumberId,
           created_at: new Date().toISOString(),
@@ -82,6 +119,27 @@ module.exports = async function handler(req, res) {
       // 2. Garante a criação/atualização do Lead para aparecer no Inbox do CRM
       const procDaMsg = (tipo === 'text') ? extrairProcedimentoDaMsg(conteudo) : null;
       await brianAcharOuCriarLead(clinica.id, telefoneLead, nomeContato, 'WhatsApp Meta', procDaMsg, false);
+
+      // ⚠️ NOVO 06/08: chama o Brian pra responder de verdade. Versão
+      // ENXUTA de propósito — não processa os marcadores avançados
+      // ([[AGENDAR]], [[CASOS]], [[SIMULAR]], [[VOZ]]) ainda, só remove
+      // eles do texto antes de mandar (pra não vazar sintaxe técnica pro
+      // paciente). Isso já coloca o Brian conversando de verdade — os
+      // recursos avançados ficam pra uma próxima etapa, portados com
+      // calma, sem risco de misturar bug novo no meio da lógica gigante
+      // que já funciona pro Evolution.
+      try {
+        const respBrian = await fetch(`${SUPABASE_URL}/functions/v1/brian`, {
+          method: 'POST',
+          headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'responder_auto', clinic_id: clinica.id, phone: telefoneLead, ultima_msg: conteudo }),
+        });
+        const dataBrian = respBrian.ok ? await respBrian.json() : null;
+        if (dataBrian?.ok && dataBrian.sugestao) {
+          const textoLimpo = String(dataBrian.sugestao).replace(/\s*\[\[[^\]]+\]\]\s*/g, ' ').trim();
+          if (textoLimpo) await responderPaciente(null, clinica.id, telefoneLead, textoLimpo, null);
+        }
+      } catch (eBrian) { console.error('[META-BRIAN] erro:', eBrian.message); }
 
       return res.status(200).json({ ok: true, clinica: clinica.nome, gravado: true });
     } catch (e) {
@@ -660,6 +718,87 @@ module.exports = async function handler(req, res) {
 
       return true;
     } catch (e) { return false; }
+  }
+
+  // ⚠️ NOVO 06/08: equivalente da função acima, mas pra mídia que chega
+  // pela API Oficial da Meta — o jeito de BAIXAR é diferente (Meta exige
+  // 2 passos: pega uma URL temporária primeiro, depois baixa o arquivo
+  // dessa URL), mas o jeito de SALVAR no Supabase Storage é o mesmo de
+  // sempre, reaproveitado igual.
+  async function baixarEsalvarMidiaMeta(mediaId, accessTokenMeta, phone, tipo, nomeOriginal) {
+    try {
+      // 1) pega a URL temporária + tipo real do arquivo
+      const infoResp = await fetch(`https://graph.facebook.com/v21.0/${mediaId}`, {
+        headers: { Authorization: `Bearer ${accessTokenMeta}` },
+      });
+      if (!infoResp.ok) return null;
+      const info = await infoResp.json();
+      if (!info.url) return null;
+
+      // 2) baixa o arquivo de verdade dessa URL (mesmo token de acesso)
+      const fileResp = await fetch(info.url, { headers: { Authorization: `Bearer ${accessTokenMeta}` } });
+      if (!fileResp.ok) return null;
+      const arrayBuffer = await fileResp.arrayBuffer();
+      const binary = Buffer.from(arrayBuffer);
+
+      const config = {
+        audio:    { bucket: 'audios', ext: 'ogg',  mime: 'audio/ogg' },
+        image:    { bucket: 'midias', ext: 'jpg',  mime: 'image/jpeg' },
+        video:    { bucket: 'midias', ext: 'mp4',  mime: 'video/mp4' },
+        sticker:  { bucket: 'midias', ext: 'webp', mime: 'image/webp' },
+        document: { bucket: 'midias', ext: 'bin',  mime: 'application/octet-stream' },
+      };
+      const cfg = config[tipo] || config.document;
+      const mimeReal = info.mime_type || cfg.mime;
+
+      let fileName;
+      if (tipo === 'document' && nomeOriginal) {
+        const limpo = String(nomeOriginal).replace(/[^a-zA-Z0-9._-]/g, '_').slice(-80);
+        fileName = `doc_${phone}_${Date.now()}_${limpo}`;
+      } else {
+        fileName = `${tipo}_${phone}_${Date.now()}.${cfg.ext}`;
+      }
+
+      const upload = await fetch(`${SUPABASE_URL}/storage/v1/object/${cfg.bucket}/${fileName}`, {
+        method: 'POST',
+        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': mimeReal },
+        body: binary,
+      });
+      if (!upload.ok) return null;
+      return { url: `${SUPABASE_URL}/storage/v1/object/public/${cfg.bucket}/${fileName}`, binary };
+    } catch (e) { return null; }
+  }
+
+  // ⚠️ NOVO 06/08: transcrição de áudio pra mídia vinda da Meta — mesma
+  // lógica do Whisper já usada pro Evolution, só que reaproveita o binário
+  // que a função de download acima já baixou (evita baixar 2x o mesmo
+  // arquivo).
+  async function transcreverAudioMetaWhisper(binary) {
+    const OPENAI_KEY = process.env.OPENAI_API_KEY;
+    if (!OPENAI_KEY || !binary) return null;
+    try {
+      const blob = new Blob([binary], { type: 'audio/ogg' });
+      const form = new FormData();
+      form.append('file', blob, 'audio.ogg');
+      form.append('model', 'whisper-1');
+      form.append('response_format', 'verbose_json');
+      form.append('language', 'pt');
+
+      const whisperResp = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${OPENAI_KEY}` },
+        body: form,
+      });
+      if (!whisperResp.ok) return null;
+      const whisperData = await whisperResp.json();
+      const texto = (whisperData.text || '').trim();
+      const segmentos = whisperData.segments || [];
+      if (segmentos.length > 0) {
+        const mediaNoSpeech = segmentos.reduce((s, seg) => s + (seg.no_speech_prob || 0), 0) / segmentos.length;
+        if (mediaNoSpeech > 0.5) return null;
+      }
+      return texto || null;
+    } catch (e) { return null; }
   }
 
   async function baixarEsalvarMidia(msgCompleta, instanceName, phone, tipo, nomeOriginal) {
