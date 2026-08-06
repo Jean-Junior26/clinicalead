@@ -833,17 +833,52 @@ module.exports = async function handler(req, res) {
     } catch (e) { return null; }
   }
 
+  // ⚠️ NOVO 06/08: essa função agora decide sozinha qual caminho usar —
+  // Evolution (como sempre) ou API Oficial da Meta, olhando o
+  // tipo_conexao_whatsapp da clínica. Isso conserta de uma vez o Brian E
+  // qualquer resposta automática que passe por aqui (confirmação,
+  // remarcação, etc.) pras clínicas já migradas — sem mexer em nada do
+  // fluxo Evolution que já funciona pras outras.
+  async function buscarCredenciaisOficial(clinicId) {
+    try {
+      const r = await fetch(
+        `${SUPABASE_URL}/rest/v1/clinicas?id=eq.${clinicId}&select=tipo_conexao_whatsapp,meta_phone_number_id,meta_access_token`,
+        { headers: sbHeaders }
+      );
+      const arr = r.ok ? await r.json() : [];
+      return arr[0] || null;
+    } catch (e) { return null; }
+  }
+
   async function responderPaciente(instanceName, clinicId, phone, message, marcador) {
     try {
       const cleanPhone = String(phone).replace(/\D/g, '');
       const number = cleanPhone.length >= 12 ? cleanPhone : '55' + cleanPhone;
-      const r = await fetch(`${EVO_URL}/message/sendText/${instanceName}`, {
-        method: 'POST',
-        headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ number, text: message }),
-      });
-      const data = await r.json().catch(() => null);
-      const sentId = data?.key?.id || null;
+
+      const clinicaInfo = await buscarCredenciaisOficial(clinicId);
+      let sentId = null;
+
+      if (clinicaInfo?.tipo_conexao_whatsapp === 'oficial' && clinicaInfo.meta_phone_number_id && clinicaInfo.meta_access_token) {
+        // ── API OFICIAL DA META ──
+        const r = await fetch(`https://graph.facebook.com/v21.0/${clinicaInfo.meta_phone_number_id}/messages`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${clinicaInfo.meta_access_token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messaging_product: 'whatsapp', to: number, type: 'text', text: { body: message } }),
+        });
+        const data = await r.json().catch(() => null);
+        sentId = data?.messages?.[0]?.id || null;
+        if (!r.ok) console.error('[META-SEND] falhou:', JSON.stringify(data));
+      } else {
+        // ── EVOLUTION (como sempre) ──
+        const r = await fetch(`${EVO_URL}/message/sendText/${instanceName}`, {
+          method: 'POST',
+          headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ number, text: message }),
+        });
+        const data = await r.json().catch(() => null);
+        sentId = data?.key?.id || null;
+      }
+
       await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
         method: 'POST',
         headers: { ...sbHeaders, Prefer: 'return=minimal' },
