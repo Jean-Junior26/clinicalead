@@ -52,7 +52,11 @@ function aplicarEndereco(texto, clinic) {
 
   if (typeof sendWhatsAppMessage === 'function') {
     const _origSend = sendWhatsAppMessage;
-    sendWhatsAppMessage = async function (instanceName, phone, message) {
+    // ⚠️ CORREÇÃO 06/08: mesmo motivo do variaveis-endereco-fix.js — esse
+    // wrapper também só aceitava 3 parâmetros, perdendo o clinicId no
+    // meio do caminho e fazendo o envio cair sempre no Evolution por
+    // engano. Agora aceita e repassa o 4º parâmetro adiante.
+    sendWhatsAppMessage = async function (instanceName, phone, message, clinicId) {
       let msgFinal = message;
       // Se a mensagem contém o endereço fixo da GOU, troca pelo da clínica ativa
       if (typeof msgFinal === 'string' && msgFinal.includes(ENDERECO_FIXO)) {
@@ -64,7 +68,7 @@ function aplicarEndereco(texto, clinic) {
       }
       // Também resolve as variáveis {endereco} e {mapa} se existirem
       msgFinal = aplicarEndereco(msgFinal, (typeof currentClinic === 'function') ? currentClinic() : null);
-      return _origSend(instanceName, phone, msgFinal);
+      return _origSend(instanceName, phone, msgFinal, clinicId);
     };
   }
 })();
