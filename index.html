@@ -1205,11 +1205,11 @@ async function getInstanceStatus(instanceName) {
 }
 
 // Send text message
-async function sendWhatsAppMessage(instanceName, phone, message) {
+async function sendWhatsAppMessage(instanceName, phone, message, clinicId) {
   const resp = await fetch('/api/send-message', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ instance: instanceName, phone, message }),
+    body: JSON.stringify({ instance: instanceName, phone, message, clinic_id: clinicId }),
   });
   if (!resp.ok) throw new Error('Erro ao enviar mensagem');
   return resp.json();
@@ -1217,7 +1217,10 @@ async function sendWhatsAppMessage(instanceName, phone, message) {
 // Send automation message
 async function sendAutomation(lead, autoType) {
   const clinic = currentClinic();
-  if (!clinic || !clinic.whatsapp_instance) return;
+  // ⚠️ AJUSTE 06/08: antes exigia whatsapp_instance sempre — clínica em
+  // API Oficial não tem esse campo (usa meta_phone_number_id em vez
+  // disso), então essa trava bloqueava 100% dos envios pra ela.
+  if (!clinic || (!clinic.whatsapp_instance && clinic.tipo_conexao_whatsapp !== 'oficial')) return;
   const templates = {
     boasvindas: `Olá, ${lead.nome}! 👋 Aqui é da ${clinic.nome}. Vi que você tem interesse em ${lead.procedimento||'nossos serviços'}. Posso te ajudar a agendar uma avaliação gratuita?`,
     confirmacao: `Ótimo, ${lead.nome}! ✅ Sua consulta está confirmada na ${clinic.nome}. Qualquer dúvida é só chamar!`,
@@ -1228,7 +1231,7 @@ async function sendAutomation(lead, autoType) {
   const msg = templates[autoType];
   if (!msg || !lead.telefone) return;
   try {
-    await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg);
+    await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg, clinic.id);
     toast('WhatsApp enviado para ' + lead.nome + '! ✓');
   } catch(e) {
     toast('Erro ao enviar WhatsApp', 'error');
@@ -1961,10 +1964,10 @@ async function sendWAConsulta(consultaId) {
   if (!c) return;
   const lead = STATE.leads.find(l => l.id === c.lead_id);
   const clinic = currentClinic();
-  if (!clinic?.whatsapp_instance || !lead?.telefone) { toast('Configure o WhatsApp primeiro!','error'); return; }
+  if ((!clinic?.whatsapp_instance && clinic?.tipo_conexao_whatsapp !== 'oficial') || !lead?.telefone) { toast('Configure o WhatsApp primeiro!','error'); return; }
   const msg = `Oi ${lead.nome}! 👋 Passando para lembrar que *amanhã* você tem consulta conosco!\n\n⏰ *Horário:* ${c.hora}\n📍 *Endereço:* R. Rui Barbosa, 483 - Centro, Araguari - MG\n🗺️ https://share.google/aBRk2BmdSOHL2iN9X\n\nConfirma sua presença? Responda *SIM* ou *NÃO* 😊`;
   try {
-    await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg);
+    await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg, clinic.id);
     await db.from('consultas').update({status:'confirmado'}).eq('id', consultaId);
     c.status = 'confirmado';
     renderDaySchedule(CAL.selectedDate);
@@ -2081,10 +2084,10 @@ async function salvarNovoAgendamento() {
   renderDaySchedule(data);
   toast('Consulta agendada! ✓');
   // Send WhatsApp confirmation
-  if (clinic?.whatsapp_instance && lead?.telefone) {
+  if ((clinic?.whatsapp_instance || clinic?.tipo_conexao_whatsapp === 'oficial') && lead?.telefone) {
     const dataFormatada = new Date(data+'T12:00').toLocaleDateString('pt-BR', {weekday:'long', day:'numeric', month:'long'});
     const msg = `Olá, ${lead.nome}! 🎉 Sua consulta está *confirmada*!\n\n📅 *Data:* ${dataFormatada}\n⏰ *Horário:* ${hora}\n📍 *Endereço:* R. Rui Barbosa, 483 - Centro, Araguari - MG\n🗺️ *Como chegar:* https://share.google/aBRk2BmdSOHL2iN9X\n\nQualquer dúvida, é só chamar aqui! Te esperamos 😊`;
-    try { await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg); toast('Confirmação enviada por WhatsApp! ✓'); } catch(e) {}
+    try { await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg, clinic.id); toast('Confirmação enviada por WhatsApp! ✓'); } catch(e) {}
   }
 }
 
@@ -2655,7 +2658,7 @@ async function confirmarEnvioWA() {
   const clinic = currentClinic();
   if (!msg) { toast('Digite uma mensagem', 'error'); return; }
   try {
-    await sendWhatsAppMessage(clinic.whatsapp_instance, l.telefone, msg);
+    await sendWhatsAppMessage(clinic.whatsapp_instance, l.telefone, msg, clinic.id);
     closeModal('modalSendWA');
     toast(`WhatsApp enviado para ${l.nome}! ✓`);
   } catch(e) {
@@ -3093,9 +3096,9 @@ async function sendChatMessage() {
     renderInboxList();
   }
 
-  if (clinic?.whatsapp_instance) {
+  if (clinic?.whatsapp_instance || clinic?.tipo_conexao_whatsapp === 'oficial') {
     try {
-      await sendWhatsAppMessage(clinic.whatsapp_instance, INBOX.activeChat.phone, text);
+      await sendWhatsAppMessage(clinic.whatsapp_instance, INBOX.activeChat.phone, text, clinic.id);
     } catch (e) {
       toast('Salvo localmente — erro ao enviar WhatsApp', 'error');
     }
