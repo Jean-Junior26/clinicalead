@@ -1,4 +1,7 @@
 module.exports = async function handler(req, res) {
+  // Log de diagnóstico para capturar o payload exato enviado pela Meta ou Evolution
+  console.log('[DEBUG-PAYLOAD]', JSON.stringify(req.body));
+
   // ════════════════════════════════════════════════════════════
   // ⚠️ VERIFICAÇÃO DE WEBHOOK DA META (Cloud API)
   // ════════════════════════════════════════════════════════════
@@ -76,14 +79,14 @@ module.exports = async function handler(req, res) {
         }),
       });
 
-      // 2. CORREÇÃO: Garante a criação/atualização do Lead para aparecer no Inbox do CRM
+      // 2. Garante a criação/atualização do Lead para aparecer no Inbox do CRM
       const procDaMsg = (tipo === 'text') ? extrairProcedimentoDaMsg(conteudo) : null;
       await brianAcharOuCriarLead(clinica.id, telefoneLead, nomeContato, 'WhatsApp Meta', procDaMsg, false);
 
       return res.status(200).json({ ok: true, clinica: clinica.nome, gravado: true });
     } catch (e) {
       console.error('[META-WEBHOOK] erro:', e.message);
-      return res.status(200).json({ ok: false, erro: e.message }); // sempre 200 pra Meta não ficar tentando em loop
+      return res.status(200).json({ ok: false, erro: e.message });
     }
   }
 
@@ -1012,7 +1015,6 @@ module.exports = async function handler(req, res) {
   if (!body || typeof body !== 'object') return res.status(400).json({ error: 'Body vazio' });
 
   try {
-    // CORREÇÃO: Só exige o evento "messages_upsert" se a requisição NÃO for da Meta Cloud API
     if (body?.object !== 'whatsapp_business_account') {
       const rawEvento = body?.event || body?.type || '';
       const evento = rawEvento.toLowerCase().replace('.', '_');
