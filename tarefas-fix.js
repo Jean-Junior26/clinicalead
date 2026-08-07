@@ -156,6 +156,25 @@ function tarefasGerar() {
       });
     });
 
+  // 🔴 1b. Pedidos de CANCELAMENTO (sem remarcar) — ⚠️ NOVO 07/08: esse
+  // sinalizador (cancelar_solicitado) já existia no banco há tempo, mas
+  // nunca virava tarefa visível — a equipe nunca ficava sabendo que
+  // alguém cancelou, o horário ficava "preso" sem ninguém saber que
+  // podia liberar pra outro paciente. Mesmo padrão da remarcação acima.
+  TAREFAS.consultas
+    .filter(c => c.cancelar_solicitado && c.status !== 'cancelado')
+    .forEach(c => {
+      const lead = leadMap[c.lead_id];
+      tarefas.push({
+        chave: `cancelar:${c.id}`,
+        prio: 1,
+        icon: 'ti-calendar-cancel',
+        titulo: `${lead?.nome || 'Paciente'} pediu para CANCELAR`,
+        desc: `Consulta de ${tFmtData(c.data)} às ${(c.hora||'').slice(0,5)} — confirmar cancelamento e liberar o horário pra outro paciente`,
+        telefone: lead?.telefone || null,
+      });
+    });
+
   // 🔴 2. Consultas de hoje/amanhã NÃO confirmadas (lembrete enviado, sem resposta)
   TAREFAS.consultas
     .filter(c => c.status === 'agendado' && c.lembrete_24h && !c.remarcar_solicitado && (c.data === hoje || c.data === amanha))
