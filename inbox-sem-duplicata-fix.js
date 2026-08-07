@@ -22,7 +22,7 @@
       input.value = '';
       if (typeof autoResizeInput === 'function') autoResizeInput(input);
 
-      if (!clinic?.whatsapp_instance) {
+      if (!clinic?.whatsapp_instance && clinic?.tipo_conexao_whatsapp !== 'oficial') {
         if (typeof toast === 'function') toast('Conecte o WhatsApp desta clínica primeiro', 'error');
         return;
       }
@@ -30,7 +30,7 @@
       try {
         // Envia pelo WhatsApp. O send-message registra no banco com o
         // message_id correto, e o Realtime mostra a mensagem na conversa.
-        await sendWhatsAppMessage(clinic.whatsapp_instance, INBOX.activeChat.phone, text);
+        await sendWhatsAppMessage(clinic.whatsapp_instance, INBOX.activeChat.phone, text, clinic?.id);
         INBOX.activeChat.lastMsg = text;
         if (typeof renderInboxList === 'function') renderInboxList();
       } catch (e) {
