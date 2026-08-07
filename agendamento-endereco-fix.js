@@ -54,13 +54,13 @@
         if (!c) return;
         const lead = (STATE.leads || []).find(l => l.id === c.lead_id);
         const clinic = currentClinic();
-        if (!clinic || !clinic.whatsapp_instance || !lead || !lead.telefone) {
+        if (!clinic || (!clinic.whatsapp_instance && clinic.tipo_conexao_whatsapp !== 'oficial') || !lead || !lead.telefone) {
           if (typeof toast === 'function') toast('Configure o WhatsApp primeiro!', 'error');
           return;
         }
         const msg = `Oi ${lead.nome}! 👋 Passando para lembrar que *amanhã* você tem consulta conosco!\n\n⏰ *Horário:* ${c.hora}${blocoEndereco(clinic)}\n\nConfirma sua presença? Responda *SIM* ou *NÃO* 😊`;
         try {
-          await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg);
+          await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg, clinic.id);
           await db.from('consultas').update({ status: 'confirmado' }).eq('id', consultaId);
           c.status = 'confirmado';
           if (typeof renderDaySchedule === 'function') renderDaySchedule(CAL.selectedDate);
