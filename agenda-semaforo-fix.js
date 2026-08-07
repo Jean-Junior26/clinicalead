@@ -67,7 +67,7 @@ async function sendWAConsultaCorrigido(consultaId) {
   if (!c) return;
   const lead = (STATE.leads || []).find(l => l.id === c.lead_id);
   const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
-  if (!clinic?.whatsapp_instance || !lead?.telefone) { toast('Configure o WhatsApp primeiro!', 'error'); return; }
+  if ((!clinic?.whatsapp_instance && clinic?.tipo_conexao_whatsapp !== 'oficial') || !lead?.telefone) { toast('Configure o WhatsApp primeiro!', 'error'); return; }
 
   // Monta a mensagem com endereço dinâmico da clínica
   const end = (typeof enderecoClinica === 'function') ? enderecoClinica(clinic) : (clinic?.endereco || '');
@@ -78,7 +78,7 @@ async function sendWAConsultaCorrigido(consultaId) {
   msg += `\n\nConfirma sua presença? Responda *SIM* ou *NÃO* 😊`;
 
   try {
-    await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg);
+    await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg, clinic.id);
     // Marca que o lembrete foi enviado (NÃO marca confirmado)
     await db.from('consultas').update({ lembrete_24h: new Date().toISOString() }).eq('id', consultaId);
     c.lembrete_24h = new Date().toISOString();
