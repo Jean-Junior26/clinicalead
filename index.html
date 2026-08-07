@@ -2622,7 +2622,7 @@ function openSendWA(leadId) {
   const l = STATE.leads.find(x=>x.id===leadId);
   if (!l) return;
   const clinic = currentClinic();
-  if (!clinic?.whatsapp_instance) {
+  if (!clinic?.whatsapp_instance && clinic?.tipo_conexao_whatsapp !== 'oficial') {
     toast('Conecte o WhatsApp primeiro em Gestão → Clínicas!', 'error');
     return;
   }
@@ -3110,7 +3110,7 @@ async function sendImageMsg(event) {
   event.target.value = '';
   if (!file || !INBOX.activeChat) return;
   const clinic = currentClinic();
-  if (!clinic?.whatsapp_instance) { toast('Conecte o WhatsApp primeiro!', 'error'); return; }
+  if (!clinic?.whatsapp_instance && clinic?.tipo_conexao_whatsapp !== 'oficial') { toast('Conecte o WhatsApp primeiro!', 'error'); return; }
   if (file.size > 3.5 * 1024 * 1024) { toast('Arquivo muito grande (máx. 3,5 MB)', 'error'); return; }
 
   const ehVideo = file.type.startsWith('video/');
@@ -3206,7 +3206,7 @@ function pararGravacao() {
 
 async function enviarAudioGravado(audioBlob) {
   const clinic = currentClinic();
-  if (!clinic?.whatsapp_instance) { toast('Conecte o WhatsApp primeiro!', 'error'); return; }
+  if (!clinic?.whatsapp_instance && clinic?.tipo_conexao_whatsapp !== 'oficial') { toast('Conecte o WhatsApp primeiro!', 'error'); return; }
   if (!INBOX.activeChat) { toast('Selecione uma conversa!', 'error'); return; }
 
   try {
@@ -3223,17 +3223,31 @@ async function enviarAudioGravado(audioBlob) {
     const { data: urlData } = db.storage.from('audios').getPublicUrl(fileName);
     const audioUrl = urlData.publicUrl;
 
-    // 3. Enviar para WhatsApp via Evolution API
-   const rawPhone = INBOX.activeChat.phone.replace(/\D/g, '');
-const phone = rawPhone.length >= 12 ? rawPhone : '55' + rawPhone;
-  const resp = await evoRequest('POST', `/message/sendWhatsAppAudio/${clinic.whatsapp_instance}`, {
-      number: phone,
-      audio: audioUrl,
-      delay: 1000,
-    });
+    // 3. Enviar para WhatsApp
+    // ⚠️ AJUSTE 06/08: clínica em API Oficial passa pelo backend
+    // (send-message.js já sabe rotear certo, e evita expor o token da
+    // Meta no navegador). Clínica Evolution continua exatamente como
+    // sempre foi, direto pelo evoRequest.
+    if (clinic?.tipo_conexao_whatsapp === 'oficial') {
+      const respOficial = await fetch('/api/send-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clinic_id: clinic.id, phone: INBOX.activeChat.phone, tipo: 'audio', media_url: audioUrl, message: '' }),
+      });
+      if (!respOficial.ok) throw new Error('Falha no envio via API Oficial');
+      console.log('Áudio enviado via API Oficial');
+    } else {
+      const rawPhone = INBOX.activeChat.phone.replace(/\D/g, '');
+      const phone = rawPhone.length >= 12 ? rawPhone : '55' + rawPhone;
+      const resp = await evoRequest('POST', `/message/sendWhatsAppAudio/${clinic.whatsapp_instance}`, {
+        number: phone,
+        audio: audioUrl,
+        delay: 1000,
+      });
+      console.log('Resposta envio áudio:', JSON.stringify(resp));
+    }
 
-    console.log('Resposta envio áudio:', JSON.stringify(resp));
- toast('🎵 Áudio enviado! ✓');
+    toast('🎵 Áudio enviado! ✓');
        await db.from('mensagens').insert({
         clinic_id: clinic.id,
         phone: INBOX.activeChat.phone,
