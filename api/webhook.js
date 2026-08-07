@@ -702,7 +702,10 @@ module.exports = async function handler(req, res) {
       if (endereco) msg += `\n\n📍 *Endereço:* ${endereco}`;
       if (linkMapa) msg += `\n🗺️ *Como chegar:* ${linkMapa}`;
       msg += `\n\nQualquer coisa que precisar, é só me chamar por aqui. Até breve! 🦷💛`;
-      if (instanceName) await responderPaciente(instanceName, clinic_id, phone, msg, 'BRIAN_AUTO');
+      // ⚠️ CORREÇÃO 07/08 (reaplicada): antes só mandava SE tivesse
+      // instanceName — pra clínica oficial, instanceName vem null de
+      // propósito, o que bloqueava a confirmação silenciosamente.
+      await responderPaciente(instanceName, clinic_id, phone, msg, 'BRIAN_AUTO');
     } catch (e) { }
   }
 
@@ -1481,19 +1484,19 @@ module.exports = async function handler(req, res) {
         if (endereco) boasVindas += `\n\n📍 *Endereço:* ${endereco}`;
         if (linkMapa) boasVindas += `\n🗺️ *Como chegar:* ${linkMapa}`;
         boasVindas += `\n\nAté breve! 🦷`;
-        if (instanceName) await responderPaciente(instanceName, clinic_id, phone, boasVindas);
+        await responderPaciente(instanceName, clinic_id, phone, boasVindas, 'BRIAN_AUTO');
       } else if (ehCancelar) {
         await fetch(`${SUPABASE_URL}/rest/v1/consultas?id=eq.${consulta.id}`, {
           method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
           body: JSON.stringify({ cancelar_solicitado: true }),
         });
-        if (instanceName) await responderPaciente(instanceName, clinic_id, phone, `Recebi sua mensagem, ${primeiroNome}! 😊\n\nJá vou repassar para nossa equipe. Em breve alguém entra em contato com você!`);
+        await responderPaciente(instanceName, clinic_id, phone, `Recebi sua mensagem, ${primeiroNome}! 😊\n\nJá vou repassar para nossa equipe. Em breve alguém entra em contato com você!`, 'BRIAN_AUTO');
       } else if (ehRemarcar) {
         await fetch(`${SUPABASE_URL}/rest/v1/consultas?id=eq.${consulta.id}`, {
           method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
           body: JSON.stringify({ remarcar_solicitado: true }),
         });
-        if (instanceName) await responderPaciente(instanceName, clinic_id, phone, `Sem problema, ${primeiroNome}! 😊\n\nNossa equipe vai entrar em contato em breve para encontrarmos um novo horário para você.`);
+        await responderPaciente(instanceName, clinic_id, phone, `Sem problema, ${primeiroNome}! 😊\n\nNossa equipe vai entrar em contato em breve para encontrarmos um novo horário para você.`, 'BRIAN_AUTO');
       }
     } catch (e) { }
   }
