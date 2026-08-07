@@ -168,7 +168,7 @@ async function saveAutoEdit() {
 // ── sendAutomation ───────────────────────────────────────────
 async function sendAutomation(lead, autoTipo) {
   const clinic = currentClinic();
-  if (!clinic?.whatsapp_instance) return;
+  if (!clinic?.whatsapp_instance && clinic?.tipo_conexao_whatsapp !== 'oficial') return;
   if (!lead?.telefone) return;
 
   const auto = STATE.automations.find(a => a.tipo === autoTipo);
@@ -178,7 +178,7 @@ async function sendAutomation(lead, autoTipo) {
   if (!msg.trim()) return;
 
   try {
-    await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg);
+    await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg, clinic.id);
     await salvarMensagemInbox(clinic, lead.telefone, lead.nome, msg);
     toast('WhatsApp enviado para ' + lead.nome + '! ✓');
   } catch (e) {
@@ -249,7 +249,7 @@ async function salvarNovoAgendamento() {
   renderDaySchedule(data);
   toast('Consulta agendada! ✓');
 
-  if (clinic?.whatsapp_instance && lead?.telefone) {
+  if ((clinic?.whatsapp_instance || clinic?.tipo_conexao_whatsapp === 'oficial') && lead?.telefone) {
     const auto = STATE.automations.find(a => a.tipo === 'confirmacao');
     if (auto?.active) {
       const dataFormatada = new Date(data + 'T12:00').toLocaleDateString('pt-BR', {
@@ -257,7 +257,7 @@ async function salvarNovoAgendamento() {
       });
       const msg = substituirVariaveis(auto.msg || auto.mensagem, lead, clinic, dataFormatada, hora);
       try {
-        await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg);
+        await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg, clinic.id);
         await salvarMensagemInbox(clinic, lead.telefone, lead.nome, msg);
         toast('Confirmação enviada por WhatsApp e salva no Inbox! ✓');
       } catch (e) {
@@ -274,7 +274,7 @@ async function sendWAConsulta(consultaId) {
   const lead = STATE.leads.find(l => l.id === c.lead_id);
   const clinic = currentClinic();
 
-  if (!clinic?.whatsapp_instance || !lead?.telefone) {
+  if ((!clinic?.whatsapp_instance && clinic?.tipo_conexao_whatsapp !== 'oficial') || !lead?.telefone) {
     toast('Configure o WhatsApp primeiro!', 'error');
     return;
   }
@@ -289,7 +289,7 @@ async function sendWAConsulta(consultaId) {
     : `Oi ${lead.nome}! 👋 Passando para lembrar que *amanhã* você tem consulta conosco!\n\n⏰ *Horário:* ${c.hora}\n📍 *Endereço:* R. Rui Barbosa, 483 - Centro, Araguari - MG\n🗺️ https://share.google/aBRk2BmdSOHL2iN9X\n\nConfirma sua presença? Responda *SIM* ou *NÃO* 😊`;
 
   try {
-    await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg);
+    await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg, clinic.id);
     await db.from('consultas').update({ status: 'confirmado' }).eq('id', consultaId);
     c.status = 'confirmado';
     await salvarMensagemInbox(clinic, lead.telefone, lead.nome, msg);
@@ -332,7 +332,7 @@ async function confirmarEnvioWA() {
   if (!msg) { toast('Digite uma mensagem', 'error'); return; }
 
   try {
-    await sendWhatsAppMessage(clinic.whatsapp_instance, l.telefone, msg);
+    await sendWhatsAppMessage(clinic.whatsapp_instance, l.telefone, msg, clinic.id);
     await salvarMensagemInbox(clinic, l.telefone, l.nome, msg);
     closeModal('modalSendWA');
     toast(`WhatsApp enviado para ${l.nome} e salvo no Inbox! ✓`);
