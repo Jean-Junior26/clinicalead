@@ -570,7 +570,7 @@ async function tarefaEnviarAniversario(leadId, chave) {
   const clinic = currentClinic();
   const lead = (STATE.leads || []).find(l => l.id === leadId);
   if (!clinic || !lead) return;
-  if (!clinic.whatsapp_instance || !lead.telefone) {
+  if ((!clinic.whatsapp_instance && clinic.tipo_conexao_whatsapp !== 'oficial') || !lead.telefone) {
     toast('Clínica sem WhatsApp conectado ou lead sem telefone', 'error');
     return;
   }
@@ -596,7 +596,7 @@ async function tarefaEnviarAniversario(leadId, chave) {
     .replaceAll('{procedimento}', lead.procedimento || '');
 
   try {
-    await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg);
+    await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg, clinic.id);
     toast(`🎂 Parabéns enviado para ${lead.nome}!`);
     tarefaConcluir(chave); // missão cumprida, tarefa some sozinha
   } catch (e) {
