@@ -127,6 +127,15 @@ module.exports = async function handler(req, res) {
       const procDaMsg = (tipo === 'text') ? extrairProcedimentoDaMsg(conteudo) : null;
       await brianAcharOuCriarLead(clinica.id, telefoneLead, nomeContato, 'WhatsApp Meta', procDaMsg, false);
 
+      // ⚠️ NOVO 07/08: trata "SIM"/"NÃO"/pedido de remarcar em resposta a
+      // lembrete — igual o Evolution já faz. Sem isso, o paciente que
+      // responde "SIM" pela API Oficial nunca tinha a consulta marcada
+      // como confirmada de verdade (só o Brian respondia livremente, sem
+      // atualizar nada no banco). Só age quando encontra uma consulta de
+      // verdade esperando confirmação — fora isso, não faz nada, e o
+      // Brian (chamado logo abaixo) continua cuidando do resto normal.
+      if (tipo === 'text') await processarConfirmacao(clinica.id, telefoneLead, conteudo, null);
+
       // ⚠️ NOVO 06/08: chama o Brian pra responder de verdade, agora usando
       // a MESMA função de processamento de marcadores que o Evolution já
       // usa (processarMarcadoresBrian) — ou seja, [[AGENDAR]] (agenda de
@@ -702,7 +711,13 @@ module.exports = async function handler(req, res) {
       if (endereco) msg += `\n\n📍 *Endereço:* ${endereco}`;
       if (linkMapa) msg += `\n🗺️ *Como chegar:* ${linkMapa}`;
       msg += `\n\nQualquer coisa que precisar, é só me chamar por aqui. Até breve! 🦷💛`;
-      if (instanceName) await responderPaciente(instanceName, clinic_id, phone, msg, 'BRIAN_AUTO');
+      // ⚠️ CORREÇÃO 07/08: antes só mandava SE tivesse instanceName —
+      // pra clínica em API Oficial, instanceName vem null de propósito
+      // (o roteamento já é feito por dentro do responderPaciente, olhando
+      // o clinic_id). Essa condição bloqueava a confirmação de sábado
+      // silenciosamente: a consulta era criada certinho no banco, mas a
+      // mensagem "Prontinho..." nunca saía — só o texto solto do Brian.
+      await responderPaciente(instanceName, clinic_id, phone, msg, 'BRIAN_AUTO');
     } catch (e) { }
   }
 
@@ -1444,19 +1459,19 @@ module.exports = async function handler(req, res) {
         if (endereco) boasVindas += `\n\n📍 *Endereço:* ${endereco}`;
         if (linkMapa) boasVindas += `\n🗺️ *Como chegar:* ${linkMapa}`;
         boasVindas += `\n\nAté breve! 🦷`;
-        if (instanceName) await responderPaciente(instanceName, clinic_id, phone, boasVindas);
+        await responderPaciente(instanceName, clinic_id, phone, boasVindas, 'BRIAN_AUTO');
       } else if (ehCancelar) {
         await fetch(`${SUPABASE_URL}/rest/v1/consultas?id=eq.${consulta.id}`, {
           method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
           body: JSON.stringify({ cancelar_solicitado: true }),
         });
-        if (instanceName) await responderPaciente(instanceName, clinic_id, phone, `Recebi sua mensagem, ${primeiroNome}! 😊\n\nJá vou repassar para nossa equipe. Em breve alguém entra em contato com você!`);
+        await responderPaciente(instanceName, clinic_id, phone, `Recebi sua mensagem, ${primeiroNome}! 😊\n\nJá vou repassar para nossa equipe. Em breve alguém entra em contato com você!`, 'BRIAN_AUTO');
       } else if (ehRemarcar) {
         await fetch(`${SUPABASE_URL}/rest/v1/consultas?id=eq.${consulta.id}`, {
           method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
           body: JSON.stringify({ remarcar_solicitado: true }),
         });
-        if (instanceName) await responderPaciente(instanceName, clinic_id, phone, `Sem problema, ${primeiroNome}! 😊\n\nNossa equipe vai entrar em contato em breve para encontrarmos um novo horário para você.`);
+        await responderPaciente(instanceName, clinic_id, phone, `Sem problema, ${primeiroNome}! 😊\n\nNossa equipe vai entrar em contato em breve para encontrarmos um novo horário para você.`, 'BRIAN_AUTO');
       }
     } catch (e) { }
   }
