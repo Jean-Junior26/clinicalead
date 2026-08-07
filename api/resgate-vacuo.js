@@ -65,12 +65,12 @@ module.exports = async function handler(req, res) {
       if (!dentroDoHorario(cfg.horario_funcionamento)) continue; // só relevante DENTRO do horário
 
       const clinResp = await fetch(
-        `${SUPABASE_URL}/rest/v1/clinicas?id=eq.${cfg.clinic_id}&select=id,whatsapp_instance`,
+        `${SUPABASE_URL}/rest/v1/clinicas?id=eq.${cfg.clinic_id}&select=id,whatsapp_instance,tipo_conexao_whatsapp,meta_phone_number_id,meta_access_token`,
         { headers: sbHeaders }
       );
       const clinArr = clinResp.ok ? await clinResp.json() : [];
       const clinic = clinArr[0];
-      if (!clinic || !clinic.whatsapp_instance) continue;
+      if (!clinic || (!clinic.whatsapp_instance && clinic.tipo_conexao_whatsapp !== 'oficial')) continue;
 
       const desde = new Date(Date.now() - JANELA_MAX_HORAS * 3600 * 1000).toISOString();
       const msgsResp = await fetch(
@@ -135,20 +135,35 @@ module.exports = async function handler(req, res) {
           if (!texto) { resultado.erros.push(`${phone}: Brian não gerou resposta (${brData?.erro || 'sem detalhe'})`); continue; }
 
           const cleanPhone = String(phone).replace(/\D/g, '');
-          const number = cleanPhone.startsWith('55') ? cleanPhone : '55' + cleanPhone;
-          const evoResp = await fetch(`${EVO_URL}/message/sendText/${clinic.whatsapp_instance}`, {
-            method: 'POST',
-            headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ number, text: texto }),
-          });
-          const evoData = await evoResp.json().catch(() => null);
+          // ⚠️ AJUSTE 06/08: mesma correção de telefone estrangeiro já
+          // aplicada em outros arquivos ("começa com 55?" quebrava número
+          // de fora do Brasil) — agora usa o tamanho.
+          const number = cleanPhone.length >= 12 ? cleanPhone : '55' + cleanPhone;
+          let messageId = null;
+          if (clinic.tipo_conexao_whatsapp === 'oficial' && clinic.meta_phone_number_id && clinic.meta_access_token) {
+            const metaResp = await fetch(`https://graph.facebook.com/v21.0/${clinic.meta_phone_number_id}/messages`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${clinic.meta_access_token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ messaging_product: 'whatsapp', to: number, type: 'text', text: { body: texto } }),
+            });
+            const metaData = await metaResp.json().catch(() => null);
+            messageId = metaData?.messages?.[0]?.id || null;
+          } else {
+            const evoResp = await fetch(`${EVO_URL}/message/sendText/${clinic.whatsapp_instance}`, {
+              method: 'POST',
+              headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ number, text: texto }),
+            });
+            const evoData = await evoResp.json().catch(() => null);
+            messageId = evoData?.key?.id || null;
+          }
           await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
             method: 'POST',
             headers: { ...sbHeaders, Prefer: 'return=minimal' },
             body: JSON.stringify({
               clinic_id: cfg.clinic_id, phone: number, contact_name: 'BRIAN_AUTO',
               content: texto, type: 'text', from_me: true, media_url: null,
-              message_id: evoData?.key?.id || null, created_at: new Date().toISOString(),
+              message_id: messageId, created_at: new Date().toISOString(),
             }),
           });
           resultado.resgatadas++;
