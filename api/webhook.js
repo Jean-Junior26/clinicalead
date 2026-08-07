@@ -127,15 +127,6 @@ module.exports = async function handler(req, res) {
       const procDaMsg = (tipo === 'text') ? extrairProcedimentoDaMsg(conteudo) : null;
       await brianAcharOuCriarLead(clinica.id, telefoneLead, nomeContato, 'WhatsApp Meta', procDaMsg, false);
 
-      // ⚠️ NOVO 07/08: trata "SIM"/"NÃO"/pedido de remarcar em resposta a
-      // lembrete — igual o Evolution já faz. Sem isso, o paciente que
-      // responde "SIM" pela API Oficial nunca tinha a consulta marcada
-      // como confirmada de verdade (só o Brian respondia livremente, sem
-      // atualizar nada no banco). Só age quando encontra uma consulta de
-      // verdade esperando confirmação — fora isso, não faz nada, e o
-      // Brian (chamado logo abaixo) continua cuidando do resto normal.
-      if (tipo === 'text') await processarConfirmacao(clinica.id, telefoneLead, conteudo, null);
-
       // ⚠️ NOVO 06/08: chama o Brian pra responder de verdade, agora usando
       // a MESMA função de processamento de marcadores que o Evolution já
       // usa (processarMarcadoresBrian) — ou seja, [[AGENDAR]] (agenda de
@@ -711,13 +702,7 @@ module.exports = async function handler(req, res) {
       if (endereco) msg += `\n\n📍 *Endereço:* ${endereco}`;
       if (linkMapa) msg += `\n🗺️ *Como chegar:* ${linkMapa}`;
       msg += `\n\nQualquer coisa que precisar, é só me chamar por aqui. Até breve! 🦷💛`;
-      // ⚠️ CORREÇÃO 07/08: antes só mandava SE tivesse instanceName —
-      // pra clínica em API Oficial, instanceName vem null de propósito
-      // (o roteamento já é feito por dentro do responderPaciente, olhando
-      // o clinic_id). Essa condição bloqueava a confirmação de sábado
-      // silenciosamente: a consulta era criada certinho no banco, mas a
-      // mensagem "Prontinho..." nunca saía — só o texto solto do Brian.
-      await responderPaciente(instanceName, clinic_id, phone, msg, 'BRIAN_AUTO');
+      if (instanceName) await responderPaciente(instanceName, clinic_id, phone, msg, 'BRIAN_AUTO');
     } catch (e) { }
   }
 
@@ -1037,6 +1022,43 @@ module.exports = async function handler(req, res) {
   async function processarMarcadoresBrian(clinic_id, phone, contact_name, content, type, textoResposta, instanceName) {
                   let campoLead = null;
                   let campoAgendar = null;
+
+                  // ⚠️ NOVO 07/08: marcador [[CANCELAR]] — pra quando o
+                  // paciente pede pra cancelar a consulta NO MEIO da
+                  // conversa (não em resposta a um lembrete, que já tinha
+                  // tratamento separado). Marca a(s) consulta(s) ativa(s)
+                  // desse paciente como "pediu cancelamento" — vira tarefa
+                  // visível pra equipe confirmar e liberar o horário pra
+                  // outro paciente (não cancela sozinho, de propósito —
+                  // cancelamento definitivo passa por confirmação humana).
+                  const mCancelar = /\[\[CANCELAR\]\]/i.test(textoResposta);
+                  if (mCancelar) {
+                    textoResposta = String(textoResposta).replace(/\s*\[\[CANCELAR\]\]\s*/i, ' ').trim();
+                    try {
+                      const hojeCancel = new Date(Date.now() - 3 * 3600 * 1000).toISOString().split('T')[0];
+                      const sufixoCancel = String(phone).replace(/\D/g, '').slice(-8);
+                      const leadCancelResp = await fetch(
+                        `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinic_id}&telefone=ilike.*${sufixoCancel}&select=id&limit=1`,
+                        { headers: sbHeaders }
+                      );
+                      const leadCancelArr = leadCancelResp.ok ? await leadCancelResp.json() : [];
+                      const leadIdCancel = leadCancelArr[0]?.id;
+                      if (leadIdCancel) {
+                        const ativasResp = await fetch(
+                          `${SUPABASE_URL}/rest/v1/consultas?clinic_id=eq.${clinic_id}&lead_id=eq.${leadIdCancel}&status=in.(agendado,confirmado)&data=gte.${hojeCancel}&select=id`,
+                          { headers: sbHeaders }
+                        );
+                        const ativasArr = ativasResp.ok ? await ativasResp.json() : [];
+                        for (const at of ativasArr) {
+                          await fetch(`${SUPABASE_URL}/rest/v1/consultas?id=eq.${at.id}`, {
+                            method: 'PATCH',
+                            headers: { ...sbHeaders, Prefer: 'return=minimal' },
+                            body: JSON.stringify({ cancelar_solicitado: true }),
+                          });
+                        }
+                      }
+                    } catch (eCancel) { }
+                  }
 
                   const mLead = String(textoResposta).match(/\[\[LEAD\|([^\]]+)\]\]/i);
                   if (mLead) {
@@ -1459,19 +1481,19 @@ module.exports = async function handler(req, res) {
         if (endereco) boasVindas += `\n\n📍 *Endereço:* ${endereco}`;
         if (linkMapa) boasVindas += `\n🗺️ *Como chegar:* ${linkMapa}`;
         boasVindas += `\n\nAté breve! 🦷`;
-        await responderPaciente(instanceName, clinic_id, phone, boasVindas, 'BRIAN_AUTO');
+        if (instanceName) await responderPaciente(instanceName, clinic_id, phone, boasVindas);
       } else if (ehCancelar) {
         await fetch(`${SUPABASE_URL}/rest/v1/consultas?id=eq.${consulta.id}`, {
           method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
           body: JSON.stringify({ cancelar_solicitado: true }),
         });
-        await responderPaciente(instanceName, clinic_id, phone, `Recebi sua mensagem, ${primeiroNome}! 😊\n\nJá vou repassar para nossa equipe. Em breve alguém entra em contato com você!`, 'BRIAN_AUTO');
+        if (instanceName) await responderPaciente(instanceName, clinic_id, phone, `Recebi sua mensagem, ${primeiroNome}! 😊\n\nJá vou repassar para nossa equipe. Em breve alguém entra em contato com você!`);
       } else if (ehRemarcar) {
         await fetch(`${SUPABASE_URL}/rest/v1/consultas?id=eq.${consulta.id}`, {
           method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
           body: JSON.stringify({ remarcar_solicitado: true }),
         });
-        await responderPaciente(instanceName, clinic_id, phone, `Sem problema, ${primeiroNome}! 😊\n\nNossa equipe vai entrar em contato em breve para encontrarmos um novo horário para você.`, 'BRIAN_AUTO');
+        if (instanceName) await responderPaciente(instanceName, clinic_id, phone, `Sem problema, ${primeiroNome}! 😊\n\nNossa equipe vai entrar em contato em breve para encontrarmos um novo horário para você.`);
       }
     } catch (e) { }
   }
