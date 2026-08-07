@@ -201,10 +201,17 @@ export default async function handler(req, res) {
 
     if (clinicaInfo?.tipo_conexao_whatsapp === 'oficial' && clinicaInfo.meta_phone_number_id && clinicaInfo.meta_access_token) {
       // ── API OFICIAL DA META ──
+      // ⚠️ NOVO 06/08: suporte a áudio por link (usado pelo gravador de
+      // áudio do Inbox) — quando o corpo vier com tipo:'audio' + media_url
+      // (já subiu pro Storage antes de chamar aqui), manda como áudio em
+      // vez de texto.
+      const corpoMeta = (req.body?.tipo === 'audio' && req.body?.media_url)
+        ? { messaging_product: 'whatsapp', to: number, type: 'audio', audio: { link: req.body.media_url } }
+        : { messaging_product: 'whatsapp', to: number, type: 'text', text: { body: message } };
       resp = await fetch(`https://graph.facebook.com/v21.0/${clinicaInfo.meta_phone_number_id}/messages`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${clinicaInfo.meta_access_token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messaging_product: 'whatsapp', to: number, type: 'text', text: { body: message } }),
+        body: JSON.stringify(corpoMeta),
       });
       data = await resp.json();
       if (!resp.ok) return res.status(resp.status).json(data);
