@@ -69,6 +69,12 @@
       btn.innerHTML = '<i class="ti ti-qrcode"></i> Gerar QR Code';
     }
     openModal('modalWhatsApp');
+    // ⚠️ NOVO 07/08: se a clínica já está em API Oficial, abre direto
+    // nessa aba (evita confundir quem só vai conferir/atualizar dados
+    // já configurados, achando que precisa gerar QR de novo).
+    if (typeof mostrarTabConexao === 'function') {
+      mostrarTabConexao(clinic.tipo_conexao_whatsapp === 'oficial' ? 'oficial' : 'evolution');
+    }
   };
 
   // ── SOBRESCREVE gerarQRCode ──────────────────────────────────
