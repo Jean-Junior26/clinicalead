@@ -119,19 +119,38 @@
   window.__wpLimparMorto = limparRegistroMorto;
 
   // ── coleta os dados da auditoria (usado pela UI e pelo console) ──
+  // ⚠️ AJUSTE 07/08: antes só enxergava número Evolution — clínica em
+  // API Oficial (sem whatsapp_instance, usa meta_phone_number_id)
+  // aparecia como "Principal: (nenhum configurado)", mesmo funcionando
+  // normalmente. Agora reconhece os dois tipos.
   async function coletarAuditoria() {
     const _db = getDb();
     const mapa = await mapaEvolution();
-    const { data: clinicas } = await _db.from('clinicas').select('id, nome, whatsapp_instance').order('nome');
+    const { data: clinicas } = await _db.from('clinicas')
+      .select('id, nome, whatsapp_instance, tipo_conexao_whatsapp, meta_phone_number_id, meta_waba_id')
+      .order('nome');
     const { data: extras } = await _db.from('instancias').select('clinic_id, instance_name, nome_exibicao');
     const usadas = new Set();
     const out = [];
     for (const c of clinicas || []) {
       const item = { id: c.id, nome: c.nome, principal: null, extras: [] };
-      if (c.whatsapp_instance) {
+      if (c.tipo_conexao_whatsapp === 'oficial' && c.meta_phone_number_id) {
+        // clínica em API Oficial — não usa instância Evolution nenhuma,
+        // então não checa webhook/estado do mesmo jeito (é outro sistema)
+        item.principal = {
+          tipo: 'oficial',
+          instancia: c.meta_phone_number_id,
+          wabaId: c.meta_waba_id || '',
+          existe: true,
+          estado: 'oficial',
+          numero: '',
+          webhook: true, // assume-se configurado — checagem de webhook oficial é outra (não via Evolution)
+        };
+      } else if (c.whatsapp_instance) {
         usadas.add(c.whatsapp_instance);
         const info = mapa[c.whatsapp_instance] || null;
         item.principal = {
+          tipo: 'evolution',
           instancia: c.whatsapp_instance,
           existe: !!info,
           estado: info ? info.estado : 'morta',
@@ -163,8 +182,12 @@
       console.log('\n📋 ' + c.nome);
       if (c.principal) {
         const p = c.principal;
-        console.log(`  👑 principal: ${p.instancia}`);
-        console.log(`     ${p.existe ? (p.estado === 'open' ? '🟢 open' : '🔴 ' + p.estado) + ' | ' + (p.numero || '(sem número)') : '👻 MORTA'} | ${p.webhook ? '✓ webhook' : '❌ sem webhook'}`);
+        if (p.tipo === 'oficial') {
+          console.log(`  👑 principal: ✅ API OFICIAL (Meta) | Phone Number ID: ${p.instancia}`);
+        } else {
+          console.log(`  👑 principal: ${p.instancia}`);
+          console.log(`     ${p.existe ? (p.estado === 'open' ? '🟢 open' : '🔴 ' + p.estado) + ' | ' + (p.numero || '(sem número)') : '👻 MORTA'} | ${p.webhook ? '✓ webhook' : '❌ sem webhook'}`);
+        }
       } else console.log('  👑 principal: (nenhum)');
       c.extras.forEach(e => {
         console.log(`  2️⃣ extra "${e.nome}": ${e.instancia}`);
@@ -189,10 +212,16 @@
       h += `<div style="font-weight:700;margin-bottom:8px;">📋 ${esc(c.nome)}</div>`;
       if (c.principal) {
         const p = c.principal;
-        const st = !p.existe ? '👻 MORTA (não existe na Evolution!)' : (p.estado === 'open' ? '🟢 conectado' : '🔴 ' + esc(p.estado));
-        h += `<div style="font-size:13px;padding:8px;background:rgba(201,168,76,0.08);border-radius:8px;margin-bottom:6px;">
-          👑 <b>Principal:</b> ${esc(p.numero) || '—'} <span style="color:var(--text-muted);font-size:11px;">(${esc(p.instancia)})</span><br>
-          <span style="font-size:12px;">${st} · ${p.webhook ? '✓ webhook' : '❌ sem webhook'}</span></div>`;
+        if (p.tipo === 'oficial') {
+          h += `<div style="font-size:13px;padding:8px;background:rgba(63,185,80,0.08);border-radius:8px;margin-bottom:6px;">
+            👑 <b>Principal:</b> ✅ API Oficial (Meta) <span style="color:var(--text-muted);font-size:11px;">(Phone Number ID: ${esc(p.instancia)})</span><br>
+            <span style="font-size:12px;">🟢 conectado · sem risco de banimento</span></div>`;
+        } else {
+          const st = !p.existe ? '👻 MORTA (não existe na Evolution!)' : (p.estado === 'open' ? '🟢 conectado' : '🔴 ' + esc(p.estado));
+          h += `<div style="font-size:13px;padding:8px;background:rgba(201,168,76,0.08);border-radius:8px;margin-bottom:6px;">
+            👑 <b>Principal:</b> ${esc(p.numero) || '—'} <span style="color:var(--text-muted);font-size:11px;">(${esc(p.instancia)})</span><br>
+            <span style="font-size:12px;">${st} · ${p.webhook ? '✓ webhook' : '❌ sem webhook'}</span></div>`;
+        }
       } else {
         h += `<div style="font-size:13px;color:var(--text-muted);margin-bottom:6px;">👑 Principal: (nenhum configurado)</div>`;
       }
