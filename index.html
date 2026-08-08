@@ -1059,7 +1059,16 @@ tbody tr:hover td { background:var(--bg-elevated); }
       <button class="btn btn-ghost btn-icon" onclick="closeModal('modalWhatsApp')"><i class="ti ti-x"></i></button>
     </div>
     <div class="modal-body" id="modalWhatsAppBody">
-      <div style="text-align:center;padding:20px;">
+      <!-- ⚠️ NOVO 07/08: abas pra escolher o tipo de conexão. Antes só
+      existia o caminho Evolution (QR Code) — agora dá pra escolher API
+      Oficial direto aqui, sem precisar de ajuda externa pra configurar
+      cliente por cliente. -->
+      <div style="display:flex;gap:8px;margin-bottom:20px;padding:0 4px;">
+        <button class="btn" id="tabBtnEvolution" onclick="mostrarTabConexao('evolution')" style="flex:1;background:var(--gold-pale);border:1px solid var(--gold-border);">📱 QR Code</button>
+        <button class="btn" id="tabBtnOficial" onclick="mostrarTabConexao('oficial')" style="flex:1;">✅ API Oficial</button>
+      </div>
+
+      <div id="tabConteudoEvolution" style="text-align:center;padding:20px;">
         <div style="width:48px;height:48px;border-radius:12px;background:var(--gold-pale);border:1px solid var(--gold-border);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;"><i class="ti ti-brand-whatsapp" style="font-size:24px;color:var(--gold);"></i></div>
         <div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:8px;font-family:var(--font-display);">Conectar número da clínica</div>
         <div style="font-size:12px;color:var(--text-secondary);margin-bottom:24px;line-height:1.6;">Vamos gerar um QR Code. Abra o WhatsApp no celular da clínica → Dispositivos conectados → Conectar dispositivo → Escaneie o QR Code.</div>
@@ -1070,9 +1079,127 @@ tbody tr:hover td { background:var(--bg-elevated); }
         <div id="waStatus" style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;"></div>
         <button class="btn btn-primary btn-full" id="btnGerarQR" onclick="gerarQRCode()"><i class="ti ti-qrcode"></i> Gerar QR Code</button>
       </div>
+
+      <!-- ⚠️ NOVO 07/08: aba da API Oficial — guia + formulário. A parte
+      da Meta (criar App, System User, token, registrar número) ainda é
+      manual — não dá pra automatizar isso por código, é feito no painel
+      da Meta. Mas isso aqui centraliza o checklist e o lugar de colar os
+      valores no final, em vez de fazer tudo pelo chat toda vez. -->
+      <div id="tabConteudoOficial" style="display:none;padding:4px;">
+        <div style="background:var(--bg-elevated);border-radius:10px;padding:14px;margin-bottom:16px;font-size:12px;color:var(--text-secondary);line-height:1.7;">
+          <div style="font-weight:600;color:var(--text-primary);margin-bottom:8px;">Antes de preencher, faça na Meta (fora do CRM):</div>
+          <ol style="margin:0;padding-left:18px;">
+            <li>Se o número JÁ foi usado como WhatsApp comum: exclua a conta pelo celular (Configurações → Conta → Excluir minha conta) e espere alguns minutos</li>
+            <li>Crie o App dentro do portfólio do cliente (Meta for Developers)</li>
+            <li>Aceite os Termos da API do WhatsApp Business Cloud</li>
+            <li>Crie um Usuário do Sistema, atribua a WABA com controle total</li>
+            <li>Gere um token permanente (expiração "Nunca")</li>
+            <li>Registre o número (PIN de 6 dígitos)</li>
+            <li>Cadastre o Webhook: URL <code style="background:var(--bg-hover);padding:1px 5px;border-radius:4px;">clinicalead.vercel.app/api/webhook</code>, token <code style="background:var(--bg-hover);padding:1px 5px;border-radius:4px;">clinicalead-verify-2026</code>, campo <code style="background:var(--bg-hover);padding:1px 5px;border-radius:4px;">messages</code></li>
+          </ol>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Phone Number ID</label>
+          <input type="text" class="form-input" id="oficialPhoneNumberId" placeholder="Ex: 1258527277344876"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">WABA ID</label>
+          <input type="text" class="form-input" id="oficialWabaId" placeholder="Ex: 1046294797757771"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">App ID</label>
+          <input type="text" class="form-input" id="oficialAppId" placeholder="Ex: 2170841700506560"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Token de Acesso Permanente</label>
+          <input type="password" class="form-input" id="oficialToken" placeholder="Cole o token gerado na Meta"/>
+        </div>
+        <button class="btn btn-primary btn-full" id="btnSalvarOficial" onclick="salvarConexaoOficial()">✅ Salvar Conexão Oficial</button>
+        <div id="waStatusOficial" style="font-size:12px;color:var(--text-secondary);margin-top:12px;text-align:center;"></div>
+      </div>
     </div>
   </div>
 </div>
+
+<script>
+// ⚠️ NOVO 07/08: alterna entre as duas abas do modal de conexão.
+function mostrarTabConexao(qual) {
+  const evo = document.getElementById('tabConteudoEvolution');
+  const ofi = document.getElementById('tabConteudoOficial');
+  const btnEvo = document.getElementById('tabBtnEvolution');
+  const btnOfi = document.getElementById('tabBtnOficial');
+  if (qual === 'oficial') {
+    evo.style.display = 'none'; ofi.style.display = '';
+    btnOfi.style.background = 'var(--gold-pale)'; btnOfi.style.border = '1px solid var(--gold-border)';
+    btnEvo.style.background = ''; btnEvo.style.border = '';
+    // se a clínica já tiver dados oficiais salvos, pré-preenche (útil pra conferir/atualizar)
+    const clinic = window.__waClinicAlvo;
+    if (clinic) {
+      document.getElementById('oficialPhoneNumberId').value = clinic.meta_phone_number_id || '';
+      document.getElementById('oficialWabaId').value = clinic.meta_waba_id || '';
+      document.getElementById('oficialAppId').value = clinic.meta_app_id || '';
+      // o token nunca é preenchido de volta por segurança — só mostra se já existe
+      document.getElementById('waStatusOficial').textContent = clinic.tipo_conexao_whatsapp === 'oficial'
+        ? '✅ Essa clínica já está em API Oficial.' : '';
+    }
+  } else {
+    ofi.style.display = 'none'; evo.style.display = '';
+    btnEvo.style.background = 'var(--gold-pale)'; btnEvo.style.border = '1px solid var(--gold-border)';
+    btnOfi.style.background = ''; btnOfi.style.border = '';
+  }
+}
+
+// ⚠️ NOVO 07/08: salva a conexão oficial — grava os IDs + token na
+// clínica, marca tipo_conexao_whatsapp='oficial'. Não mexe em nada da
+// Evolution (campos separados no banco), então dá pra até trocar de
+// tipo de conexão depois sem perder o histórico.
+async function salvarConexaoOficial() {
+  const clinic = window.__waClinicAlvo || (typeof currentClinic === 'function' ? currentClinic() : null);
+  if (!clinic) { toast('Erro: clínica não identificada', 'error'); return; }
+
+  const phoneNumberId = document.getElementById('oficialPhoneNumberId').value.trim();
+  const wabaId = document.getElementById('oficialWabaId').value.trim();
+  const appId = document.getElementById('oficialAppId').value.trim();
+  const token = document.getElementById('oficialToken').value.trim();
+
+  if (!phoneNumberId || !wabaId) {
+    toast('Preencha ao menos o Phone Number ID e o WABA ID', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('btnSalvarOficial');
+  const st = document.getElementById('waStatusOficial');
+  btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> Salvando...';
+
+  const dbRef = (typeof db !== 'undefined') ? db : null;
+  if (!dbRef) { toast('Erro interno: conexão com banco indisponível', 'error'); btn.disabled = false; return; }
+
+  const updates = {
+    tipo_conexao_whatsapp: 'oficial',
+    meta_phone_number_id: phoneNumberId,
+    meta_waba_id: wabaId,
+    meta_app_id: appId || null,
+  };
+  // só sobrescreve o token se um novo foi digitado (campo fica vazio se
+  // já existir um salvo, pra não expor o valor de volta na tela)
+  if (token) updates.meta_access_token = token;
+
+  const { error } = await dbRef.from('clinicas').update(updates).eq('id', clinic.id);
+  btn.disabled = false; btn.innerHTML = '✅ Salvar Conexão Oficial';
+
+  if (error) {
+    st.innerHTML = `<span style="color:var(--coral,#C0624A);">Erro ao salvar: ${error.message}</span>`;
+    return;
+  }
+
+  const cLocal = STATE.clinics.find(c => c.id === clinic.id);
+  if (cLocal) Object.assign(cLocal, updates);
+
+  st.innerHTML = '<span style="color:var(--gold);font-weight:600;">✅ Conexão Oficial salva! Não esqueça de cadastrar o Webhook na Meta (veja o checklist acima).</span>';
+  toast(`WhatsApp Oficial configurado pra "${clinic.nome}"! 🎉`);
+  if (typeof renderClinicas === 'function') renderClinicas();
+}
+</script>
 
 <!-- MODAL WHATSAPP SEND -->
 <div class="modal-overlay" id="modalSendWA">
