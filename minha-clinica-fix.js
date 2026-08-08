@@ -183,17 +183,18 @@
             <i class="ti ti-${waConectado ? 'qrcode' : 'plus'}"></i> ${waConectado ? 'Gerenciar / Reconectar WhatsApp' : 'Gerenciar números extras'}
           </button>
 
-          <!-- ⚠️ NOVO 01/08: botão da API Oficial (Embedded Signup) —
-          separado do fluxo Evolution/QR Code acima. Mostra o status
-          se essa clínica já usa a API Oficial. -->
-          <div style="margin-top:18px;padding-top:18px;border-top:1px solid var(--border-subtle);">
-            <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px;">
-              ${c.tipo_conexao_whatsapp === 'oficial' ? '✅ Conectado via API Oficial (Meta)' : 'API Oficial do WhatsApp (recomendado — sem risco de banimento)'}
-            </div>
-            <button class="btn btn-primary" id="btnConectarWhatsAppOficial" onclick="iniciarConexaoOficial('${c.id}')" style="width:100%;">
-              <i class="ti ti-brand-whatsapp"></i> ${c.tipo_conexao_whatsapp === 'oficial' ? 'Reconectar API Oficial' : 'Conectar WhatsApp (API Oficial)'}
-            </button>
+          <!-- ⚠️ REMOVIDO 07/08: botão de Embedded Signup (login via
+          Facebook) removido daqui — sempre travava (exige status de
+          Tech Provider que a ClinicaLead não tem). A conexão via API
+          Oficial agora é feita só por quem administra o CRM, em
+          Gestão → Clínicas → Conectar WhatsApp → aba "API Oficial".
+          Mantido só um indicador informativo, sem ação, se a clínica
+          já estiver conectada por esse caminho. -->
+          ${c.tipo_conexao_whatsapp === 'oficial' ? `
+          <div style="margin-top:18px;padding-top:18px;border-top:1px solid var(--border-subtle);font-size:13px;color:var(--text-muted);">
+            ✅ WhatsApp conectado via API Oficial (Meta)
           </div>
+          ` : ''}
         </div>
 
       </div>`;
