@@ -42,6 +42,29 @@ module.exports = async function handler(req, res) {
       // sem mensagem de verdade (pode ser só um status de "entregue/lido") — ignora
       if (!msg || !phoneNumberId) return res.status(200).json({ ok: true, ignorado: 'sem mensagem de texto' });
 
+      // ⚠️ NOVO 09/08: trava contra mensagem DUPLICADA — a Meta às vezes
+      // reenvia o MESMO evento de webhook mais de uma vez (comportamento
+      // conhecido da plataforma, "at least once delivery" — ela garante
+      // que a mensagem chega, mesmo que isso signifique mandar 2x). Sem
+      // essa trava, o Brian processava a mesma mensagem duas vezes em
+      // paralelo — gerando resposta duplicada, e em casos de agendamento,
+      // uma tentativa "reservava" o horário e a outra (rodando quase
+      // junto) encontrava ele "ocupado" por ela mesma, sem saber. Caso
+      // real: paciente Daniel (09/08) recebeu duas respostas quase
+      // idênticas em 1,7s, e depois viu "esse horário já está ocupado"
+      // logo após o Brian ter acabado de "reservar" — tudo culpa dessa
+      // mesma duplicata. Se o message_id da Meta já foi visto antes,
+      // ignora silenciosamente (responde 200 pra Meta não ficar
+      // re-tentando, mas não processa de novo).
+      if (msg.id) {
+        const jaVistoResp = await fetch(
+          `${SUPABASE_URL}/rest/v1/mensagens?message_id=eq.${msg.id}&select=id&limit=1`,
+          { headers: sbHeaders }
+        );
+        const jaVistoArr = jaVistoResp.ok ? await jaVistoResp.json() : [];
+        if (jaVistoArr.length) return res.status(200).json({ ok: true, ignorado: 'mensagem duplicada (message_id já processado)' });
+      }
+
       // acha a clínica pelo phone_number_id (já traz o token, precisamos
       // dele agora pra baixar mídia e pra eventualmente responder)
       const clinicaResp = await fetch(
