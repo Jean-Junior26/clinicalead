@@ -114,6 +114,7 @@ async function renderEquipe() {
           <div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">${resumoPerms}</div>
         </div>
         <div style="display:flex;gap:6px;">
+          <button class="btn btn-sm" onclick="abrirEditarColaborador('${c.id}')"><i class="ti ti-edit"></i> Editar</button>
           <button class="btn btn-sm" onclick="editarPermissoes('${c.id}')"><i class="ti ti-adjustments"></i> Permissões</button>
           <button class="btn btn-sm btn-danger" onclick="removerColaborador('${c.id}')"><i class="ti ti-trash"></i></button>
         </div>
@@ -210,6 +211,92 @@ async function salvarNovoColaborador() {
     toast('Erro: ' + e.message, 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="ti ti-check"></i> Criar colaborador'; }
+  }
+}
+
+// ── NOVO 10/08: Editar dados (nome/email) e resetar senha ────
+// Antes só dava pra criar colaborador e editar permissões — se a pessoa
+// esquecesse a senha ou trocasse de computador (caso real: Ana, José
+// Bonifácio, e-mail de recuperação não chegou), não tinha saída fácil.
+function abrirEditarColaborador(colabId) {
+  const c = EQUIPE.colaboradores.find(x => x.id === colabId);
+  if (!c) return;
+  if (!document.getElementById('modalEditColab')) {
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'modalEditColab';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:420px;width:96vw;">
+        <div class="modal-header">
+          <h3><i class="ti ti-user-edit" style="margin-right:8px;color:var(--gold);"></i>Editar colaborador</h3>
+          <button class="btn btn-ghost btn-icon" onclick="closeModal('modalEditColab')"><i class="ti ti-x"></i></button>
+        </div>
+        <div class="modal-body" style="display:flex;flex-direction:column;gap:12px;">
+          <div class="form-group"><label class="form-label">Nome</label><input class="form-input" id="editColabNome"/></div>
+          <div class="form-group"><label class="form-label">E-mail</label><input class="form-input" id="editColabEmail" type="email"/></div>
+          <div style="border-top:1px solid var(--border-subtle);margin-top:4px;padding-top:14px;">
+            <label class="form-label">Nova senha (deixe em branco pra não alterar)</label>
+            <input class="form-input" id="editColabNovaSenha" placeholder="mínimo 6 caracteres"/>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Use isso quando a pessoa esquecer a senha ou não receber o e-mail de recuperação.</div>
+          </div>
+          <div id="editColabMsg" style="font-size:12px;"></div>
+        </div>
+        <div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end;">
+          <button class="btn" onclick="closeModal('modalEditColab')">Cancelar</button>
+          <button class="btn btn-primary" id="btnSalvarEditColab" onclick="salvarEdicaoColaborador()"><i class="ti ti-check"></i> Salvar</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+  }
+  document.getElementById('modalEditColab').dataset.colabId = colabId;
+  document.getElementById('editColabNome').value = c.nome || '';
+  document.getElementById('editColabEmail').value = c.email || '';
+  document.getElementById('editColabNovaSenha').value = '';
+  document.getElementById('editColabMsg').textContent = '';
+  openModal('modalEditColab');
+}
+
+async function salvarEdicaoColaborador() {
+  const modal = document.getElementById('modalEditColab');
+  const colabId = modal.dataset.colabId;
+  const nome = document.getElementById('editColabNome').value.trim();
+  const email = document.getElementById('editColabEmail').value.trim();
+  const novaSenha = document.getElementById('editColabNovaSenha').value.trim();
+  const msg = document.getElementById('editColabMsg');
+  const btn = document.getElementById('btnSalvarEditColab');
+
+  if (novaSenha && novaSenha.length < 6) { msg.innerHTML = '<span style="color:var(--coral);">A senha precisa ter ao menos 6 caracteres</span>'; return; }
+
+  btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> Salvando...';
+  msg.textContent = '';
+  try {
+    // 1) atualiza nome/email, se algo mudou
+    const respEditar = await fetch('/api/criar-colaborador', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ acao: 'editar', requesterId: STATE.user.id, colabId, nome, email }),
+    });
+    const dataEditar = await respEditar.json();
+    if (!respEditar.ok) throw new Error(dataEditar.error || 'Erro ao salvar dados');
+
+    // 2) se preencheu senha nova, reseta separado
+    if (novaSenha) {
+      const respSenha = await fetch('/api/criar-colaborador', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ acao: 'resetar_senha', requesterId: STATE.user.id, colabId, novaSenha }),
+      });
+      const dataSenha = await respSenha.json();
+      if (!respSenha.ok) throw new Error(dataSenha.error || 'Erro ao resetar senha');
+    }
+
+    toast(novaSenha ? 'Dados e senha atualizados! ✓' : 'Dados atualizados! ✓');
+    closeModal('modalEditColab');
+    renderEquipe();
+  } catch (e) {
+    msg.innerHTML = `<span style="color:var(--coral);">${e.message}</span>`;
+  } finally {
+    btn.disabled = false; btn.innerHTML = '<i class="ti ti-check"></i> Salvar';
   }
 }
 
