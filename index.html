@@ -2990,7 +2990,7 @@ function renderInboxList() {
     const avatarHtml = fotoUrl
       ? `<img src="${fotoUrl}" class="inbox-avatar" style="object-fit:cover;" onerror="this.outerHTML='<div class=&quot;inbox-avatar&quot;>${ini}</div>'"/>`
       : `<div class="inbox-avatar">${ini}</div>`;
-    return `<div class="inbox-item ${isActive ? 'active' : ''} ${c.lead ? 'is-lead' : ''}" onclick="openChat('${c.id}')">
+    return `<div class="inbox-item ${isActive ? 'active' : ''} ${c.lead ? 'is-lead' : ''}" onclick="openChat('${c.id}')" oncontextmenu="return mostrarMenuInbox(event, '${c.id}')">
       ${avatarHtml}
       <div class="inbox-item-info">
         <div class="inbox-item-name">
@@ -3005,6 +3005,62 @@ function renderInboxList() {
       </div>
     </div>`;
   }).join('');
+}
+
+// ⚠️ NOVO 10/08: clique direito numa conversa → menu com "Marcar como
+// não lida" (pra não perder uma mensagem importante, mesmo já tendo
+// aberto). Mesmo padrão do WhatsApp Web, familiar pra quem usa.
+function mostrarMenuInbox(event, chatId) {
+  event.preventDefault();
+  document.getElementById('menuContextoInbox')?.remove();
+
+  const menu = document.createElement('div');
+  menu.id = 'menuContextoInbox';
+  menu.style.cssText = `position:fixed;top:${event.clientY}px;left:${event.clientX}px;background:var(--bg-elevated,#1a1a1a);border:1px solid var(--border-subtle,#2a2a2a);border-radius:10px;padding:6px;z-index:99999;box-shadow:0 8px 24px rgba(0,0,0,0.4);min-width:200px;`;
+  menu.innerHTML = `
+    <div style="padding:9px 12px;font-size:13px;cursor:pointer;border-radius:6px;display:flex;align-items:center;gap:8px;"
+         onmouseover="this.style.background='var(--bg-hover,#252525)'" onmouseout="this.style.background=''"
+         onclick="marcarComoNaoLida('${chatId}'); document.getElementById('menuContextoInbox')?.remove();">
+      <i class="ti ti-mail" style="color:var(--gold,#C9A84C);"></i> Marcar como não lida
+    </div>`;
+  document.body.appendChild(menu);
+
+  // fecha o menu ao clicar em qualquer lugar fora dele
+  setTimeout(() => {
+    document.addEventListener('click', function fechar() {
+      document.getElementById('menuContextoInbox')?.remove();
+      document.removeEventListener('click', fechar);
+    }, { once: true });
+  }, 0);
+
+  return false; // impede o menu padrão do navegador
+}
+
+async function marcarComoNaoLida(chatId) {
+  const chat = INBOX.chats.find(c => c.id === chatId);
+  if (!chat) return;
+  const clinic = currentClinic();
+  if (!clinic) return;
+
+  const sufixoChat = chat.phone.replace(/\D/g, '').slice(-8);
+  if (sufixoChat.length !== 8) return;
+
+  // marca só a ÚLTIMA mensagem recebida como não lida (suficiente pra
+  // acender a bolinha de novo, sem precisar "desler" a conversa inteira)
+  const ultimaRecebida = [...chat.messages].reverse().find(m => !m.from_me);
+  if (!ultimaRecebida) { toast('Essa conversa não tem mensagem recebida pra marcar', 'error'); return; }
+
+  const { error } = await db.from('mensagens')
+    .update({ read_at: null })
+    .eq('id', ultimaRecebida.id);
+
+  if (error) { toast('Erro ao marcar como não lida', 'error'); return; }
+
+  ultimaRecebida.read_at = null;
+  chat.unread = Math.max(1, chat.unread);
+  if (INBOX.activeChat?.id === chatId) INBOX.activeChat = null; // fecha a conversa aberta, se for essa mesma
+  renderInboxList();
+  toast('Marcada como não lida ✓');
 }
 
 function formatMsgTime(date) {
