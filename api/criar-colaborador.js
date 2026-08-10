@@ -12,6 +12,83 @@ export default async function handler(req, res) {
   const SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
   if (!SERVICE_KEY) return res.status(500).json({ error: 'Configuração ausente (service key)' });
 
+  const adminHeaders = {
+    apikey: SERVICE_KEY,
+    Authorization: `Bearer ${SERVICE_KEY}`,
+    'Content-Type': 'application/json',
+  };
+  const ADMIN_EMAIL = 'jeanjunior.digital@gmail.com';
+
+  // ⚠️ NOVO 10/08: duas ações novas, reaproveitando este mesmo arquivo (a
+  // Vercel Hobby só libera 12 funções, já estávamos no limite) — antes só
+  // dava pra CRIAR colaborador, sem jeito de editar dados ou resetar senha
+  // depois. Caso real: Ana (José Bonifácio) trocou de computador, esqueceu
+  // a senha, e o e-mail de recuperação não chegou — sem essa opção, ficava
+  // sem saída a não ser mexer direto no Supabase.
+  const acao = req.body?.acao || 'criar';
+
+  if (acao === 'editar' || acao === 'resetar_senha') {
+    const { requesterId, colabId, nome, email, novaSenha } = req.body || {};
+    if (!requesterId || !colabId) return res.status(400).json({ error: 'Campos obrigatórios: requesterId, colabId' });
+
+    try {
+      // autorização: só dono da clínica desse colaborador OU admin geral
+      const colabResp = await fetch(`${SUPABASE_URL}/rest/v1/clinic_users?id=eq.${colabId}&select=id,user_id,clinic_id,nome,email`, { headers: adminHeaders });
+      const colabArr = await colabResp.json();
+      if (!colabResp.ok || !colabArr?.length) return res.status(404).json({ error: 'Colaborador não encontrado' });
+      const colab = colabArr[0];
+
+      const reqUserResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${requesterId}`, { headers: adminHeaders });
+      if (!reqUserResp.ok) return res.status(403).json({ error: 'Solicitante inválido' });
+      const reqUser = await reqUserResp.json();
+      const reqEmail = (reqUser?.email || '').toLowerCase();
+
+      const clinicResp = await fetch(`${SUPABASE_URL}/rest/v1/clinicas?id=eq.${colab.clinic_id}&select=user_id`, { headers: adminHeaders });
+      const clinics = await clinicResp.json();
+      const ehDono = clinics?.[0]?.user_id === requesterId;
+      const ehAdminGeral = reqEmail === ADMIN_EMAIL;
+      if (!ehDono && !ehAdminGeral) return res.status(403).json({ error: 'Sem permissão para editar este colaborador' });
+
+      if (acao === 'resetar_senha') {
+        if (!novaSenha || String(novaSenha).length < 6) return res.status(400).json({ error: 'A nova senha precisa ter ao menos 6 caracteres' });
+        const resetResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${colab.user_id}`, {
+          method: 'PUT',
+          headers: adminHeaders,
+          body: JSON.stringify({ password: novaSenha }),
+        });
+        if (!resetResp.ok) {
+          const errData = await resetResp.json().catch(() => null);
+          return res.status(400).json({ error: errData?.msg || 'Erro ao resetar senha' });
+        }
+        return res.status(200).json({ ok: true, mensagem: 'Senha resetada com sucesso' });
+      }
+
+      // acao === 'editar': nome/email na clinic_users (e no Auth também, se o email mudou)
+      const updates = {};
+      if (nome) updates.nome = nome;
+      if (email) updates.email = String(email).trim().toLowerCase();
+      if (Object.keys(updates).length) {
+        const upResp = await fetch(`${SUPABASE_URL}/rest/v1/clinic_users?id=eq.${colabId}`, {
+          method: 'PATCH',
+          headers: { ...adminHeaders, Prefer: 'return=minimal' },
+          body: JSON.stringify(updates),
+        });
+        if (!upResp.ok) return res.status(400).json({ error: 'Erro ao atualizar dados do colaborador' });
+      }
+      if (email && email.trim().toLowerCase() !== (colab.email || '').toLowerCase()) {
+        await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${colab.user_id}`, {
+          method: 'PUT',
+          headers: adminHeaders,
+          body: JSON.stringify({ email: email.trim().toLowerCase(), email_confirm: true }),
+        });
+      }
+      return res.status(200).json({ ok: true, mensagem: 'Colaborador atualizado' });
+    } catch (err) {
+      return res.status(500).json({ error: 'Erro interno', message: err.message });
+    }
+  }
+
+  // ── ação padrão (sem mudanças): criar colaborador ──
   const { requesterId, clinicId, nome, email, senha, permissoes } = req.body || {};
 
   // Validações básicas
@@ -22,15 +99,8 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'A senha deve ter ao menos 6 caracteres' });
   }
 
-  const adminHeaders = {
-    apikey: SERVICE_KEY,
-    Authorization: `Bearer ${SERVICE_KEY}`,
-    'Content-Type': 'application/json',
-  };
-
   try {
     // ── 1. Autorização: quem pede tem que ser dono da clínica OU admin geral ──
-    const ADMIN_EMAIL = 'jeanjunior.digital@gmail.com';
 
     // Busca o usuário solicitante
     const reqUserResp = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${requesterId}`, { headers: adminHeaders });
