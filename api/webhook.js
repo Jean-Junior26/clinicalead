@@ -257,7 +257,20 @@ module.exports = async function handler(req, res) {
               { headers: sbHeaders }
             );
             const uArrR = ultR.ok ? await ultR.json() : [];
-            brianAssumiu = !!(uArrR[0] && uArrR[0].contact_name === 'BRIAN_AUTO');
+            // ⚠️ CORREÇÃO 10/08: lógica estava invertida — antes só liberava
+            // o Brian se achasse PROVA RECENTE (últimas 6h) de que ELE
+            // MESMO mandou a última mensagem. Se a conversa ficou muito
+            // tempo em silêncio (sem ninguém mandar nada, nem Brian nem
+            // humano), essa "falta de prova" era tratada como "humano
+            // assumiu" — errado, silêncio longo não é evidência de humano
+            // nenhum. Caso real: Denise (Camaquã) mandou áudio depois de
+            // 10 dias de silêncio total na conversa, e o Brian ficou mudo
+            // por causa dessa lógica. Agora: se não tem NENHUMA mensagem
+            // recente de ninguém, é seguro pro Brian responder (não é
+            // evidência de humano) — só trava de verdade se a ÚLTIMA
+            // mensagem recente foi de alguém que NÃO é o Brian (aí sim é
+            // sinal real de humano tendo assumido).
+            brianAssumiu = !uArrR[0] || uArrR[0].contact_name === 'BRIAN_AUTO' || uArrR[0].contact_name === 'BRIAN_FOLLOWUP';
           } catch (e) { }
           if (!brianAssumiu) return motivo(false, 'dentro do horário de atendimento (modo Cauteloso: humano assume)');
         }
@@ -282,7 +295,13 @@ module.exports = async function handler(req, res) {
       const normMsg = (x) => String(x || '').trim().toLowerCase();
       const conteudoAtual = normMsg(content);
       const humanoAtivo = humArr.some(m => {
-        if (m.contact_name === 'BRIAN_AUTO') return false;
+        // ⚠️ CORREÇÃO 10/08: reconhece BRIAN_FOLLOWUP também (não só
+        // BRIAN_AUTO) — sem isso, uma mensagem de follow-up automático
+        // (que usa esse marcador de propósito, pra não disparar a
+        // reativação de 10min em cima dela) era tratada como se fosse de
+        // um humano, travando o Brian de responder se o paciente
+        // respondesse rápido ao follow-up.
+        if (m.contact_name === 'BRIAN_AUTO' || m.contact_name === 'BRIAN_FOLLOWUP') return false;
         const c = normMsg(m.content);
         if (c === conteudoAtual) return false;
         if (marcadoresAuto.some(mk => c.includes(mk))) return false;
