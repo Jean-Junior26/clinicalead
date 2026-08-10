@@ -3029,12 +3029,27 @@ async function openChat(chatId) {
 
  const clinic = currentClinic();
   if (clinic) {
-    db.from('mensagens')
-      .update({ read_at: new Date().toISOString() })
-      .eq('phone', chat.phone)
-      .is('read_at', null)
-      .eq('from_me', false)
-      .then(() => {});
+    // ⚠️ CORREÇÃO 10/08: antes comparava telefone com igualdade EXATA
+    // (.eq('phone', chat.phone)) — chat.phone é um valor NORMALIZADO
+    // (só dígitos), mas o telefone salvo em cada mensagem no banco pode
+    // estar num formato levemente diferente (com/sem código de país,
+    // etc. — mesmo problema já visto em vários outros lugares do
+    // sistema). Quando não batia 100% igual, a atualização não marcava
+    // NADA como lido de verdade — só zerava a variável local na tela,
+    // que "voltava" na próxima vez que o Inbox recarregasse (parecendo
+    // que a notificação nunca sumia). Agora busca por SUFIXO (últimos 8
+    // dígitos), tolerante a variação de formato, igual o resto do
+    // sistema já faz.
+    const sufixoChat = chat.phone.replace(/\D/g, '').slice(-8);
+    if (sufixoChat.length === 8) {
+      db.from('mensagens')
+        .update({ read_at: new Date().toISOString() })
+        .eq('clinic_id', clinic.id)
+        .ilike('phone', `%${sufixoChat}`)
+        .is('read_at', null)
+        .eq('from_me', false)
+        .then(() => {});
+    }
   }
 }
 
