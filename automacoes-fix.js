@@ -196,6 +196,7 @@ async function saveNewLead() {
   const newLead = {
     clinic_id: currentClinic().id,
     nome,
+    nome_confirmado: true, // ⚠️ 10/08: mesma correção — nome digitado manualmente aqui é confirmado, não provisório (essa versão da função tinha ficado sem essa proteção)
     telefone: document.getElementById('nlPhone').value,
     procedimento,
     origem: document.getElementById('nlSource').value,
