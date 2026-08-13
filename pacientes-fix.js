@@ -100,7 +100,7 @@ function renderPacientes() {
     <div class="toolbar" style="flex-wrap:wrap;gap:10px;">
       <div class="search-box" style="max-width:280px;flex:1;min-width:200px;">
         <i class="ti ti-search"></i>
-        <input type="text" placeholder="Buscar por nome ou telefone..." value="${PAC.busca.replace(/"/g, '&quot;')}" oninput="setPacBusca(this.value)"/>
+        <input type="search" placeholder="Buscar por nome ou telefone..." value="${PAC.busca.replace(/"/g, '&quot;')}" name="busca_pacientes" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-form-type="other" data-lpignore="true" oninput="setPacBusca(this.value)"/>
       </div>
       <select class="filter-select" onchange="setPacProc(this.value)">
         <option value="all">Todos os procedimentos</option>
