@@ -291,11 +291,14 @@ async function sendWAConsulta(consultaId) {
 
   try {
     await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg, clinic.id);
-    await db.from('consultas').update({ status: 'confirmado' }).eq('id', consultaId);
-    c.status = 'confirmado';
+    // ⚠️ CORREÇÃO 13/08: não marca 'confirmado' aqui — só enviou o
+    // pedido, o paciente ainda não respondeu nada. Status só vira
+    // 'confirmado' quando ele responder SIM de verdade.
+    await db.from('consultas').update({ lembrete_24h: new Date().toISOString() }).eq('id', consultaId);
+    c.lembrete_24h = new Date().toISOString();
     await salvarMensagemInbox(clinic, lead.telefone, lead.nome, msg);
     renderDaySchedule(CAL.selectedDate);
-    toast('Lembrete enviado e salvo no Inbox! ✓');
+    toast('Pedido de confirmação enviado e salvo no Inbox! ✓');
   } catch (e) {
     toast('Erro ao enviar WhatsApp', 'error');
   }
