@@ -257,20 +257,35 @@ module.exports = async function handler(req, res) {
               { headers: sbHeaders }
             );
             const uArrR = ultR.ok ? await ultR.json() : [];
-            // ⚠️ CORREÇÃO 10/08: lógica estava invertida — antes só liberava
-            // o Brian se achasse PROVA RECENTE (últimas 6h) de que ELE
-            // MESMO mandou a última mensagem. Se a conversa ficou muito
-            // tempo em silêncio (sem ninguém mandar nada, nem Brian nem
-            // humano), essa "falta de prova" era tratada como "humano
-            // assumiu" — errado, silêncio longo não é evidência de humano
-            // nenhum. Caso real: Denise (Camaquã) mandou áudio depois de
-            // 10 dias de silêncio total na conversa, e o Brian ficou mudo
-            // por causa dessa lógica. Agora: se não tem NENHUMA mensagem
-            // recente de ninguém, é seguro pro Brian responder (não é
-            // evidência de humano) — só trava de verdade se a ÚLTIMA
-            // mensagem recente foi de alguém que NÃO é o Brian (aí sim é
-            // sinal real de humano tendo assumido).
-            brianAssumiu = !uArrR[0] || uArrR[0].contact_name === 'BRIAN_AUTO' || uArrR[0].contact_name === 'BRIAN_FOLLOWUP';
+            if (uArrR[0]) {
+              // teve mensagem nossa nas últimas 6h — só é seguro se foi o
+              // próprio Brian; se foi humano, ele que continue
+              brianAssumiu = uArrR[0].contact_name === 'BRIAN_AUTO' || uArrR[0].contact_name === 'BRIAN_FOLLOWUP';
+            } else {
+              // ⚠️ CORREÇÃO 11/08 (ajuste fino da correção de 10/08): sem
+              // mensagem nossa nas últimas 6h pode significar DUAS coisas
+              // bem diferentes pro modo Cauteloso — (1) conversa CHEGANDO
+              // AGORA pela primeira vez (nunca respondemos nada ainda —
+              // aqui o Cauteloso deve MESMO segurar o Brian, dar a
+              // primeira chance pro humano, que é o objetivo do modo); ou
+              // (2) conversa ANTIGA reativando depois de dias de silêncio
+              // (caso real: Denise, Camaquã, 10 dias parada) — aqui é
+              // seguro o Brian responder, não tem humano "no meio" de
+              // nada. A correção de ontem tratava as DUAS iguais (sempre
+              // seguro), o que fez o Brian atender direto até em conversa
+              // NOVA em horário comercial em Uberlândia — o oposto do que
+              // o modo Cauteloso deveria fazer. Agora verifica se JÁ
+              // existiu QUALQUER mensagem nossa antes (sem limite de
+              // tempo) — só nesse caso (conversa com histórico, só
+              // silenciosa há um tempo) libera o Brian; conversa 100%
+              // nova continua esperando o humano, como antes.
+              const historicoResp = await fetch(
+                `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixo}&from_me=eq.true&select=id&limit=1`,
+                { headers: sbHeaders }
+              );
+              const historicoArr = historicoResp.ok ? await historicoResp.json() : [];
+              brianAssumiu = historicoArr.length > 0; // já teve conversa antes = seguro; nunca respondemos = espera o humano
+            }
           } catch (e) { }
           if (!brianAssumiu) return motivo(false, 'dentro do horário de atendimento (modo Cauteloso: humano assume)');
         }
