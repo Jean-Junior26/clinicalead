@@ -180,7 +180,7 @@
         <div class="form-group">
           <label class="form-label">Contatos (<span id="dispContagemSelecionados">${DISP.contatosSelecionados.size}</span> selecionado${DISP.contatosSelecionados.size !== 1 ? 's' : ''})</label>
           <div style="display:flex;gap:8px;margin-bottom:8px;">
-            <input type="text" id="dispBuscaContato" class="form-input" placeholder="Buscar por nome ou telefone..." value="${DISP.buscaContato}" oninput="dispBuscarContato(this.value)" style="flex:1;"/>
+            <input type="search" id="dispBuscaContato" class="form-input" placeholder="Buscar por nome ou telefone..." value="${DISP.buscaContato}" name="busca_contato_disparo" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-form-type="other" data-lpignore="true" oninput="dispBuscarContato(this.value)" style="flex:1;"/>
             <button class="btn btn-sm" id="dispBtnSelecionarTodos" onclick="dispSelecionarTodosVisiveis()">Selecionar todos (${listaVisivel.length})</button>
             <button class="btn btn-sm" onclick="dispLimparSelecao()">Limpar</button>
           </div>
