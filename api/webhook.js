@@ -150,6 +150,21 @@ module.exports = async function handler(req, res) {
       const procDaMsg = (tipo === 'text') ? extrairProcedimentoDaMsg(conteudo) : null;
       await brianAcharOuCriarLead(clinica.id, telefoneLead, nomeContato, 'WhatsApp Meta', procDaMsg, false);
 
+      // ⚠️ CORREÇÃO 11/08: caso real (Uberlândia, API Oficial/Meta) — o
+      // Brian estava respondendo NA HORA mesmo em modo Cauteloso, dentro
+      // do horário comercial, pra lead totalmente novo. Motivo: esse
+      // trecho (caminho Meta) NUNCA passava pela função brianDecide()
+      // (a "trava de segurança" com todas as regras — horário, os 15min
+      // de espera, limite de mensagens, contato protegido, anti-loop) —
+      // só o caminho Evolution usava ela. A Meta ia direto pro Brian,
+      // sem NENHUMA dessas proteções. Agora os dois caminhos passam pela
+      // MESMA decisão, sem exceção.
+      const decisaoMeta = await brianDecide(clinica.id, telefoneLead, conteudo, null, false, false);
+      await logDebug(clinica.id, telefoneLead, 'decisao_resposta', decisaoMeta.responder ? 'sucesso' : 'pulado', decisaoMeta.razao);
+      if (!decisaoMeta.responder) {
+        return res.status(200).json({ ok: true, clinica: clinica.nome, gravado: true, brian: 'pulado', motivo: decisaoMeta.razao });
+      }
+
       // ⚠️ NOVO 06/08: chama o Brian pra responder de verdade, agora usando
       // a MESMA função de processamento de marcadores que o Evolution já
       // usa (processarMarcadoresBrian) — ou seja, [[AGENDAR]] (agenda de
