@@ -61,10 +61,22 @@
         const msg = `Oi ${lead.nome}! 👋 Passando para lembrar que *amanhã* você tem consulta conosco!\n\n⏰ *Horário:* ${c.hora}${blocoEndereco(clinic)}\n\nConfirma sua presença? Responda *SIM* ou *NÃO* 😊`;
         try {
           await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg, clinic.id);
-          await db.from('consultas').update({ status: 'confirmado' }).eq('id', consultaId);
-          c.status = 'confirmado';
+          // ⚠️ CORREÇÃO 13/08: esse arquivo foi criado só pra resolver o
+          // endereço fixo da Araguari, mas reescreveu a função inteira do
+          // zero — sem perceber, trouxe de volta um bug que JÁ tinha sido
+          // corrigido em agenda-semaforo-fix.js: marcar status='confirmado'
+          // na hora de ENVIAR o pedido, mesmo sem o paciente ter respondido
+          // nada ainda. Isso causava dois problemas: (1) a agenda mostrava
+          // "confirmado" mesmo sem confirmação real, e (2) quando o
+          // paciente respondia SIM depois, processarConfirmacao (webhook)
+          // não reconhecia a consulta como pendente (já estava
+          // "confirmado"), e o paciente não recebia resposta nenhuma.
+          // Agora só marca que o lembrete foi enviado — o status só vira
+          // 'confirmado' quando o paciente responder SIM de verdade.
+          await db.from('consultas').update({ lembrete_24h: new Date().toISOString() }).eq('id', consultaId);
+          c.lembrete_24h = new Date().toISOString();
           if (typeof renderDaySchedule === 'function') renderDaySchedule(CAL.selectedDate);
-          if (typeof toast === 'function') toast('Confirmação enviada por WhatsApp! ✓');
+          if (typeof toast === 'function') toast('Pedido de confirmação enviado! Aguardando resposta do paciente. ✓');
         } catch (e) {
           if (typeof toast === 'function') toast('Erro ao enviar WhatsApp', 'error');
         }
