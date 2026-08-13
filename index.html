@@ -2102,10 +2102,14 @@ async function sendWAConsulta(consultaId) {
   const msg = `Oi ${lead.nome}! 👋 Passando para lembrar que *amanhã* você tem consulta conosco!\n\n⏰ *Horário:* ${c.hora}\n📍 *Endereço:* R. Rui Barbosa, 483 - Centro, Araguari - MG\n🗺️ https://share.google/aBRk2BmdSOHL2iN9X\n\nConfirma sua presença? Responda *SIM* ou *NÃO* 😊`;
   try {
     await sendWhatsAppMessage(clinic.whatsapp_instance, lead.telefone, msg, clinic.id);
-    await db.from('consultas').update({status:'confirmado'}).eq('id', consultaId);
-    c.status = 'confirmado';
+    // ⚠️ CORREÇÃO 13/08: não marca 'confirmado' aqui — isso só é enviar o
+    // PEDIDO de confirmação, não significa que o paciente confirmou. O
+    // status só vira 'confirmado' quando ele responder SIM de verdade
+    // (processarConfirmacao no webhook.js cuida disso).
+    await db.from('consultas').update({lembrete_24h: new Date().toISOString()}).eq('id', consultaId);
+    c.lembrete_24h = new Date().toISOString();
     renderDaySchedule(CAL.selectedDate);
-    toast('Confirmação enviada por WhatsApp! ✓');
+    toast('Pedido de confirmação enviado! Aguardando resposta do paciente. ✓');
   } catch(e) { toast('Erro ao enviar WhatsApp','error'); }
 }
 
