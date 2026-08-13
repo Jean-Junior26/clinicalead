@@ -746,7 +746,7 @@ tbody tr:hover td { background:var(--bg-elevated); }
           <div class="page-header-actions"><button class="btn btn-primary" onclick="openNewLead()"><i class="ti ti-plus"></i> Novo lead</button></div>
         </div>
         <div class="toolbar">
-          <div class="search-box" style="max-width:300px;flex:1;"><i class="ti ti-search"></i><input type="text" placeholder="Buscar por nome ou procedimento..." oninput="renderLeads(document.getElementById('filterStatus').value,this.value)" id="searchLeads"/></div>
+          <div class="search-box" style="max-width:300px;flex:1;"><i class="ti ti-search"></i><input type="search" placeholder="Buscar por nome ou procedimento..." oninput="renderLeads(document.getElementById('filterStatus').value,this.value)" id="searchLeads" name="busca_leads_crm" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-form-type="other" data-lpignore="true"/></div>
           <select class="filter-select" id="filterStatus" onchange="renderLeads(this.value,document.getElementById('searchLeads').value)">
             <option value="all">Todos os status</option>
             <option value="novo">Novo lead</option>
@@ -826,7 +826,14 @@ tbody tr:hover td { background:var(--bg-elevated); }
           <!-- Lista de conversas -->
           <div class="inbox-sidebar">
             <div class="inbox-search">
-              <div class="search-box"><i class="ti ti-search"></i><input type="text" placeholder="Buscar conversa..." id="inboxSearch" oninput="filterInboxChats(this.value)"/></div>
+              <!-- ⚠️ CORREÇÃO 11/08: navegador confundia esse campo de busca
+              com campo de login e autopreenchia e-mail/senha salvos (caso
+              real: Uberlândia, sumia todas as conversas porque a busca
+              filtrava por esse texto errado). type="search" + autocomplete
+              com valor aleatório é o jeito mais confiável de impedir isso
+              — "off" sozinho o Chrome às vezes ignora, mas um valor
+              inesperado ele respeita. -->
+              <div class="search-box"><i class="ti ti-search"></i><input type="search" placeholder="Buscar conversa..." id="inboxSearch" name="busca_conversa_crm" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-form-type="other" data-lpignore="true" oninput="filterInboxChats(this.value)"/></div>
             </div>
             <div class="inbox-tabs">
               <button class="inbox-tab active" onclick="filterInboxTab('all',this)">Todas</button>
