@@ -25,6 +25,7 @@
     wrap.style.cssText = 'position:relative;';
     wrap.innerHTML = `
       <input type="text" id="naLeadBusca" class="form-input" autocomplete="off" data-mask-tel="1"
+        name="busca_paciente_agendamento" autocorrect="off" autocapitalize="off" spellcheck="false" data-form-type="other" data-lpignore="true"
         placeholder="Buscar paciente por nome ou número..." style="width:100%;" />
       <div id="naLeadResultados" style="display:none;position:absolute;z-index:50;left:0;right:0;top:100%;margin-top:4px;
         background:var(--bg-elevated,#18181B);border:1px solid var(--border,rgba(201,168,76,0.15));
