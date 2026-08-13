@@ -219,8 +219,8 @@ async function renderOrcamentosPage() {
     </div>
     <div style="position:relative;margin-bottom:14px;max-width:360px;">
       <i class="ti ti-search" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:15px;"></i>
-      <input type="text" id="orcBusca" class="form-input" placeholder="Buscar por nome do paciente..."
-        value="${ORCLISTA.busca || ''}" oninput="orcSetBusca(this.value)"
+      <input type="search" id="orcBusca" class="form-input" placeholder="Buscar por nome do paciente..."
+        value="${ORCLISTA.busca || ''}" name="busca_orcamentos" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-form-type="other" data-lpignore="true" oninput="orcSetBusca(this.value)"
         style="width:100%;padding:9px 12px 9px 36px;font-size:13px;"/>
       ${ORCLISTA.busca ? `<button onclick="orcSetBusca('')" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;padding:2px 6px;">×</button>` : ''}
     </div>
@@ -259,7 +259,8 @@ function orcAbrirBuscaNovo() {
           <div style="display:flex;gap:8px;margin-bottom:12px;">
             <div style="position:relative;flex:1;">
               <i class="ti ti-search" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:15px;"></i>
-              <input type="text" id="orcBuscaNovoInput" class="form-input" placeholder="Buscar paciente por nome ou telefone..."
+              <input type="search" id="orcBuscaNovoInput" class="form-input" placeholder="Buscar paciente por nome ou telefone..."
+                name="busca_paciente_novo_orcamento" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-form-type="other" data-lpignore="true"
                 oninput="orcRenderBuscaNovo(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();orcRenderBuscaNovo(this.value);}"
                 style="width:100%;padding:9px 12px 9px 36px;font-size:13px;" autofocus/>
             </div>
