@@ -551,6 +551,30 @@ module.exports = async function handler(req, res) {
     } catch (e) { return null; }
   }
 
+  // ⚠️ NOVO 14/08: acha o horário MAIS PRÓXIMO dentro da grade, quando o
+  // horário exato pedido não existe (ex: pediram 10:20 numa grade de 15
+  // em 15 minutos — não existe 10:20, mas existe 10:15 e 10:30). Caso
+  // real (Camaquã, paciente Ronaldinho): Brian prometeu um horário,
+  // tentou confirmar de verdade, a grade recusou por não bater exato, e
+  // ele só desistiu ("esse horário não atendemos") sem tentar resolver —
+  // grave, porque a equipe já tinha combinado esse horário com o
+  // paciente por mensagem manual. Agora, em vez de falhar direto, busca
+  // o horário válido mais próximo (por diferença em minutos) e usa ele.
+  function horarioMaisProximo(grade, horaAlvo) {
+    if (!Array.isArray(grade) || !grade.length) return null;
+    const paraMin = (h) => { const [hh, mm] = String(h).split(':').map(Number); return hh * 60 + mm; };
+    const alvoMin = paraMin(horaAlvo);
+    let melhor = null, menorDist = Infinity;
+    for (const h of grade) {
+      const dist = Math.abs(paraMin(h) - alvoMin);
+      if (dist < menorDist) { menorDist = dist; melhor = h; }
+    }
+    // só aceita se a diferença for razoável (até 40 minutos) — além disso
+    // é bom sinal que o dia/período pedido está mesmo errado, não vale
+    // "empurrar" pra um horário muito distante do que foi combinado
+    return (menorDist <= 40) ? melhor : null;
+  }
+
   async function brianCriarConsulta(clinic_id, lead_id, data, hora, dentista_id, telefonePaciente) {
     try {
       if (!lead_id || !data || !hora) return { ok: false, motivo: 'dados incompletos' };
@@ -571,7 +595,11 @@ module.exports = async function handler(req, res) {
         const ex = exA[0];
         if (ex.fechado !== false) return { ok: false, motivo: 'clínica fechada nesse dia (feriado/exceção)' };
         const gradeEx = Array.isArray(ex.horarios) ? ex.horarios : [];
-        if (gradeEx.length && !gradeEx.includes(hora)) return { ok: false, motivo: 'horário fora da grade especial do dia' };
+        if (gradeEx.length && !gradeEx.includes(hora)) {
+          const proximo = horarioMaisProximo(gradeEx, hora);
+          if (!proximo) return { ok: false, motivo: 'horário fora da grade especial do dia' };
+          hora = proximo;
+        }
       } else {
         const padR = await fetch(`${SUPABASE_URL}/rest/v1/agenda_padrao?clinic_id=eq.${clinic_id}&dia_semana=eq.${diaSemana}&select=horarios,ativo&limit=1`, { headers: sbHeaders });
         const padA = padR.ok ? await padR.json() : [];
@@ -579,12 +607,20 @@ module.exports = async function handler(req, res) {
           const row = padA[0];
           if (row.ativo === false) return { ok: false, motivo: 'clínica fechada nesse dia' };
           const gradeDia = Array.isArray(row.horarios) ? row.horarios : [];
-          if (gradeDia.length && !gradeDia.includes(hora)) return { ok: false, motivo: 'horário fora da grade do dia' };
+          if (gradeDia.length && !gradeDia.includes(hora)) {
+            const proximo = horarioMaisProximo(gradeDia, hora);
+            if (!proximo) return { ok: false, motivo: 'horário fora da grade do dia' };
+            hora = proximo;
+          }
         } else {
           const cfgR = await fetch(`${SUPABASE_URL}/rest/v1/agenda_config?clinic_id=eq.${clinic_id}&select=horarios&limit=1`, { headers: sbHeaders });
           const cfgA = cfgR.ok ? await cfgR.json() : [];
           const grade = (cfgA[0] && Array.isArray(cfgA[0].horarios)) ? cfgA[0].horarios : [];
-          if (grade.length && !grade.includes(hora)) return { ok: false, motivo: 'horário fora da grade' };
+          if (grade.length && !grade.includes(hora)) {
+            const proximo = horarioMaisProximo(grade, hora);
+            if (!proximo) return { ok: false, motivo: 'horário fora da grade' };
+            hora = proximo;
+          }
         }
       }
 
@@ -654,7 +690,11 @@ module.exports = async function handler(req, res) {
         method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' },
         body: JSON.stringify({ status: 'agendado' }),
       });
-      return { ok: true };
+      // ⚠️ NOVO 14/08: horaFinal informa o horário REAL usado pra criar
+      // a consulta — pode ser diferente do que foi pedido originalmente
+      // (se ajustado pro mais próximo da grade). O chamador usa isso pra
+      // avisar o paciente do horário certo, não do que ele pediu.
+      return { ok: true, horaFinal: hora };
     } catch (e) { return { ok: false, motivo: e.message }; }
   }
 
@@ -755,7 +795,7 @@ module.exports = async function handler(req, res) {
     } catch (e) { return false; }
   }
 
-  async function brianEnviarConfirmacao(instanceName, clinic_id, phone, nome, data, hora) {
+  async function brianEnviarConfirmacao(instanceName, clinic_id, phone, nome, data, hora, horaOriginalPedida) {
     try {
       let endereco = '', linkMapa = '', nomeClinica = '';
       const r = await fetch(`${SUPABASE_URL}/rest/v1/clinicas?id=eq.${clinic_id}&select=nome,endereco,link_mapa&limit=1`, { headers: sbHeaders });
@@ -770,7 +810,18 @@ module.exports = async function handler(req, res) {
       const [ano, mes, dia] = String(data).split('-');
       const dataFmt = `${dia}/${mes}`;
       const primeiroNome = (nome || '').split(' ')[0] || '';
-      let msg = `Prontinho, ${primeiroNome}! 🎉\n\nSua avaliação está *agendada* para o dia *${dataFmt}* às *${hora}*.`;
+      let msg;
+      // ⚠️ NOVO 14/08: se o horário pedido foi ajustado pro mais próximo
+      // disponível (ex: pediu 10:20, só tinha 10:15), explica isso com
+      // naturalidade em vez de simplesmente confirmar um horário
+      // diferente do que a pessoa pediu sem dizer nada — "jogo de
+      // cintura" pedido pelo Jean. Só entra nesse texto quando os dois
+      // horários realmente são diferentes.
+      if (horaOriginalPedida && horaOriginalPedida !== hora) {
+        msg = `Olha, o horário certinho das *${horaOriginalPedida}* não tinha disponível — mas consegui deixar reservado bem pertinho, às *${hora}*! 😊\n\nSua avaliação, ${primeiroNome}, está *agendada* para o dia *${dataFmt}* às *${hora}*.`;
+      } else {
+        msg = `Prontinho, ${primeiroNome}! 🎉\n\nSua avaliação está *agendada* para o dia *${dataFmt}* às *${hora}*.`;
+      }
       if (endereco) msg += `\n\n📍 *Endereço:* ${endereco}`;
       if (linkMapa) msg += `\n🗺️ *Como chegar:* ${linkMapa}`;
       msg += `\n\nQualquer coisa que precisar, é só me chamar por aqui. Até breve! 🦷💛`;
@@ -1297,7 +1348,13 @@ module.exports = async function handler(req, res) {
                       const dentistaId = await brianResolverDentista(clinic_id, campoAgendar.dentista || '');
                       const r = await brianCriarConsulta(clinic_id, lead.id, campoAgendar.data, campoAgendar.hora, dentistaId, phone);
                       if (r.ok && !r.jaAgendado) {
-                        await brianEnviarConfirmacao(instanceName, clinic_id, phone, campoAgendar.nome || lead.nome, campoAgendar.data, campoAgendar.hora);
+                        // ⚠️ NOVO 14/08: se o horário pedido não existia
+                        // na grade e foi ajustado pro mais próximo
+                        // disponível, avisa o paciente do horário REAL
+                        // confirmado — nunca confirma um horário que na
+                        // verdade não foi esse que ficou marcado.
+                        const horaConfirmada = r.horaFinal || campoAgendar.hora;
+                        await brianEnviarConfirmacao(instanceName, clinic_id, phone, campoAgendar.nome || lead.nome, campoAgendar.data, horaConfirmada, campoAgendar.hora);
                       } else if (!r.ok) {
                         // ⚠️ CORREÇÃO 06/08: antes só tratava 3 motivos específicos de
                         // falha (horário ocupado, dentista ocupado, horário no passado)
