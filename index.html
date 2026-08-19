@@ -1107,19 +1107,19 @@ tbody tr:hover td { background:var(--bg-elevated); }
         </div>
         <div class="form-group">
           <label class="form-label">Phone Number ID</label>
-          <input type="text" class="form-input" id="oficialPhoneNumberId" placeholder="Ex: 1258527277344876"/>
+          <input type="text" class="form-input" id="oficialNumeroMetaId" data-mask-tel="1" placeholder="Ex: 1258527277344876"/>
         </div>
         <div class="form-group">
           <label class="form-label">WABA ID</label>
-          <input type="text" class="form-input" id="oficialWabaId" placeholder="Ex: 1046294797757771"/>
+          <input type="text" class="form-input" id="oficialWabaId" data-mask-tel="1" placeholder="Ex: 1046294797757771"/>
         </div>
         <div class="form-group">
           <label class="form-label">App ID</label>
-          <input type="text" class="form-input" id="oficialAppId" placeholder="Ex: 2170841700506560"/>
+          <input type="text" class="form-input" id="oficialAppId" data-mask-tel="1" placeholder="Ex: 2170841700506560"/>
         </div>
         <div class="form-group">
           <label class="form-label">Token de Acesso Permanente</label>
-          <input type="password" class="form-input" id="oficialToken" placeholder="Cole o token gerado na Meta"/>
+          <input type="password" class="form-input" id="oficialToken" data-mask-tel="1" placeholder="Cole o token gerado na Meta"/>
         </div>
         <button class="btn btn-primary btn-full" id="btnSalvarOficial" onclick="salvarConexaoOficial()">✅ Salvar Conexão Oficial</button>
         <div id="waStatusOficial" style="font-size:12px;color:var(--text-secondary);margin-top:12px;text-align:center;"></div>
@@ -1142,7 +1142,7 @@ function mostrarTabConexao(qual) {
     // se a clínica já tiver dados oficiais salvos, pré-preenche (útil pra conferir/atualizar)
     const clinic = window.__waClinicAlvo;
     if (clinic) {
-      document.getElementById('oficialPhoneNumberId').value = clinic.meta_phone_number_id || '';
+      document.getElementById('oficialNumeroMetaId').value = clinic.meta_phone_number_id || '';
       document.getElementById('oficialWabaId').value = clinic.meta_waba_id || '';
       document.getElementById('oficialAppId').value = clinic.meta_app_id || '';
       // o token nunca é preenchido de volta por segurança — só mostra se já existe
@@ -1164,7 +1164,7 @@ async function salvarConexaoOficial() {
   const clinic = window.__waClinicAlvo || (typeof currentClinic === 'function' ? currentClinic() : null);
   if (!clinic) { toast('Erro: clínica não identificada', 'error'); return; }
 
-  const phoneNumberId = document.getElementById('oficialPhoneNumberId').value.trim();
+  const phoneNumberId = document.getElementById('oficialNumeroMetaId').value.trim();
   const wabaId = document.getElementById('oficialWabaId').value.trim();
   const appId = document.getElementById('oficialAppId').value.trim();
   const token = document.getElementById('oficialToken').value.trim();
