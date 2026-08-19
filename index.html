@@ -3443,7 +3443,16 @@ async function enviarAudioGravado(audioBlob) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clinic_id: clinic.id, phone: INBOX.activeChat.phone, tipo: 'audio', media_url: audioUrl, message: '' }),
       });
-      if (!respOficial.ok) throw new Error('Falha no envio via API Oficial');
+      if (!respOficial.ok) {
+        // ⚠️ CORREÇÃO 14/08: antes jogava fora o erro de verdade que a
+        // Meta devolvia, mostrando só "Falha no envio via API Oficial"
+        // sem dizer o motivo — impossível saber se era formato de
+        // áudio incompatível, token, ou outra coisa. Agora mostra o
+        // erro real (ex: código/mensagem específicos da Meta).
+        let detalhe = '';
+        try { const j = await respOficial.json(); detalhe = j?.error?.message || j?.error || JSON.stringify(j); } catch (e) { }
+        throw new Error('Falha no envio via API Oficial' + (detalhe ? `: ${detalhe}` : ''));
+      }
       console.log('Áudio enviado via API Oficial');
     } else {
       const rawPhone = INBOX.activeChat.phone.replace(/\D/g, '');
