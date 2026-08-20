@@ -3229,10 +3229,25 @@ if (tipo === 'image') {
       }
     };
     
+    // ⚠️ NOVO 14/08: antes mostrava "✓✓" fixo pra TODA mensagem enviada,
+    // sem checar se realmente foi entregue/lida. Agora usa o status real
+    // (só disponível pra clínica em API Oficial — Evolution não manda
+    // esse tipo de confirmação, então continua sem tique nenhum nesse
+    // caso, como sempre foi).
+    let tiqueHtml = '';
+    if (isSent) {
+      const st = m.status_entrega;
+      if (st === 'lido') tiqueHtml = ' <span style="color:#53BDEB;">✓✓</span>';
+      else if (st === 'entregue') tiqueHtml = ' <span style="opacity:0.6;">✓✓</span>';
+      else if (st === 'falhou') tiqueHtml = ' <span style="color:#E06055;" title="Falha no envio">⚠️</span>';
+      else if (st === 'enviado') tiqueHtml = ' <span style="opacity:0.6;">✓</span>';
+      // sem status_entrega (Evolution, ou ainda não chegou confirmação) → sem tique, como sempre foi
+    }
+
     html += `<div class="msg-row ${isSent ? 'sent' : ''}">
       <div class="msg-bubble ${isSent ? 'sent' : 'received'}">
         ${bubbleContent}
-        <div class="msg-time">${timeStr}${isSent ? ' ✓✓' : ''}</div>
+        <div class="msg-time">${timeStr}${tiqueHtml}</div>
       </div>
     </div>`;
   });
