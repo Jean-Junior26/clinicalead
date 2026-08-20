@@ -39,6 +39,37 @@ module.exports = async function handler(req, res) {
       const phoneNumberId = value?.metadata?.phone_number_id;
       const msg = value?.messages?.[0];
 
+      // ⚠️ NOVO 14/08: a Meta manda ATUALIZAÇÕES DE STATUS (enviado/
+      // entregue/lido/falhou) num campo separado (statuses), não junto
+      // de "messages" — antes esse payload chegava e era simplesmente
+      // ignorado (o comentário logo abaixo já dizia isso, mas ninguém
+      // tratava). Agora atualiza a mensagem correspondente pelo
+      // message_id, pra aparecer o statuszinho certo no Inbox.
+      const statusUpdate = value?.statuses?.[0];
+      if (statusUpdate && statusUpdate.id && phoneNumberId) {
+        try {
+          const clinicaStResp = await fetch(
+            `${SUPABASE_URL}/rest/v1/clinicas?meta_phone_number_id=eq.${phoneNumberId}&select=id&limit=1`,
+            { headers: sbHeaders }
+          );
+          const clinicaStArr = await clinicaStResp.json();
+          const clinicaSt = clinicaStArr[0];
+          if (clinicaSt) {
+            const mapaStatus = { sent: 'enviado', delivered: 'entregue', read: 'lido', failed: 'falhou' };
+            const statusTraduzido = mapaStatus[statusUpdate.status] || statusUpdate.status;
+            await fetch(
+              `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinicaSt.id}&message_id=eq.${statusUpdate.id}`,
+              {
+                method: 'PATCH',
+                headers: { ...sbHeaders, Prefer: 'return=minimal' },
+                body: JSON.stringify({ status_entrega: statusTraduzido }),
+              }
+            );
+          }
+        } catch (eStatus) { }
+        return res.status(200).json({ ok: true, status_processado: true });
+      }
+
       // sem mensagem de verdade (pode ser só um status de "entregue/lido") — ignora
       if (!msg || !phoneNumberId) return res.status(200).json({ ok: true, ignorado: 'sem mensagem de texto' });
 
