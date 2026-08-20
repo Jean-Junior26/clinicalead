@@ -170,8 +170,15 @@ export default async function handler(req, res) {
   const SUPABASE_URL = process.env.SUPABASE_URL || 'https://zcwntpkiispbhjjgidih.supabase.co';
   const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
-  const { instance, phone, message, clinic_id } = req.body;
-  if (!phone || !message) return res.status(400).json({ error: 'Campos obrigatórios: phone, message' });
+  const { instance, phone, message, clinic_id, tipo, media_url } = req.body;
+  // ⚠️ CORREÇÃO 14/08: essa checagem exigia "message" preenchido sempre —
+  // mas o envio de ÁUDIO manda message:'' de propósito (o conteúdo é o
+  // media_url, não texto). Isso barrava TODO áudio manual do Inbox antes
+  // mesmo de tentar falar com a Meta — daí o erro "Campos obrigatórios:
+  // phone, message" mesmo com tudo certo. Agora só exige "message" pro
+  // caso de texto normal; pra áudio, exige media_url no lugar.
+  const ehAudioComLink = tipo === 'audio' && media_url;
+  if (!phone || (!message && !ehAudioComLink)) return res.status(400).json({ error: 'Campos obrigatórios: phone, e message (ou media_url quando for áudio)' });
   const cleanPhone = phone.replace(/\D/g, '');
   const number = cleanPhone.length >= 12 ? cleanPhone : '55' + cleanPhone;
 
