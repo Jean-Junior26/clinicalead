@@ -3130,6 +3130,15 @@ function renderChatHeader(chat) {
         <div class="chat-header-status">${chat.phone}${chat.lead ? ' · ' + (chat.lead.procedimento || '') : ''}</div>
       </div>
       <div class="chat-header-actions">
+        <!-- ⚠️ NOVO 21/08: botão VISÍVEL de "marcar como não lida". O
+        recurso já existia desde 10/08, mas só respondia a clique direito
+        na lista de conversas (e depois toque longo) — dois atalhos
+        escondidos, que ninguém adivinha que existem. Agora fica aqui,
+        na cara, junto dos outros botões da conversa. -->
+        <button class="btn btn-sm" title="Marcar esta conversa como não lida"
+          onclick="marcarComoNaoLida(INBOX.activeChat && INBOX.activeChat.id)">
+          <i class="ti ti-mail"></i> Não lida
+        </button>
         ${chat.lead
          ? `<button class="btn btn-sm btn-primary" onclick="openEditLead('${chat.lead.id}')"><i class="ti ti-user"></i> Ver lead</button>`
           : `<button class="btn btn-sm" onclick="createLeadFromChat('${chat.id}')"><i class="ti ti-user-plus"></i> Criar lead</button>`
