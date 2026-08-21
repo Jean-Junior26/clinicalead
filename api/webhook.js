@@ -172,6 +172,10 @@ module.exports = async function handler(req, res) {
           from_me: false,
           media_url: mediaUrl,
           message_id: msg.id,
+          // ⚠️ NOVO 21/08: quando o PACIENTE responde citando uma
+          // mensagem nossa, a Meta manda o id da citada em msg.context —
+          // guardamos pra mostrar a citação no Inbox também.
+          reply_to: msg.context?.id || null,
           instance_name: phoneNumberId,
           created_at: new Date().toISOString(),
         }),
