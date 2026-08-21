@@ -308,7 +308,36 @@ function aplicarFiltroNumero() {
         // backend identifica a clínica direto e roteia certo, ignorando
         // esse valor de instância que não se aplica.
         const clinicAtual = (typeof currentClinic === 'function') ? currentClinic() : null;
-        await sendWhatsAppMessage(instancia, INBOX.activeChat.phone, text, clinicAtual?.id);
+
+        // ⚠️ NOVO 21/08: se o usuário escolheu RESPONDER uma mensagem
+        // específica, chama o backend direto passando o reply_to. Fiz
+        // assim de propósito, em vez de adicionar um parâmetro novo no
+        // sendWhatsAppMessage: essa função tem 5 versões encadeadas
+        // (wrappers de endereço, dentistas, variáveis...), e já perdemos
+        // parâmetro no meio dessa corrente antes — ia dar o mesmo
+        // problema de novo. Aqui o caminho é curto e não depende delas.
+        const respondendo = window.INBOX_RESPONDENDO;
+        if (respondendo && respondendo.id) {
+          const r = await fetch('/api/send-message', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              instance: instancia,
+              clinic_id: clinicAtual?.id,
+              phone: INBOX.activeChat.phone,
+              message: text,
+              reply_to: respondendo.id,
+            }),
+          });
+          if (!r.ok) {
+            let detalhe = '';
+            try { const j = await r.json(); detalhe = j?.error?.message || j?.error || ''; } catch (e) { }
+            throw new Error(detalhe || 'falha ao responder');
+          }
+          if (typeof cancelarResposta === 'function') cancelarResposta();
+        } else {
+          await sendWhatsAppMessage(instancia, INBOX.activeChat.phone, text, clinicAtual?.id);
+        }
         INBOX.activeChat.lastMsg = text;
         if (typeof renderInboxList === 'function') renderInboxList();
       } catch (e) {
