@@ -212,8 +212,47 @@ export default async function handler(req, res) {
       // áudio do Inbox) — quando o corpo vier com tipo:'audio' + media_url
       // (já subiu pro Storage antes de chamar aqui), manda como áudio em
       // vez de texto.
+      // ⚠️ NOVO 21/08: quando é áudio, em vez de só passar o LINK pra
+      // Meta baixar sozinha, a gente BAIXA o arquivo aqui e SOBE direto
+      // pra ela (endpoint /media), usando o media_id que ela devolve.
+      // Motivo: com link, a Meta precisa conseguir acessar a URL do
+      // Storage por fora — se o bucket não estiver 100% público (ou a
+      // Meta tiver qualquer problema pra baixar), ela aceita o pedido e
+      // só falha DEPOIS, silenciosamente, na entrega. Subindo direto,
+      // esse ponto de falha deixa de existir. Se a subida falhar por
+      // qualquer motivo, cai de volta no método antigo (link) — nunca
+      // fica pior do que era.
+      let audioMediaId = null;
+      if (req.body?.tipo === 'audio' && req.body?.media_url) {
+        try {
+          const mime = req.body?.media_mime || 'audio/mpeg';
+          const arqResp = await fetch(req.body.media_url, {
+            headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+          });
+          if (arqResp.ok) {
+            const bytes = Buffer.from(await arqResp.arrayBuffer());
+            const form = new FormData();
+            form.append('messaging_product', 'whatsapp');
+            form.append('type', mime);
+            form.append('file', new Blob([bytes], { type: mime }), mime === 'audio/mpeg' ? 'audio.mp3' : 'audio.webm');
+            const upResp = await fetch(`https://graph.facebook.com/v21.0/${clinicaInfo.meta_phone_number_id}/media`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${clinicaInfo.meta_access_token}` },
+              body: form,
+            });
+            const upData = await upResp.json().catch(() => null);
+            if (upResp.ok && upData?.id) audioMediaId = upData.id;
+            else console.error('[send-message] upload de áudio pra Meta falhou:', JSON.stringify(upData));
+          } else {
+            console.error('[send-message] não consegui baixar o áudio do Storage:', arqResp.status);
+          }
+        } catch (eUp) {
+          console.error('[send-message] erro no upload de áudio:', eUp.message);
+        }
+      }
+
       const corpoMeta = (req.body?.tipo === 'audio' && req.body?.media_url)
-        ? { messaging_product: 'whatsapp', to: number, type: 'audio', audio: { link: req.body.media_url } }
+        ? { messaging_product: 'whatsapp', to: number, type: 'audio', audio: audioMediaId ? { id: audioMediaId } : { link: req.body.media_url } }
         : { messaging_product: 'whatsapp', to: number, type: 'text', text: { body: message } };
       resp = await fetch(`https://graph.facebook.com/v21.0/${clinicaInfo.meta_phone_number_id}/messages`, {
         method: 'POST',
