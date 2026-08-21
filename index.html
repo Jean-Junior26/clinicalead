@@ -3428,6 +3428,59 @@ function pararGravacao() {
   }
 }
 
+// ⚠️ NOVO 21/08: CONVERSÃO DE ÁUDIO PRA MP3 — o navegador grava em webm,
+// formato que o Evolution engole numa boa mas que a API Oficial da Meta
+// NÃO aceita pra mensagem de áudio (ela só aceita mp3/aac/amr/mp4 e
+// ogg-opus). Por isso o áudio manual do Inbox falhava em TODA clínica
+// oficial (confirmado no Hugo e na ClinicaLead) — a Meta até aceitava o
+// pedido, mas falhava depois, na hora de processar o arquivo. Aqui a
+// gente converte pra MP3 no próprio navegador antes de subir.
+// Se a biblioteca não carregar por qualquer motivo, devolve null e o
+// envio segue com o arquivo original (mesmo comportamento de antes —
+// nunca fica PIOR do que já era).
+function carregarLame() {
+  return new Promise((resolve) => {
+    if (typeof lamejs !== 'undefined') return resolve(true);
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js';
+    s.onload = () => resolve(typeof lamejs !== 'undefined');
+    s.onerror = () => resolve(false);
+    document.head.appendChild(s);
+  });
+}
+
+async function converterAudioParaMp3(blob) {
+  try {
+    const temLame = await carregarLame();
+    if (!temLame) return null;
+    const arrayBuffer = await blob.arrayBuffer();
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+    const canal = audioBuffer.getChannelData(0); // mono já basta pra nota de voz
+    const sampleRate = audioBuffer.sampleRate;
+    const samples = new Int16Array(canal.length);
+    for (let i = 0; i < canal.length; i++) {
+      const s = Math.max(-1, Math.min(1, canal[i]));
+      samples[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    const encoder = new lamejs.Mp3Encoder(1, sampleRate, 64);
+    const blocos = [];
+    const TAM = 1152;
+    for (let i = 0; i < samples.length; i += TAM) {
+      const buf = encoder.encodeBuffer(samples.subarray(i, i + TAM));
+      if (buf.length) blocos.push(new Int8Array(buf));
+    }
+    const fim = encoder.flush();
+    if (fim.length) blocos.push(new Int8Array(fim));
+    try { ctx.close(); } catch (e) { }
+    if (!blocos.length) return null;
+    return new Blob(blocos, { type: 'audio/mpeg' });
+  } catch (e) {
+    console.warn('Conversão pra MP3 falhou, seguindo com o original:', e);
+    return null;
+  }
+}
+
 async function enviarAudioGravado(audioBlob) {
   const clinic = currentClinic();
   if (!clinic?.whatsapp_instance && clinic?.tipo_conexao_whatsapp !== 'oficial') { toast('Conecte o WhatsApp primeiro!', 'error'); return; }
@@ -3435,11 +3488,15 @@ async function enviarAudioGravado(audioBlob) {
 
   try {
     toast('Enviando áudio...');
-    // 1. Upload para Supabase Storage
-    const fileName = `audio_${Date.now()}.webm`;
+
+    // 1. Converte pra MP3 (ver comentário acima) e sobe pro Storage
+    const mp3 = await converterAudioParaMp3(audioBlob);
+    const blobFinal = mp3 || audioBlob;
+    const ehMp3 = !!mp3;
+    const fileName = `audio_${Date.now()}.${ehMp3 ? 'mp3' : 'webm'}`;
     const { data: uploadData, error: uploadError } = await db.storage
       .from('audios')
-      .upload(fileName, audioBlob, { contentType: 'audio/webm' });
+      .upload(fileName, blobFinal, { contentType: ehMp3 ? 'audio/mpeg' : 'audio/webm' });
 
     if (uploadError) throw new Error('Erro upload: ' + uploadError.message);
 
@@ -3456,7 +3513,7 @@ async function enviarAudioGravado(audioBlob) {
       const respOficial = await fetch('/api/send-message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clinic_id: clinic.id, phone: INBOX.activeChat.phone, tipo: 'audio', media_url: audioUrl, message: '' }),
+        body: JSON.stringify({ clinic_id: clinic.id, phone: INBOX.activeChat.phone, tipo: 'audio', media_url: audioUrl, media_mime: ehMp3 ? 'audio/mpeg' : 'audio/webm', message: '' }),
       });
       if (!respOficial.ok) {
         // ⚠️ CORREÇÃO 14/08: antes jogava fora o erro de verdade que a
