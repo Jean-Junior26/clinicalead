@@ -254,6 +254,12 @@ export default async function handler(req, res) {
       const corpoMeta = (req.body?.tipo === 'audio' && req.body?.media_url)
         ? { messaging_product: 'whatsapp', to: number, type: 'audio', audio: audioMediaId ? { id: audioMediaId } : { link: req.body.media_url } }
         : { messaging_product: 'whatsapp', to: number, type: 'text', text: { body: message } };
+      // ⚠️ NOVO 21/08: RESPONDER UMA MENSAGEM ESPECÍFICA — quando vem
+      // reply_to (o message_id da mensagem citada), a Meta mostra a
+      // mensagem original em cima da resposta, igualzinho ao WhatsApp
+      // normal. Se o id for inválido/antigo a Meta recusa, então isso só
+      // é adicionado quando realmente veio um reply_to.
+      if (req.body?.reply_to) corpoMeta.context = { message_id: req.body.reply_to };
       resp = await fetch(`https://graph.facebook.com/v21.0/${clinicaInfo.meta_phone_number_id}/messages`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${clinicaInfo.meta_access_token}`, 'Content-Type': 'application/json' },
@@ -265,10 +271,14 @@ export default async function handler(req, res) {
     } else {
       // ── EVOLUTION (como sempre) ──
       if (!instance) return res.status(400).json({ error: 'Campo obrigatório: instance (clínica não está em modo API Oficial)' });
+      // ⚠️ NOVO 21/08: mesma coisa pro Evolution — lá o campo se chama
+      // "quoted" e espera a chave da mensagem citada.
+      const corpoEvo = { number, text: message };
+      if (req.body?.reply_to) corpoEvo.quoted = { key: { id: req.body.reply_to } };
       resp = await fetch(`${EVO_URL}/message/sendText/${instance}`, {
         method: 'POST',
         headers: { 'apikey': EVO_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ number, text: message }),
+        body: JSON.stringify(corpoEvo),
       });
       data = await resp.json();
       if (!resp.ok) return res.status(resp.status).json(data);
