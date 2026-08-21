@@ -3138,6 +3138,15 @@ function renderChatHeader(chat) {
     </div>
     <div class="chat-messages" id="chatMessages"></div>
     <div class="chat-quick-replies" id="chatQuickReplies"></div>
+    <!-- ⚠️ NOVO 21/08: barra de "respondendo a uma mensagem específica" —
+    fica escondida até você escolher uma mensagem pra responder. -->
+    <div id="barraRespondendo" style="display:none;padding:8px 12px;background:var(--bg-elevated,#18181B);border-left:3px solid var(--gold,#C9A84C);margin:0 12px 6px;border-radius:8px;align-items:center;gap:10px;">
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:11px;color:var(--gold,#C9A84C);font-weight:600;">Respondendo</div>
+        <div id="barraRespondendoTexto" style="font-size:12px;color:var(--text-secondary,#A1A1AA);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+      </div>
+      <button onclick="cancelarResposta()" style="background:none;border:none;color:var(--text-muted,#71717A);cursor:pointer;font-size:18px;line-height:1;padding:4px;">&times;</button>
+    </div>
     <div class="chat-input-area">
       <div class="chat-input-row">
         <textarea class="chat-input" id="chatInput" placeholder="Digite uma mensagem..." rows="1"
@@ -3159,6 +3168,67 @@ function renderChatHeader(chat) {
   renderMessages(chat.messages, chat);
   renderQuickReplies(chat);
 }
+
+// ⚠️ NOVO 21/08: estado de "estou respondendo a esta mensagem".
+// Guardado fora do INBOX pra não ser sobrescrito quando o Realtime
+// recarrega as conversas no meio da digitação.
+window.INBOX_RESPONDENDO = null;
+
+function responderMensagem(messageId, preview) {
+  window.INBOX_RESPONDENDO = { id: messageId, preview: preview || '' };
+  const barra = document.getElementById('barraRespondendo');
+  const txt = document.getElementById('barraRespondendoTexto');
+  if (txt) txt.textContent = preview || '(mídia)';
+  if (barra) barra.style.display = 'flex';
+  const input = document.getElementById('chatInput');
+  if (input) input.focus();
+}
+
+function cancelarResposta() {
+  window.INBOX_RESPONDENDO = null;
+  const barra = document.getElementById('barraRespondendo');
+  if (barra) barra.style.display = 'none';
+}
+
+// ⚠️ NOVO 21/08: TOQUE LONGO pra celular/tablet. O menu de contexto da
+// conversa (que tem o "Marcar como não lida") só respondia a CLIQUE
+// DIREITO — que simplesmente não existe em touch, então o recurso era
+// invisível pra quem usa no celular. Mesma coisa pro botão de responder
+// mensagem, que aparece no hover (também inexistente em touch).
+(function ativarToqueLongo() {
+  let timer = null;
+  let alvoInicial = null;
+
+  document.addEventListener('touchstart', (ev) => {
+    const itemConversa = ev.target.closest?.('.inbox-item');
+    const bolha = ev.target.closest?.('.msg-row');
+    if (!itemConversa && !bolha) return;
+    alvoInicial = ev.target;
+    timer = setTimeout(() => {
+      timer = null;
+      if (itemConversa) {
+        const onclick = itemConversa.getAttribute('oncontextmenu') || '';
+        const m = onclick.match(/mostrarMenuInbox\(event,\s*'([^']+)'\)/);
+        const toque = ev.touches?.[0];
+        if (m && typeof mostrarMenuInbox === 'function') {
+          mostrarMenuInbox({
+            preventDefault: () => {},
+            clientX: toque ? toque.clientX : 40,
+            clientY: toque ? toque.clientY : 120,
+          }, m[1]);
+        }
+      } else if (bolha) {
+        const btn = bolha.querySelector('.btn-responder-msg');
+        if (btn) btn.click();
+      }
+    }, 550);
+  }, { passive: true });
+
+  const cancelar = () => { if (timer) { clearTimeout(timer); timer = null; } alvoInicial = null; };
+  document.addEventListener('touchend', cancelar, { passive: true });
+  document.addEventListener('touchmove', cancelar, { passive: true });
+  document.addEventListener('touchcancel', cancelar, { passive: true });
+})();
 
 function renderMessages(msgs, chat) {
   const el = document.getElementById('chatMessages');
@@ -3244,8 +3314,22 @@ if (tipo === 'image') {
       // sem status_entrega (Evolution, ou ainda não chegou confirmação) → sem tique, como sempre foi
     }
 
-    html += `<div class="msg-row ${isSent ? 'sent' : ''}">
-      <div class="msg-bubble ${isSent ? 'sent' : 'received'}">
+    // ⚠️ NOVO 21/08: botãozinho de RESPONDER em cada mensagem — só
+    // aparece quando a mensagem tem message_id de verdade (o WhatsApp
+    // precisa desse id pra saber qual mensagem está sendo citada;
+    // mensagens antigas sem esse id não podem ser respondidas).
+    const previewResp = String(m.content || (m.type === 'audio' ? '🎵 Áudio' : '📎 Mídia'))
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;').slice(0, 120);
+    const btnResponder = m.message_id
+      ? `<button class="btn-responder-msg" title="Responder esta mensagem"
+           onclick="responderMensagem('${m.message_id}', '${previewResp}')"
+           style="position:absolute;top:2px;${isSent ? 'left:-26px' : 'right:-26px'};background:var(--bg-elevated,#18181B);border:1px solid var(--border-subtle,#2a2a2a);border-radius:50%;width:22px;height:22px;cursor:pointer;opacity:0;transition:opacity .15s;color:var(--text-secondary,#A1A1AA);font-size:11px;line-height:1;padding:0;">↩</button>`
+      : '';
+
+    html += `<div class="msg-row ${isSent ? 'sent' : ''}" onmouseover="this.querySelector('.btn-responder-msg')&&(this.querySelector('.btn-responder-msg').style.opacity='1')" onmouseout="this.querySelector('.btn-responder-msg')&&(this.querySelector('.btn-responder-msg').style.opacity='0')">
+      <div class="msg-bubble ${isSent ? 'sent' : 'received'}" style="position:relative;">
+        ${btnResponder}
         ${bubbleContent}
         <div class="msg-time">${timeStr}${tiqueHtml}</div>
       </div>
