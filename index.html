@@ -3240,6 +3240,10 @@ function renderMessages(msgs, chat) {
   }
 
   const sorted = [...msgs].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  // ⚠️ NOVO 21/08: índice por message_id, pra conseguir achar a mensagem
+  // CITADA quando uma resposta for desenhada (ver bloco "citacaoHtml").
+  const porMessageId = {};
+  sorted.forEach(x => { if (x.message_id) porMessageId[x.message_id] = x; });
   let html = '';
   let lastDate = '';
 
@@ -3327,9 +3331,30 @@ if (tipo === 'image') {
            style="position:absolute;top:2px;${isSent ? 'left:-26px' : 'right:-26px'};background:var(--bg-elevated,#18181B);border:1px solid var(--border-subtle,#2a2a2a);border-radius:50%;width:22px;height:22px;cursor:pointer;opacity:0;transition:opacity .15s;color:var(--text-secondary,#A1A1AA);font-size:11px;line-height:1;padding:0;">↩</button>`
       : '';
 
+    // ⚠️ NOVO 21/08: se esta mensagem responde outra, desenha a citação
+    // em cima dela — igual o WhatsApp. Se a mensagem citada não estiver
+    // carregada na tela (conversa muito longa, citada é antiga demais),
+    // mostra um aviso curto em vez de sumir com a citação.
+    let citacaoHtml = '';
+    if (m.reply_to) {
+      const orig = porMessageId[m.reply_to];
+      const rotulo = orig
+        ? (orig.from_me ? 'Você' : (chat?.name || 'Paciente'))
+        : '';
+      const trechoCitado = orig
+        ? String(orig.content || (orig.type === 'audio' ? '🎵 Áudio' : '📎 Mídia'))
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').slice(0, 90)
+        : 'mensagem anterior';
+      citacaoHtml = `<div style="border-left:3px solid var(--gold,#C9A84C);padding:4px 8px;margin-bottom:5px;background:rgba(255,255,255,0.06);border-radius:6px;font-size:11.5px;line-height:1.35;">
+        ${rotulo ? `<div style="color:var(--gold,#C9A84C);font-weight:600;">${rotulo}</div>` : ''}
+        <div style="opacity:0.75;">${trechoCitado}</div>
+      </div>`;
+    }
+
     html += `<div class="msg-row ${isSent ? 'sent' : ''}" onmouseover="this.querySelector('.btn-responder-msg')&&(this.querySelector('.btn-responder-msg').style.opacity='1')" onmouseout="this.querySelector('.btn-responder-msg')&&(this.querySelector('.btn-responder-msg').style.opacity='0')">
       <div class="msg-bubble ${isSent ? 'sent' : 'received'}" style="position:relative;">
         ${btnResponder}
+        ${citacaoHtml}
         ${bubbleContent}
         <div class="msg-time">${timeStr}${tiqueHtml}</div>
       </div>
