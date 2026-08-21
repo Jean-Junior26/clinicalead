@@ -14,6 +14,20 @@ let INBOXNUM = { lista: [], ativa: 'todos' };
 function instalarLoadInbox() {
   if (typeof loadInboxChats !== 'function' || typeof currentClinic !== 'function') return false;
 
+  // ⚠️ NOVO 21/08: só devolve um nome quando ele serve pra EXIBIR como
+  // nome do contato. Ignora (a) mensagens nossas — o contact_name delas
+  // é marcador interno, não nome de pessoa — e (b) os marcadores
+  // automáticos, mesmo que por algum motivo venham numa mensagem
+  // recebida. Sem isso, conversa cujo último evento foi automático
+  // aparecia no Inbox chamada "BRIAN_AUTO"/"BRIAN_FOLLOWUP".
+  const MARCADORES_INTERNOS = ['BRIAN_AUTO', 'BRIAN_FOLLOWUP'];
+  function nomeExibivelDaMsg(msg) {
+    if (!msg || msg.from_me) return null;
+    const n = String(msg.contact_name || '').trim();
+    if (!n || MARCADORES_INTERNOS.includes(n)) return null;
+    return n;
+  }
+
   loadInboxChats = async function () {
     const clinic = currentClinic();
     if (!clinic) return;
@@ -69,10 +83,27 @@ function instalarLoadInbox() {
             id: chave,            // id único por telefone (+número, se aplicável)
             phone,                // telefone completo da mensagem mais recente (msgs vêm ordenadas desc) — usado pra exibir e responder
             instance_name: inst,  // de qual número é essa conversa
-            name: m.contact_name || lead?.nome || phone,
+            // ⚠️ CORREÇÃO 21/08: antes era `m.contact_name || lead?.nome`.
+            // Como as mensagens vêm ordenadas da mais NOVA pra mais velha,
+            // "m" aqui é a mensagem mais recente — e se a última mensagem
+            // foi automática (follow-up, lembrete, Brian), o contact_name
+            // dela é um MARCADOR INTERNO ("BRIAN_AUTO"/"BRIAN_FOLLOWUP"),
+            // não o nome de ninguém. Resultado: a conversa aparecia no
+            // Inbox chamada "Brian", como se ele fosse o contato — bem
+            // visível em follow-up disparado pra lead sem histórico, onde
+            // essa era a ÚNICA mensagem da conversa. Agora o nome do LEAD
+            // vem primeiro, e contact_name só é aceito quando veio de uma
+            // mensagem do próprio paciente (nunca de mensagem nossa).
+            name: lead?.nome || nomeExibivelDaMsg(m) || phone,
             lastMsg: '', time: new Date(m.created_at),
             unread: 0, lead, messages: [],
           };
+        }
+        // se ainda não temos um nome de verdade, tenta achar numa mensagem
+        // mais antiga que o paciente tenha mandado (o nome do WhatsApp dele)
+        if (chatMap[chave].name === phone) {
+          const nomeReal = nomeExibivelDaMsg(m);
+          if (nomeReal) chatMap[chave].name = nomeReal;
         }
         chatMap[chave].messages.push(m);
         if (!m.from_me && !m.read_at) chatMap[chave].unread++;
