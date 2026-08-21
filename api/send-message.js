@@ -324,6 +324,11 @@ export default async function handler(req, res) {
             type: 'text',
             from_me: true,
             message_id: messageId,
+            // ⚠️ NOVO 21/08: registra qual mensagem estava sendo citada,
+            // pra o Inbox conseguir DESENHAR a citação em cima da bolha
+            // (igual o WhatsApp). Sem isso, a resposta ia citada certinho
+            // pro paciente, mas dentro do CRM parecia mensagem solta.
+            reply_to: req.body?.reply_to || null,
             instance_name: instance,
             read_at: new Date().toISOString(),
             created_at: new Date().toISOString(),
