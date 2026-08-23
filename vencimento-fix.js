@@ -105,7 +105,16 @@
       const { data: clinicas } = await database.from('clinicas').select('id, nome');
       const mapa = {}; (clinicas || []).forEach(c => mapa[c.id] = c.nome);
       (saldos || []).forEach(s => {
-        if (!s.vence_em) return;
+        // ⚠️ NOVO 23/08: clínica SEM data de vencimento era simplesmente
+        // ignorada aqui (`if (!s.vence_em) return;`) — ficava invisível
+        // nos dois lados: nem o cliente via o aviso de vencimento, nem
+        // você via ela nesta lista. Caso real: Camaquã e Elaíde ficaram
+        // assim sem ninguém perceber. Agora ela aparece no topo, como
+        // pendência de cadastro, em vez de sumir caladinha.
+        if (!s.vence_em) {
+          linhas.push({ nome: mapa[s.clinic_id] || s.clinic_id, clinic_id: s.clinic_id, dias: -99999, vence_em: null, semData: true });
+          return;
+        }
         const dias = diasAte(s.vence_em);
         // mostra os que vencem em até 5 dias ou já venceram (e não estão pagos)
         if (s.pagamento_status !== 'pago' && dias !== null && dias <= 5) {
@@ -123,6 +132,12 @@
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px;';
     const corpo = linhas.length
       ? linhas.map(l => {
+          // linha especial: clínica sem data de vencimento cadastrada
+          if (l.semData) {
+            return `<div style="display:flex;justify-content:space-between;align-items:center;padding:12px;border-radius:9px;background:var(--bg-base,#0A0A0B);margin-bottom:8px;border-left:3px solid #C0624A;">
+              <div><b>${l.nome}</b><div style="font-size:12px;color:#C0624A;">⚠️ Sem data de vencimento cadastrada — esta clínica não recebe aviso nenhum</div></div>
+            </div>`;
+          }
           const venc = l.dias < 0;
           const txt = venc ? `Venceu há ${Math.abs(l.dias)} dia(s)` : (l.dias === 0 ? 'Vence hoje' : `Vence em ${l.dias} dia(s)`);
           return `<div style="display:flex;justify-content:space-between;align-items:center;padding:12px;border-radius:9px;background:var(--bg-base,#0A0A0B);margin-bottom:8px;border-left:3px solid ${venc ? '#C0624A' : '#C9A84C'};">
