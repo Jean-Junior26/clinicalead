@@ -14,6 +14,77 @@ let INBOXNUM = { lista: [], ativa: 'todos' };
 function instalarLoadInbox() {
   if (typeof loadInboxChats !== 'function' || typeof currentClinic !== 'function') return false;
 
+  // ⚠️ NOVO 25/08: busca paginada. O Supabase devolve no máximo 1.000
+  // linhas por requisição, então qualquer `.limit()` maior que isso era
+  // silenciosamente ignorado. Aqui a gente pede de mil em mil até
+  // juntar o que precisa (ou até acabarem as mensagens).
+  async function buscarMensagensPaginado(montarQuery, alvo) {
+    const TAM = 1000;
+    let todas = [];
+    let inicio = 0;
+    while (todas.length < alvo) {
+      const { data, error } = await montarQuery(inicio, inicio + TAM - 1);
+      if (error) throw error;
+      const lote = data || [];
+      todas = todas.concat(lote);
+      if (lote.length < TAM) break;   // acabou de verdade
+      inicio += TAM;
+    }
+    return todas;
+  }
+
+  // ⚠️ NOVO 25/08: ao abrir uma conversa, busca o histórico COMPLETO
+  // daquele telefone — sem limite. É barato porque filtra por um número
+  // só, e garante que conversa antiga nunca fique inacessível, mesmo em
+  // clínica com dezenas de milhares de mensagens (caso da API Oficial,
+  // onde o CRM é o ÚNICO lugar que guarda o histórico — não tem cópia
+  // no celular como no WhatsApp comum).
+  async function carregarHistoricoCompleto(chat) {
+    const clinic = currentClinic();
+    if (!clinic || !chat?.phone) return;
+    const sufixo = String(chat.phone).replace(/\D/g, '').slice(-8);
+    if (sufixo.length < 8) return;
+    try {
+      const todas = await buscarMensagensPaginado(
+        (i, f) => db.from('mensagens').select('*')
+          .eq('clinic_id', clinic.id)
+          .ilike('phone', `%${sufixo}`)
+          .order('created_at', { ascending: false })
+          .range(i, f),
+        100000
+      );
+      if (!todas.length) return;
+      // junta com o que já estava carregado, sem duplicar
+      const vistos = new Set();
+      const juntas = [];
+      [...todas, ...(chat.messages || [])].forEach(m => {
+        if (m && m.id && !vistos.has(m.id)) { vistos.add(m.id); juntas.push(m); }
+      });
+      juntas.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      chat.messages = juntas;
+      // só redesenha se essa ainda for a conversa aberta
+      if (INBOX.activeChat && INBOX.activeChat.id === chat.id && typeof renderMessages === 'function') {
+        renderMessages(chat.messages, chat);
+      }
+    } catch (e) {
+      console.warn('Não consegui carregar o histórico completo:', e);
+    }
+  }
+
+  // pendura no openChat existente, sem reescrever ele
+  if (typeof openChat === 'function' && !openChat.__historicoCompleto) {
+    const _openChatOriginal = openChat;
+    openChat = function (chatId) {
+      const r = _openChatOriginal.apply(this, arguments);
+      try {
+        const chat = INBOX.chats.find(c => c.id === chatId);
+        if (chat) carregarHistoricoCompleto(chat);
+      } catch (e) { }
+      return r;
+    };
+    openChat.__historicoCompleto = true;
+  }
+
   // ⚠️ NOVO 21/08: só devolve um nome quando ele serve pra EXIBIR como
   // nome do contato. Ignora (a) mensagens nossas — o contact_name delas
   // é marcador interno, não nome de pessoa — e (b) os marcadores
@@ -38,12 +109,23 @@ function instalarLoadInbox() {
       // não porque os dados foram apagados, mas porque simplesmente não
       // entravam nas 500 mais recentes buscadas. Isso causava o "não há
       // conversa com este paciente" mesmo com a conversa existindo.
-      const { data: msgs, error } = await db
-        .from('mensagens').select('*')
-        .eq('clinic_id', clinic.id)
-        .order('created_at', { ascending: false })
-        .limit(8000);
-      if (error) throw error;
+      // ⚠️ CORREÇÃO DE RAIZ 25/08: o ajuste de 12/07 (subir 500 → 8000)
+      // era um remendo — só empurrava o problema pra frente, e com o
+      // volume crescendo ele voltou. Pior: o Supabase corta a resposta
+      // em 1.000 linhas por padrão, então na prática o `.limit(8000)`
+      // nem estava sendo respeitado de verdade. Agora busca PAGINADO,
+      // de mil em mil, até completar o alvo — e, mais importante, ao
+      // ABRIR uma conversa o histórico COMPLETO dela é carregado sob
+      // demanda (ver o wrapper de openChat mais abaixo). Ou seja:
+      // nenhuma conversa fica inalcançável, por mais antiga que seja.
+      // Nada nunca foi apagado do banco — era só carregamento.
+      const msgs = await buscarMensagensPaginado(
+        (inicio, fim) => db.from('mensagens').select('*')
+          .eq('clinic_id', clinic.id)
+          .order('created_at', { ascending: false })
+          .range(inicio, fim),
+        8000
+      );
 
       // Descobre o número principal (pra mensagens sem instance_name)
       const principal = clinic.whatsapp_instance || null;
