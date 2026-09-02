@@ -96,6 +96,34 @@ module.exports = async function handler(req, res) {
         if (jaVistoArr.length) return res.status(200).json({ ok: true, ignorado: 'mensagem duplicada (message_id já processado)' });
       }
 
+      // ⚠️ NOVO 02/09: TRAVA CONTRA RESPOSTA DUPLICADA EM SEQUÊNCIA.
+      // A trava acima só pega o MESMO id chegando duas vezes. Mas quando
+      // a pessoa manda DUAS mensagens diferentes com poucos segundos de
+      // diferença (super comum: "Sexta às 9h" + "Será online?"), as duas
+      // eram processadas em paralelo e o Brian respondia DUAS vezes — e,
+      // pior, cada resposta podia trazer um [[AGENDAR]] próprio, criando
+      // DOIS agendamentos em datas diferentes. Aconteceu no teste com o
+      // Pablo (02/09): saíram 3 mensagens em 1 segundo e 2 consultas.
+      // Agora: se já existe uma mensagem MAIS NOVA desse contato, esta
+      // aqui é abandonada — a mais nova responde por todas, com o
+      // contexto completo (ela enxerga as duas no histórico).
+      if (msg?.timestamp) {
+        try {
+          const tsAtual = new Date(Number(msg.timestamp) * 1000).toISOString();
+          const sufixoSeq = String(msg.from || '').replace(/\D/g, '').slice(-8);
+          if (sufixoSeq.length === 8) {
+            const maisNovaResp = await fetch(
+              `${SUPABASE_URL}/rest/v1/mensagens?phone=ilike.*${sufixoSeq}&from_me=eq.false&created_at=gt.${tsAtual}&select=id&limit=1`,
+              { headers: sbHeaders }
+            );
+            const maisNovaArr = maisNovaResp.ok ? await maisNovaResp.json() : [];
+            if (maisNovaArr.length) {
+              return res.status(200).json({ ok: true, ignorado: 'chegou mensagem mais nova — ela responde por esta' });
+            }
+          }
+        } catch (eSeq) { }
+      }
+
       // acha a clínica pelo phone_number_id (já traz o token, precisamos
       // dele agora pra baixar mídia e pra eventualmente responder)
       const clinicaResp = await fetch(
@@ -845,6 +873,27 @@ module.exports = async function handler(req, res) {
       const [ano, mes, dia] = String(data).split('-');
       const dataFmt = `${dia}/${mes}`;
       const primeiroNome = (nome || '').split(' ')[0] || '';
+
+      // ⚠️ NOVO 02/09: a clínica de PROSPECÇÃO (ClinicaLead — venda B2B
+      // pra dono de clínica) agenda REUNIÃO ONLINE, não avaliação
+      // odontológica. Até agora ela usava a mesma mensagem das clínicas:
+      // dizia "sua avaliação está agendada", mandava ENDEREÇO e link do
+      // Google Maps de Araguari, e fechava com 🦷 — tudo errado pra uma
+      // call comercial. Caso real: teste com o Pablo (02/09) recebeu
+      // "avaliação agendada" + mapa da rua da clínica pra uma reunião
+      // que era por vídeo. Agora tem mensagem própria, avisando que o
+      // LINK da reunião chega minutos antes.
+      const CLINIC_ID_PROSPECCAO = 'b34a2f2f-fad9-4e4a-b898-45c4c2516dcf';
+      if (clinic_id === CLINIC_ID_PROSPECCAO) {
+        let msgB2B = (horaOriginalPedida && horaOriginalPedida !== hora)
+          ? `Olha, o horário das *${horaOriginalPedida}* não estava livre — mas consegui bem pertinho, às *${hora}*! 😊\n\nNossa conversa, ${primeiroNome}, está *confirmada* para *${dataFmt}* às *${hora}*.`
+          : `Prontinho, ${primeiroNome}! 🎉\n\nNossa conversa está *confirmada* para *${dataFmt}* às *${hora}*.`;
+        msgB2B += `\n\n💻 É uma reunião *online*, de uns 15 minutos.\n🔗 Alguns minutos antes eu te mando o *link da reunião* aqui mesmo — é só clicar na hora.`;
+        msgB2B += `\n\nSe precisar remarcar, é só me chamar por aqui. Até lá! 🤝`;
+        await responderPaciente(instanceName, clinic_id, phone, msgB2B, 'BRIAN_AUTO');
+        return;
+      }
+
       let msg;
       // ⚠️ NOVO 14/08: se o horário pedido foi ajustado pro mais próximo
       // disponível (ex: pediu 10:20, só tinha 10:15), explica isso com
