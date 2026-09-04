@@ -285,6 +285,29 @@ function tarefasGerar() {
     });
   });
 
+  // 🔴 3b. Lead INSISTIU em saber preço — Brian repassou pra equipe
+  // ⚠️ NOVO 03/09: só aparece nas clínicas que configuraram esse fluxo
+  // (o Brian só marca isso se o contexto DELA mandar). Clínica que não
+  // usa, nunca vê essa tarefa.
+  leads
+    .filter(l => l.preco_solicitado === true)
+    .forEach(l => {
+      const quando = l.preco_solicitado_em
+        ? Math.floor((agora - new Date(l.preco_solicitado_em).getTime()) / 3600000)
+        : null;
+      const tempo = (quando !== null)
+        ? (quando < 1 ? ' (há menos de 1h)' : ` (há ${quando}h)`)
+        : '';
+      tarefas.push({
+        chave: `preco:${l.id}`,
+        prio: 1,
+        icon: 'ti-cash',
+        titulo: `💰 ${l.nome || 'Lead'} quer saber o preço`,
+        desc: `Insistiu no valor${l.preco_procedimento ? ' de ' + l.preco_procedimento : ''}${tempo} — o Brian avisou que um especialista retorna. Ligue ou responda com o valor.`,
+        telefone: l.telefone || null,
+      });
+    });
+
   // 🟡 4. Recuperar faltas (últimos 7 dias)
   TAREFAS.consultas
     .filter(c => c.status === 'faltou' && c.data <= hoje)
