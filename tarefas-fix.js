@@ -37,6 +37,26 @@ async function tarefasCarregarDados() {
     .lte('data', tDiasFrente(2));
   TAREFAS.consultas = cons || [];
 
+  // ⚠️ CORREÇÃO 03/09: BURACO SÉRIO nas tarefas de remarcar/cancelar.
+  // A consulta acima só pega de -7 a +2 dias. Só que pedido de
+  // REMARCAR ou CANCELAR quase sempre é pra consulta MAIS DISTANTE
+  // ("não vou poder na semana que vem") — essas ficavam FORA da
+  // janela, então o paciente pedia, o sistema marcava a flag no banco
+  // certinho... e nenhuma tarefa aparecia pra equipe. O horário ficava
+  // preso e ninguém sabia. Agora busca à parte TODA consulta marcada
+  // com pedido de remarcar/cancelar, sem limite de data pra frente.
+  try {
+    const { data: pedidos } = await db.from('consultas')
+      .select('*')
+      .eq('clinic_id', clinic.id)
+      .gte('data', tDiasAtras(7))
+      .or('remarcar_solicitado.eq.true,cancelar_solicitado.eq.true');
+    if (pedidos && pedidos.length) {
+      const jaTem = new Set(TAREFAS.consultas.map(c => c.id));
+      pedidos.forEach(p => { if (!jaTem.has(p.id)) TAREFAS.consultas.push(p); });
+    }
+  } catch (ePed) { console.warn('[tarefas] falha ao buscar pedidos de remarcar/cancelar:', ePed); }
+
   // Tarefas já resolvidas/adiadas
   const { data: res } = await db.from('tarefas_resolvidas')
     .select('tarefa_chave, adiada_ate')
