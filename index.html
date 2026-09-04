@@ -3025,7 +3025,9 @@ function renderInboxList() {
     // Sem foto salva, cai automaticamente nas iniciais de sempre.
     const fotoUrl = c.lead?.foto_perfil_url;
     const avatarHtml = fotoUrl
-      ? `<img src="${fotoUrl}" class="inbox-avatar" style="object-fit:cover;" onerror="this.outerHTML='<div class=&quot;inbox-avatar&quot;>${ini}</div>'"/>`
+      ? `<img src="${fotoUrl}" class="inbox-avatar" style="object-fit:cover;" title="Ver foto"
+           onclick="event.stopPropagation(); abrirFotoPerfil('${fotoUrl}', '${String(c.name).replace(/'/g, "\\'")}')"
+           onerror="this.outerHTML='<div class=&quot;inbox-avatar&quot;>${ini}</div>'"/>`
       : `<div class="inbox-avatar">${ini}</div>`;
     return `<div class="inbox-item ${isActive ? 'active' : ''} ${c.lead ? 'is-lead' : ''}" onclick="openChat('${c.id}')" oncontextmenu="return mostrarMenuInbox(event, '${c.id}')">
       ${avatarHtml}
@@ -3148,9 +3150,19 @@ async function openChat(chatId) {
 
 function renderChatHeader(chat) {
   const ini = chat.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+  // ⚠️ NOVO 04/09: foto de perfil no CABEÇALHO também. A lista lateral
+  // já mostrava foto desde 01/08, mas aqui em cima continuava só com as
+  // iniciais — clicando na conversa a foto sumia, o que ficava estranho.
+  // Clicar na foto abre ela ampliada, igual no WhatsApp.
+  const fotoCab = chat.lead?.foto_perfil_url;
+  const avatarCab = fotoCab
+    ? `<img src="${fotoCab}" class="chat-header-avatar" style="object-fit:cover;cursor:pointer;" title="Ver foto"
+         onclick="abrirFotoPerfil('${fotoCab}', '${String(chat.name).replace(/'/g, "\\'")}')"
+         onerror="this.outerHTML='<div class=&quot;chat-header-avatar&quot;>${ini}</div>'"/>`
+    : `<div class="chat-header-avatar">${ini}</div>`;
   document.getElementById('inboxChat').innerHTML = `
     <div class="chat-header">
-      <div class="chat-header-avatar">${ini}</div>
+      ${avatarCab}
       <div class="chat-header-info">
         <div class="chat-header-name">${chat.name} ${chat.lead ? '<span class="inbox-lead-badge">LEAD</span>' : ''}</div>
         <div class="chat-header-status">${chat.phone}${chat.lead ? ' · ' + (chat.lead.procedimento || '') : ''}</div>
@@ -3216,6 +3228,25 @@ window.INBOX_RESPONDENDO = null;
 // ⚠️ NOVO 03/09: liga/desliga o modo compacto do Inbox na mão. A
 // preferência fica salva no navegador de quem clicou — cada pessoa da
 // equipe escolhe o que funciona melhor na tela dela, sem afetar ninguém.
+// ⚠️ NOVO 04/09: abre a foto de perfil ampliada, igual o WhatsApp.
+// Fecha clicando em qualquer lugar ou apertando Esc.
+function abrirFotoPerfil(url, nome) {
+  if (!url) return;
+  document.getElementById('visorFotoPerfil')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'visorFotoPerfil';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;cursor:zoom-out;';
+  ov.innerHTML = `
+    <img src="${url}" style="max-width:82vw;max-height:72vh;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,0.5);"/>
+    <div style="color:#fff;font-size:15px;font-weight:500;">${nome || ''}</div>
+    <div style="color:rgba(255,255,255,0.5);font-size:12px;">Toque em qualquer lugar para fechar</div>`;
+  const fechar = () => { ov.remove(); document.removeEventListener('keydown', onEsc); };
+  const onEsc = (e) => { if (e.key === 'Escape') fechar(); };
+  ov.onclick = fechar;
+  document.addEventListener('keydown', onEsc);
+  document.body.appendChild(ov);
+}
+
 function alternarInboxCompacto() {
   const ativo = document.body.classList.toggle('inbox-compacto');
   try { window.localStorage.setItem('inboxCompacto', ativo ? '1' : '0'); } catch (e) { }
