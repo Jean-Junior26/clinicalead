@@ -1241,6 +1241,39 @@ module.exports = async function handler(req, res) {
                   // visível pra equipe confirmar e liberar o horário pra
                   // outro paciente (não cancela sozinho, de propósito —
                   // cancelamento definitivo passa por confirmação humana).
+                  // ⚠️ NOVO 03/09: marcador [[PRECO]] — quando o lead
+                  // INSISTE em saber preço e o Brian repassa pra equipe.
+                  // Gera uma tarefa pra alguém retornar com o valor.
+                  // Só entra em ação se o prompt/contexto DAQUELA clínica
+                  // mandar o Brian usar — clínica que não configurar isso
+                  // segue exatamente como antes (o marcador nunca aparece).
+                  const mPreco = String(textoResposta).match(/\[\[PRECO(?:\|procedimento=([^\]]*))?\]\]/i);
+                  if (mPreco) {
+                    const procPreco = (mPreco[1] || '').trim();
+                    textoResposta = String(textoResposta).replace(/\s*\[\[PRECO(?:\|[^\]]*)?\]\]\s*/i, ' ').trim();
+                    try {
+                      const sufPreco = String(phone).replace(/\D/g, '').slice(-8);
+                      const lResp = await fetch(
+                        `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinic_id}&telefone=ilike.*${sufPreco}&select=id&limit=1`,
+                        { headers: sbHeaders }
+                      );
+                      const lArr = lResp.ok ? await lResp.json() : [];
+                      const leadIdPreco = lArr[0]?.id;
+                      if (leadIdPreco) {
+                        // grava a pendência no lead — a tela de Tarefas lê daqui
+                        await fetch(`${SUPABASE_URL}/rest/v1/leads?id=eq.${leadIdPreco}`, {
+                          method: 'PATCH',
+                          headers: { ...sbHeaders, Prefer: 'return=minimal' },
+                          body: JSON.stringify({
+                            preco_solicitado: true,
+                            preco_solicitado_em: new Date().toISOString(),
+                            preco_procedimento: procPreco || null,
+                          }),
+                        });
+                      }
+                    } catch (ePreco) { }
+                  }
+
                   const mCancelar = /\[\[CANCELAR\]\]/i.test(textoResposta);
                   if (mCancelar) {
                     textoResposta = String(textoResposta).replace(/\s*\[\[CANCELAR\]\]\s*/i, ' ').trim();
