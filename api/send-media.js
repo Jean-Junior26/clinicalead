@@ -76,9 +76,32 @@ export default async function handler(req, res) {
     if (ehOficial) {
       if (!media_url) return res.status(500).json({ error: 'Falha ao subir mídia pro Storage (necessário pra API Oficial)' });
       const tipoMeta = tipo === 'sticker' ? 'sticker' : (tipo === 'document' ? 'document' : tipo); // image | video | sticker | document
+      // ⚠️ NOVO 09/09: sobe o arquivo DIRETO pra Meta (media_id) em vez de
+      // mandar só o link. Mesma correção aplicada no envio de casos do
+      // Brian — com link, a Meta precisa baixar do nosso Storage por fora,
+      // e quando não consegue a mensagem falha silenciosamente (causa das
+      // falhas intermitentes de Uberlândia). Se o upload falhar, cai de
+      // volta no link, exatamente como era antes.
+      let midiaId = null;
+      try {
+        const form = new FormData();
+        form.append('messaging_product', 'whatsapp');
+        form.append('type', mimetype);
+        form.append('file', new Blob([binary], { type: mimetype }), fileName || fname);
+        const up = await fetch(`https://graph.facebook.com/v21.0/${clinicaInfo.meta_phone_number_id}/media`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${clinicaInfo.meta_access_token}` },
+          body: form,
+        });
+        const j = await up.json().catch(() => null);
+        if (up.ok && j?.id) midiaId = j.id;
+        else console.error('[send-media] upload pra Meta falhou:', JSON.stringify(j));
+      } catch (eUp) { console.error('[send-media] erro no upload:', eUp.message); }
+
+      const ref = midiaId ? { id: midiaId } : { link: media_url };
       const corpo = { messaging_product: 'whatsapp', to: number, type: tipoMeta };
-      if (tipoMeta === 'document') corpo.document = { link: media_url, filename: fileName || 'documento', caption: caption || undefined };
-      else corpo[tipoMeta] = { link: media_url, caption: tipoMeta === 'sticker' ? undefined : (caption || undefined) };
+      if (tipoMeta === 'document') corpo.document = { ...ref, filename: fileName || 'documento', caption: caption || undefined };
+      else corpo[tipoMeta] = { ...ref, caption: tipoMeta === 'sticker' ? undefined : (caption || undefined) };
       const metaResp = await fetch(`https://graph.facebook.com/v21.0/${clinicaInfo.meta_phone_number_id}/messages`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${clinicaInfo.meta_access_token}`, 'Content-Type': 'application/json' },
