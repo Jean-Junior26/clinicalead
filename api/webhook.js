@@ -803,6 +803,43 @@ module.exports = async function handler(req, res) {
     } catch (e) { }
   }
 
+  // ⚠️ NOVO 09/09: sobe a imagem DIRETO pra Meta e devolve o media_id.
+  // Antes as imagens iam só como LINK, e a Meta tinha que baixar o
+  // arquivo do nosso Storage por fora — quando ela não conseguia baixar
+  // a tempo (Storage lento, muita requisição junto), a mensagem falhava
+  // silenciosamente. Isso explicava as falhas INTERMITENTES de
+  // Uberlândia: a MESMA imagem falhava às 19:55 e funcionava às 19:57.
+  // Foi exatamente o mesmo problema que resolvemos no áudio em 21/08 —
+  // na época corrigi só o áudio e deixei as imagens no método antigo.
+  // Se o upload falhar por qualquer motivo, cai de volta no link
+  // (comportamento antigo) — nunca fica pior do que era.
+  async function subirImagemParaMeta(phoneNumberId, token, imagemUrl) {
+    try {
+      const arq = await fetch(imagemUrl, {
+        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+      });
+      if (!arq.ok) return null;
+      const tipo = arq.headers.get('content-type') || 'image/jpeg';
+      const bytes = Buffer.from(await arq.arrayBuffer());
+      const form = new FormData();
+      form.append('messaging_product', 'whatsapp');
+      form.append('type', tipo);
+      form.append('file', new Blob([bytes], { type: tipo }), 'imagem.jpg');
+      const up = await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/media`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+      const j = await up.json().catch(() => null);
+      if (up.ok && j?.id) return j.id;
+      console.error('[imagem] upload pra Meta falhou:', JSON.stringify(j));
+      return null;
+    } catch (e) {
+      console.error('[imagem] erro no upload:', e.message);
+      return null;
+    }
+  }
+
   async function brianEnviarCasos(instanceName, clinic_id, phone, procedimento) {
     try {
       if (!procedimento) return false;
@@ -827,10 +864,15 @@ module.exports = async function handler(req, res) {
         try {
           const legenda = caso.legenda || `✨ Olha esse resultado real de ${proc} que fizemos! 😍`;
           if (ehOficial) {
+            // sobe a imagem primeiro (ver comentário em subirImagemParaMeta)
+            const midiaId = await subirImagemParaMeta(clinicaInfo.meta_phone_number_id, clinicaInfo.meta_access_token, caso.imagem_url);
             await fetch(`https://graph.facebook.com/v21.0/${clinicaInfo.meta_phone_number_id}/messages`, {
               method: 'POST',
               headers: { Authorization: `Bearer ${clinicaInfo.meta_access_token}`, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ messaging_product: 'whatsapp', to: number, type: 'image', image: { link: caso.imagem_url, caption: legenda } }),
+              body: JSON.stringify({
+                messaging_product: 'whatsapp', to: number, type: 'image',
+                image: midiaId ? { id: midiaId, caption: legenda } : { link: caso.imagem_url, caption: legenda },
+              }),
             });
           } else if (instanceName) {
             await fetch(`${EVO_URL}/message/sendMedia/${instanceName}`, {
