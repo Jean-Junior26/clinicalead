@@ -251,6 +251,51 @@ export default async function handler(req, res) {
         }
       }
 
+      // ⚠️ NOVO 10/09: ENVIO DE TEMPLATE APROVADO.
+      // Serve pra equipe conseguir falar com lead que está há mais de 24h
+      // sem escrever — nesse caso a Meta bloqueia texto livre, e o ÚNICO
+      // jeito de a mensagem chegar é por um modelo aprovado previamente.
+      // Importante: não adianta a pessoa digitar o texto do template no
+      // Inbox — a Meta trata como mensagem comum e bloqueia igual. Tem
+      // que ser enviado por este caminho, que é o que o botão "Reativar"
+      // do CRM usa.
+      if (req.body?.template && req.body.template.nome) {
+        const tpl = req.body.template;
+        const componentes = (Array.isArray(tpl.params) && tpl.params.length)
+          ? [{ type: 'body', parameters: tpl.params.map(p => ({ type: 'text', text: String(p) })) }]
+          : [];
+        const respTpl = await fetch(`https://graph.facebook.com/v21.0/${clinicaInfo.meta_phone_number_id}/messages`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${clinicaInfo.meta_access_token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messaging_product: 'whatsapp',
+            to: number,
+            type: 'template',
+            template: { name: tpl.nome, language: { code: tpl.idioma || 'pt_BR' }, components: componentes },
+          }),
+        });
+        const dataTpl = await respTpl.json().catch(() => null);
+        if (!respTpl.ok) return res.status(respTpl.status).json(dataTpl || { error: 'Falha ao enviar o modelo' });
+        const idTpl = dataTpl?.messages?.[0]?.id || null;
+
+        // registra no Inbox com o texto que o paciente REALMENTE recebeu,
+        // pra equipe conseguir acompanhar a conversa normalmente
+        if (SUPABASE_KEY && clinicId && tpl.textoVisivel) {
+          try {
+            await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
+              method: 'POST',
+              headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+              body: JSON.stringify({
+                clinic_id: clinicId, phone: number, contact_name: null,
+                content: tpl.textoVisivel, type: 'text', from_me: true,
+                message_id: idTpl, created_at: new Date().toISOString(),
+              }),
+            });
+          } catch (e) { }
+        }
+        return res.status(200).json({ ok: true, mensagem: 'Modelo enviado!', message_id: idTpl });
+      }
+
       const corpoMeta = (req.body?.tipo === 'audio' && req.body?.media_url)
         ? { messaging_product: 'whatsapp', to: number, type: 'audio', audio: audioMediaId ? { id: audioMediaId } : { link: req.body.media_url } }
         : { messaging_product: 'whatsapp', to: number, type: 'text', text: { body: message } };
