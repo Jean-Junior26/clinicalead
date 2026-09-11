@@ -3322,7 +3322,7 @@ function abrirReativarLead() {
           </div>
           <div class="form-group">
             <label class="form-label">Qual a situação do paciente?</label>
-            <select class="form-select" id="reativarModelo" onchange="atualizarPreviaReativar()"></select>
+            <select class="form-select" id="reativarModelo" onchange="trocarModeloReativar()"></select>
           </div>
           <div class="form-group">
             <label class="form-label">Nome do paciente</label>
@@ -3351,11 +3351,48 @@ function abrirReativarLead() {
   const lead = chat.lead;
   const primeiro = String(lead?.nome || chat.name || '').split(' ')[0] || '';
   document.getElementById('reativarNome').value = primeiro;
-  document.getElementById('reativarProc').value = lead?.procedimento || '';
+
+  // guarda os dois valores possíveis do campo do meio, pra alternar certo
+  // quando a pessoa trocar a situação (ver trocarModeloReativar)
+  window.__reativarProcedimento = lead?.procedimento || '';
+  window.__reativarDataFalta = '';
+  try {
+    // se esse paciente tem consulta marcada como "faltou", já sugere a data dela
+    if (lead?.id && typeof CAL !== 'undefined' && Array.isArray(CAL.consultas)) {
+      const faltas = CAL.consultas
+        .filter(c => c.lead_id === lead.id && c.status === 'faltou' && c.data)
+        .sort((a, b) => new Date(b.data) - new Date(a.data));
+      if (faltas.length) {
+        const [ano, mes, dia] = String(faltas[0].data).split('-');
+        window.__reativarDataFalta = `${dia}/${mes}`;
+      }
+    }
+  } catch (e) { }
+
   document.getElementById('reativarModelo').value = (lead?.procedimento || '').trim() ? '0' : '1';
   document.getElementById('reativarMsg').textContent = '';
-  atualizarPreviaReativar();
+  trocarModeloReativar();
   openModal('modalReativar');
+}
+
+// ⚠️ CORREÇÃO 12/09: BUG REAL encontrado em uso — ao trocar a situação
+// pra "Faltou na consulta", o campo do meio continuava com o PROCEDIMENTO
+// que veio preenchido do cadastro do lead. Se a pessoa não apagasse, ia
+// parar no lugar da data: "não conseguiu comparecer à sua consulta no dia
+// Consulta geral". Agora, ao trocar de situação, o campo é redefinido
+// conforme o que aquele modelo realmente pede — e quando pede DATA, já
+// sugere a data da última consulta que o paciente faltou (ou a de hoje).
+function trocarModeloReativar() {
+  const m = MODELOS_REATIVACAO[Number(document.getElementById('reativarModelo').value) || 0];
+  const campoMeio = document.getElementById('reativarProc');
+  if (m.campos[1] === 'data') {
+    campoMeio.value = window.__reativarDataFalta || '';
+  } else if (m.campos[1] === 'procedimento') {
+    campoMeio.value = window.__reativarProcedimento || '';
+  } else {
+    campoMeio.value = '';
+  }
+  atualizarPreviaReativar();
 }
 
 function atualizarPreviaReativar() {
@@ -3386,6 +3423,13 @@ async function enviarReativacao() {
   if (!nome) { msgEl.innerHTML = '<span style="color:var(--coral,#C0624A);">Preencha o nome do paciente</span>'; return; }
   const temSegundoEnv = m.campos.length > 1;
   if (temSegundoEnv && !proc) { msgEl.innerHTML = `<span style="color:var(--coral,#C0624A);">Preencha o campo "${m.campos[1] === 'data' ? 'data' : 'procedimento'}"</span>`; return; }
+
+  // trava de segurança: se o modelo pede DATA, o texto tem que parecer
+  // uma data mesmo — evita repetir o erro de mandar procedimento no lugar
+  if (temSegundoEnv && m.campos[1] === 'data' && !/\d{1,2}\s*[\/\-]\s*\d{1,2}/.test(proc)) {
+    msgEl.innerHTML = '<span style="color:var(--coral,#C0624A);">A data precisa estar no formato dia/mês — ex: 12/09</span>';
+    return;
+  }
 
   const params = temSegundoEnv ? [nome, proc] : [nome];
   const textoVisivel = temSegundoEnv ? m.texto(nome, proc) : m.texto(nome);
