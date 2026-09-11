@@ -3149,6 +3149,7 @@ async function openChat(chatId) {
 }
 
 function renderChatHeader(chat) {
+  const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
   const ini = chat.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
   // ⚠️ NOVO 04/09: foto de perfil no CABEÇALHO também. A lista lateral
   // já mostrava foto desde 01/08, mas aqui em cima continuava só com as
@@ -3173,6 +3174,11 @@ function renderChatHeader(chat) {
         na lista de conversas (e depois toque longo) — dois atalhos
         escondidos, que ninguém adivinha que existem. Agora fica aqui,
         na cara, junto dos outros botões da conversa. -->
+        ${clinic?.tipo_conexao_whatsapp === 'oficial' ? `
+        <button class="btn btn-sm" title="Usar quando o paciente está há mais de 24h sem responder"
+          onclick="abrirReativarLead()" style="border:1px solid var(--gold-border,rgba(201,168,76,0.35));color:var(--gold,#C9A84C);">
+          <i class="ti ti-send"></i> Reativar
+        </button>` : ''}
         <button class="btn btn-sm" title="Aperta a conversa pra caber mais mensagem na tela"
           onclick="alternarInboxCompacto()">
           <i class="ti ti-arrows-diagonal-minimize-2"></i> Compacto
@@ -3230,6 +3236,136 @@ window.INBOX_RESPONDENDO = null;
 // equipe escolhe o que funciona melhor na tela dela, sem afetar ninguém.
 // ⚠️ NOVO 04/09: abre a foto de perfil ampliada, igual o WhatsApp.
 // Fecha clicando em qualquer lugar ou apertando Esc.
+// ⚠️ NOVO 10/09: REATIVAR LEAD (modelos aprovados pelo WhatsApp).
+// Quando o paciente está há mais de 24h sem escrever, o WhatsApp NÃO
+// deixa mandar mensagem digitada — nem copiando o texto do modelo, que
+// é o engano mais comum. A única forma de chegar é por este caminho,
+// que dispara o modelo já aprovado. Daí este botão.
+const MODELOS_REATIVACAO = [
+  {
+    chave: 'retomada_interesse',
+    rotulo: 'Tinha interesse em um procedimento',
+    idioma: 'pt_BR',
+    campos: ['nome', 'procedimento'],
+    texto: (nome, proc) => `Oi ${nome}! Aqui é da Gou Odonto Uberlândia. Vimos que você tinha interesse em ${proc} e ficamos à disposição para tirar suas dúvidas. Quer conversar sobre isso?`,
+  },
+  {
+    chave: 'retomada_agendamento',
+    rotulo: 'Quase agendou e não fechou',
+    idioma: 'pt_BR',
+    campos: ['nome'],
+    texto: (nome) => `Oi ${nome}! Aqui é da Gou Odonto Uberlândia. Vimos que você chegou a conversar com a gente sobre uma avaliação e não conseguimos concluir o agendamento. Ainda tem interesse? Podemos separar um horário para você.`,
+  },
+];
+
+function abrirReativarLead() {
+  const chat = INBOX.activeChat;
+  if (!chat) { toast('Abra uma conversa primeiro', 'error'); return; }
+
+  if (!document.getElementById('modalReativar')) {
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'modalReativar';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:520px;width:96vw;">
+        <div class="modal-header">
+          <h3><i class="ti ti-send" style="margin-right:8px;color:var(--gold);"></i>Reativar conversa</h3>
+          <button class="btn btn-ghost btn-icon" onclick="closeModal('modalReativar')"><i class="ti ti-x"></i></button>
+        </div>
+        <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
+          <div style="font-size:12px;color:var(--text-secondary);background:var(--bg-elevated,#18181B);padding:10px 12px;border-radius:9px;line-height:1.6;">
+            Use quando o paciente está <b>há mais de 24h sem responder</b>. Nesse caso o WhatsApp só aceita mensagens aprovadas — o texto abaixo não pode ser alterado.
+          </div>
+          <div class="form-group">
+            <label class="form-label">Qual a situação do paciente?</label>
+            <select class="form-select" id="reativarModelo" onchange="atualizarPreviaReativar()"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Nome do paciente</label>
+            <input class="form-input" id="reativarNome" oninput="atualizarPreviaReativar()"/>
+          </div>
+          <div class="form-group" id="reativarProcWrap">
+            <label class="form-label">Procedimento de interesse</label>
+            <input class="form-input" id="reativarProc" placeholder="ex: lentes em resina" oninput="atualizarPreviaReativar()"/>
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--text-secondary);margin-bottom:5px;">O paciente vai receber exatamente isto:</div>
+            <div id="reativarPrevia" style="background:var(--bg-elevated,#18181B);border-left:3px solid var(--gold,#C9A84C);padding:11px 13px;border-radius:9px;font-size:13px;line-height:1.55;white-space:pre-wrap;"></div>
+          </div>
+          <div id="reativarMsg" style="font-size:12px;"></div>
+        </div>
+        <div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end;">
+          <button class="btn" onclick="closeModal('modalReativar')">Cancelar</button>
+          <button class="btn btn-primary" id="btnReativarEnviar" onclick="enviarReativacao()"><i class="ti ti-send"></i> Enviar</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    const sel = document.getElementById('reativarModelo');
+    sel.innerHTML = MODELOS_REATIVACAO.map((m, i) => `<option value="${i}">${m.rotulo}</option>`).join('');
+  }
+
+  const lead = chat.lead;
+  const primeiro = String(lead?.nome || chat.name || '').split(' ')[0] || '';
+  document.getElementById('reativarNome').value = primeiro;
+  document.getElementById('reativarProc').value = lead?.procedimento || '';
+  document.getElementById('reativarModelo').value = (lead?.procedimento || '').trim() ? '0' : '1';
+  document.getElementById('reativarMsg').textContent = '';
+  atualizarPreviaReativar();
+  openModal('modalReativar');
+}
+
+function atualizarPreviaReativar() {
+  const m = MODELOS_REATIVACAO[Number(document.getElementById('reativarModelo').value) || 0];
+  const nome = (document.getElementById('reativarNome').value || '').trim();
+  const proc = (document.getElementById('reativarProc').value || '').trim();
+  document.getElementById('reativarProcWrap').style.display = m.campos.includes('procedimento') ? '' : 'none';
+  document.getElementById('reativarPrevia').textContent = m.campos.includes('procedimento')
+    ? m.texto(nome || '[nome]', proc || '[procedimento]')
+    : m.texto(nome || '[nome]');
+}
+
+async function enviarReativacao() {
+  const chat = INBOX.activeChat;
+  const clinic = currentClinic();
+  if (!chat || !clinic) return;
+
+  const m = MODELOS_REATIVACAO[Number(document.getElementById('reativarModelo').value) || 0];
+  const nome = (document.getElementById('reativarNome').value || '').trim();
+  const proc = (document.getElementById('reativarProc').value || '').trim();
+  const msgEl = document.getElementById('reativarMsg');
+  const btn = document.getElementById('btnReativarEnviar');
+
+  if (!nome) { msgEl.innerHTML = '<span style="color:var(--coral,#C0624A);">Preencha o nome do paciente</span>'; return; }
+  if (m.campos.includes('procedimento') && !proc) { msgEl.innerHTML = '<span style="color:var(--coral,#C0624A);">Preencha o procedimento (ou escolha a outra situação)</span>'; return; }
+
+  const params = m.campos.includes('procedimento') ? [nome, proc] : [nome];
+  const textoVisivel = m.campos.includes('procedimento') ? m.texto(nome, proc) : m.texto(nome);
+
+  btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> Enviando...';
+  msgEl.textContent = '';
+  try {
+    const r = await fetch('/api/send-message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clinic_id: clinic.id,
+        phone: chat.phone,
+        message: textoVisivel,
+        template: { nome: m.chave, idioma: m.idioma, params, textoVisivel },
+      }),
+    });
+    const j = await r.json().catch(() => null);
+    if (!r.ok) throw new Error(j?.error?.message || j?.error || 'falha no envio');
+    toast('Mensagem enviada! ✓');
+    closeModal('modalReativar');
+    if (typeof loadInboxChats === 'function') loadInboxChats();
+  } catch (e) {
+    msgEl.innerHTML = `<span style="color:var(--coral,#C0624A);">${e.message}</span>`;
+  } finally {
+    btn.disabled = false; btn.innerHTML = '<i class="ti ti-send"></i> Enviar';
+  }
+}
+
 function abrirFotoPerfil(url, nome) {
   if (!url) return;
   document.getElementById('visorFotoPerfil')?.remove();
