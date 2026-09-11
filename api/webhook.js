@@ -145,6 +145,27 @@ module.exports = async function handler(req, res) {
       // um texto genérico tipo "🎵 Áudio", sem o arquivo real).
       if (msg.type === 'text') {
         conteudo = msg.text?.body || ''; tipo = 'text';
+      } else if (msg.type === 'button') {
+        // ⚠️ NOVO 12/09: RESPOSTA DE BOTÃO DE TEMPLATE.
+        // Quando o paciente aperta "Quero saber mais" / "Agora não" num
+        // template, a Meta manda type='button' — e o texto do que ele
+        // apertou vem em msg.button.text, NÃO em msg.text.body. Antes
+        // isso caía no "else" genérico lá embaixo e era gravado como
+        // "[button]", então a equipe abria o Inbox e via literalmente a
+        // palavra "button" em vez de saber se o paciente disse sim ou
+        // não. Agora grava o texto do botão como se fosse mensagem
+        // normal — e, de brinde, o Brian também passa a entender a
+        // resposta e conseguir dar sequência na conversa.
+        conteudo = msg.button?.text || msg.button?.payload || '';
+        tipo = 'text';
+      } else if (msg.type === 'interactive') {
+        // mesma coisa pros botões/listas interativos (fora de template)
+        const it = msg.interactive || {};
+        conteudo = it.button_reply?.title
+          || it.list_reply?.title
+          || it.nfm_reply?.body
+          || '';
+        tipo = 'text';
       } else if (msg.type === 'image') {
         tipo = 'image';
         const r = await baixarEsalvarMidiaMeta(msg.image?.id, clinica.meta_access_token, telefoneLead, 'image', null);
