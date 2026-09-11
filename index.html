@@ -3278,6 +3278,28 @@ const MODELOS_REATIVACAO = [
     campos: ['nome'],
     texto: (nome) => `Oi ${nome}! Hoje é um dia especial e toda a equipe da Gou Odonto Uberlândia passou aqui para te desejar muita saúde e alegria. Feliz aniversário!`,
   },
+  // ── últimos 3, aprovados em 11/09 ──
+  {
+    chave: 'pos_consulta',
+    rotulo: 'Saber como ficou depois do atendimento',
+    idioma: 'pt_BR',
+    campos: ['nome'],
+    texto: (nome) => `Oi ${nome}! Aqui é da Gou Odonto Uberlândia. Queremos saber como você está depois do seu atendimento. Está tudo bem com o seu tratamento?`,
+  },
+  {
+    chave: 'paciente_faltou',
+    rotulo: 'Faltou na consulta — oferecer novo horário',
+    idioma: 'pt_BR',
+    campos: ['nome', 'data'],
+    texto: (nome, data) => `Oi ${nome}! Notamos que você não conseguiu comparecer à sua consulta na Gou Odonto no dia ${data}. Quer que a gente separe um novo horário para você?`,
+  },
+  {
+    chave: 'campanha_ativa',
+    rotulo: 'Avisar sobre condição especial',
+    idioma: 'pt_BR',
+    campos: ['nome', 'procedimento'],
+    texto: (nome, proc) => `Oi ${nome}! A Gou Odonto Uberlândia está com uma condição especial em ${proc} neste mês e queremos que você aproveite. Quer saber mais sobre isso?`,
+  },
 ];
 
 function abrirReativarLead() {
@@ -3340,9 +3362,13 @@ function atualizarPreviaReativar() {
   const m = MODELOS_REATIVACAO[Number(document.getElementById('reativarModelo').value) || 0];
   const nome = (document.getElementById('reativarNome').value || '').trim();
   const proc = (document.getElementById('reativarProc').value || '').trim();
-  document.getElementById('reativarProcWrap').style.display = m.campos.includes('procedimento') ? '' : 'none';
-  document.getElementById('reativarPrevia').textContent = m.campos.includes('procedimento')
-    ? m.texto(nome || '[nome]', proc || '[procedimento]')
+  const temSegundo = m.campos.length > 1;
+  document.getElementById('reativarProcWrap').style.display = temSegundo ? '' : 'none';
+  const lbl = document.querySelector('#reativarProcWrap .form-label');
+  if (lbl) lbl.textContent = (m.campos[1] === 'data') ? 'Data da consulta que faltou' : 'Procedimento de interesse';
+  document.getElementById('reativarProc').placeholder = (m.campos[1] === 'data') ? 'ex: 12/09' : 'ex: lentes em resina';
+  document.getElementById('reativarPrevia').textContent = temSegundo
+    ? m.texto(nome || '[nome]', proc || `[${m.campos[1]}]`)
     : m.texto(nome || '[nome]');
 }
 
@@ -3358,10 +3384,11 @@ async function enviarReativacao() {
   const btn = document.getElementById('btnReativarEnviar');
 
   if (!nome) { msgEl.innerHTML = '<span style="color:var(--coral,#C0624A);">Preencha o nome do paciente</span>'; return; }
-  if (m.campos.includes('procedimento') && !proc) { msgEl.innerHTML = '<span style="color:var(--coral,#C0624A);">Preencha o procedimento (ou escolha a outra situação)</span>'; return; }
+  const temSegundoEnv = m.campos.length > 1;
+  if (temSegundoEnv && !proc) { msgEl.innerHTML = `<span style="color:var(--coral,#C0624A);">Preencha o campo "${m.campos[1] === 'data' ? 'data' : 'procedimento'}"</span>`; return; }
 
-  const params = m.campos.includes('procedimento') ? [nome, proc] : [nome];
-  const textoVisivel = m.campos.includes('procedimento') ? m.texto(nome, proc) : m.texto(nome);
+  const params = temSegundoEnv ? [nome, proc] : [nome];
+  const textoVisivel = temSegundoEnv ? m.texto(nome, proc) : m.texto(nome);
 
   btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i> Enviando...';
   msgEl.textContent = '';
