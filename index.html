@@ -3256,6 +3256,28 @@ const MODELOS_REATIVACAO = [
     campos: ['nome'],
     texto: (nome) => `Oi ${nome}! Aqui é da Gou Odonto Uberlândia. Vimos que você chegou a conversar com a gente sobre uma avaliação e não conseguimos concluir o agendamento. Ainda tem interesse? Podemos separar um horário para você.`,
   },
+  // ── aprovados em 11/09 ──
+  {
+    chave: 'retomada_conversa',
+    rotulo: 'Mandou mensagem e sumiu (poucos dias)',
+    idioma: 'pt_BR',
+    campos: ['nome'],
+    texto: (nome) => `Oi ${nome}! Aqui é da Gou Odonto Uberlândia. Nossa conversa ficou pela metade e continuamos à disposição para te ajudar. Quer retomar de onde paramos?`,
+  },
+  {
+    chave: 'retomada_longa',
+    rotulo: 'Sumido há bastante tempo (15+ dias)',
+    idioma: 'pt_BR',
+    campos: ['nome'],
+    texto: (nome) => `Oi ${nome}! Aqui é da Gou Odonto Uberlândia. Faz um tempinho que conversamos por aqui e queremos saber se você ainda deseja cuidar do seu sorriso. Podemos te ajudar?`,
+  },
+  {
+    chave: 'aniversario_paciente',
+    rotulo: 'Parabenizar por aniversário',
+    idioma: 'pt_BR',
+    campos: ['nome'],
+    texto: (nome) => `Oi ${nome}! Hoje é um dia especial e toda a equipe da Gou Odonto Uberlândia passou aqui para te desejar muita saúde e alegria. Feliz aniversário!`,
+  },
 ];
 
 function abrirReativarLead() {
