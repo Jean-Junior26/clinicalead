@@ -193,6 +193,19 @@
       // vencimento vai ser empurrado bem pra frente — evita alguém
       // clicar por engano na clínica errada e adiantar um mês sem querer.
       const diasFalta = s && s.vence_em ? diasAte(s.vence_em) : null;
+
+      // ⚠️ NOVO 12/09: TRAVA CONTRA PAGAMENTO EM DOBRO.
+      // Caso real (José Bonifácio): o botão foi apertado mais de uma vez
+      // e o vencimento pulou de 18/10 pra 18/11 — um mês a mais sem o
+      // cliente ter pago. Como nada avisava, só dava pra perceber olhando
+      // a data depois. Agora, se JÁ existe pagamento registrado hoje, o
+      // sistema alerta antes de empurrar de novo.
+      const hojeCheck = new Date().toISOString().split('T')[0];
+      if (s && s.ultimo_pagamento === hojeCheck) {
+        const proximaData = s.vence_em ? fmtData(s.vence_em) : '—';
+        if (!confirm(`⚠️ ATENÇÃO — JÁ TEM PAGAMENTO REGISTRADO HOJE\n\nEssa clínica já recebeu baixa hoje, e o vencimento dela está em ${proximaData}.\n\nSe você confirmar de novo, o vencimento vai ser empurrado MAIS UM MÊS (total de 2 meses).\n\nSó confirme se o cliente realmente pagou dois meses. Continuar?`)) return;
+      }
+
       const msgConfirma = (diasFalta !== null && diasFalta > 5)
         ? `PAGAMENTO ADIANTADO\n\nEssa clínica só vence daqui a ${diasFalta} dia(s).\n\nConfirmar registra o pagamento agora e empurra o vencimento em mais 1 mês. Tem certeza?`
         : 'Confirmar pagamento desta clínica?\n\nIsso registra o pagamento e renova o vencimento. Os créditos do plano renovam normalmente na virada do ciclo (não agora).';
