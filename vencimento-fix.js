@@ -116,9 +116,20 @@
           return;
         }
         const dias = diasAte(s.vence_em);
-        // mostra os que vencem em até 5 dias ou já venceram (e não estão pagos)
-        if (s.pagamento_status !== 'pago' && dias !== null && dias <= 5) {
-          linhas.push({ nome: mapa[s.clinic_id] || s.clinic_id, clinic_id: s.clinic_id, dias, vence_em: s.vence_em });
+        // ⚠️ CORREÇÃO 12/09: antes só listava quem vencia em até 5 dias.
+        // Quem pagava ADIANTADO (com 10, 20 dias de antecedência) não
+        // aparecia aqui, e o Jean não tinha onde lançar o pagamento —
+        // tinha que esperar chegar perto do vencimento pra conseguir dar
+        // baixa. Agora lista TODAS as clínicas, ordenadas por urgência:
+        // as vencidas/vencendo primeiro, as tranquilas no fim.
+        if (dias !== null) {
+          linhas.push({
+            nome: mapa[s.clinic_id] || s.clinic_id,
+            clinic_id: s.clinic_id,
+            dias,
+            vence_em: s.vence_em,
+            tranquila: dias > 5, // só pra pintar diferente na tela
+          });
         }
       });
       linhas.sort((a, b) => a.dias - b.dias); // mais urgentes primeiro
@@ -140,17 +151,24 @@
           }
           const venc = l.dias < 0;
           const txt = venc ? `Venceu há ${Math.abs(l.dias)} dia(s)` : (l.dias === 0 ? 'Vence hoje' : `Vence em ${l.dias} dia(s)`);
-          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:12px;border-radius:9px;background:var(--bg-base,#0A0A0B);margin-bottom:8px;border-left:3px solid ${venc ? '#C0624A' : '#C9A84C'};">
+          // cor da borda: vermelho = vencida | dourado = vencendo em breve
+          // | cinza = tranquila (aparece só pra permitir pagamento adiantado)
+          const cor = venc ? '#C0624A' : (l.tranquila ? '#3A3A3A' : '#C9A84C');
+          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:12px;border-radius:9px;background:var(--bg-base,#0A0A0B);margin-bottom:8px;border-left:3px solid ${cor};${l.tranquila ? 'opacity:0.72;' : ''}">
             <div><b>${l.nome}</b><div style="font-size:12px;color:var(--text-muted,#888);">${txt} · vence ${fmtData(l.vence_em)}</div></div>
-            <button onclick="marcarComoPago('${l.clinic_id}')" style="padding:7px 14px;border-radius:8px;border:none;background:#6FBF8E;color:#0A0A0B;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap;">✓ Marcar pago</button>
+            <button onclick="marcarComoPago('${l.clinic_id}')" style="padding:7px 14px;border-radius:8px;border:none;background:${l.tranquila ? '#2E2E2E' : '#6FBF8E'};color:${l.tranquila ? '#B8B8B8' : '#0A0A0B'};font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap;" title="${l.tranquila ? 'Pagamento adiantado — registra e já empurra o vencimento' : 'Registrar pagamento'}">✓ ${l.tranquila ? 'Pagou adiantado' : 'Marcar pago'}</button>
           </div>`;
         }).join('')
-      : '<p style="text-align:center;color:var(--text-muted,#888);padding:20px;">✅ Nenhuma clínica vencendo. Tudo em dia!</p>';
+      : '<p style="text-align:center;color:var(--text-muted,#888);padding:20px;">Nenhuma clínica com vencimento cadastrado.</p>';
     modal.innerHTML = `
       <div style="background:var(--bg-surface,#141414);border:1px solid var(--gold-border,#333);border-radius:16px;padding:26px;max-width:520px;width:100%;max-height:90vh;overflow:auto;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
           <h2 style="margin:0;font-size:19px;">🗓️ Vencimentos de planos</h2>
           <button onclick="document.getElementById('modalVencimentos').remove()" style="background:none;border:none;color:var(--text-muted,#888);font-size:24px;cursor:pointer;">×</button>
+        </div>
+        <div style="font-size:11.5px;color:var(--text-muted,#888);margin-bottom:14px;line-height:1.55;">
+          As clínicas em <b style="color:#C0624A;">vermelho</b> já venceram e as em <b style="color:#C9A84C;">dourado</b> vencem em breve.
+          As esmaecidas estão tranquilas — aparecem aqui pra você conseguir lançar <b>pagamento adiantado</b> quando o cliente pagar antes da hora.
         </div>
         ${corpo}
       </div>`;
@@ -164,11 +182,21 @@
   // paga adiantado não ganha créditos extras antes da hora — é justo e correto.
   window.marcarComoPago = async function (clinicId) {
     if (!ehAdminMaster()) return;
-    if (!confirm('Confirmar pagamento desta clínica?\n\nIsso registra o pagamento e renova o vencimento. Os créditos do plano renovam normalmente na virada do ciclo (não agora).')) return;
     const database = getDb();
     try {
       const { data: s } = await database.from('brian_saldo')
         .select('vence_em, dia_renovacao').eq('clinic_id', clinicId).maybeSingle();
+
+      // ⚠️ NOVO 12/09: aviso diferente pra PAGAMENTO ADIANTADO. Como
+      // agora a lista mostra todas as clínicas (inclusive as que ainda
+      // faltam semanas pra vencer), é bom deixar claro quando o
+      // vencimento vai ser empurrado bem pra frente — evita alguém
+      // clicar por engano na clínica errada e adiantar um mês sem querer.
+      const diasFalta = s && s.vence_em ? diasAte(s.vence_em) : null;
+      const msgConfirma = (diasFalta !== null && diasFalta > 5)
+        ? `PAGAMENTO ADIANTADO\n\nEssa clínica só vence daqui a ${diasFalta} dia(s).\n\nConfirmar registra o pagamento agora e empurra o vencimento em mais 1 mês. Tem certeza?`
+        : 'Confirmar pagamento desta clínica?\n\nIsso registra o pagamento e renova o vencimento. Os créditos do plano renovam normalmente na virada do ciclo (não agora).';
+      if (!confirm(msgConfirma)) return;
       // próximo vencimento: +1 mês a partir do vencimento atual (ou de hoje)
       const base = (s && s.vence_em) ? new Date(s.vence_em + 'T00:00:00') : new Date();
       const proximo = new Date(base);
