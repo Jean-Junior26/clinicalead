@@ -1698,9 +1698,32 @@ async function loadLeads() {
   // atualizado, só que sem competir com dado de clínica nenhuma outra.
   const clinic = currentClinic();
   if (!clinic) { STATE.leads = []; document.getElementById('navLeadsBadge').textContent = '0'; return; }
-  const { data, error } = await db.from('leads').select('*').eq('clinic_id', clinic.id).order('created_at', { ascending: false });
-  if (error) { console.error('leads:', error); return; }
-  STATE.leads = data || [];
+  // ⚠️ CORREÇÃO 12/09 (CAUSA RAIZ de "paciente não aparece na busca"):
+  // essa consulta não tinha paginação, e o Supabase corta em 1.000 linhas
+  // por padrão. Como a ordenação é do mais NOVO pro mais velho, os leads
+  // ANTIGOS eram silenciosamente descartados assim que a clínica passava
+  // de mil cadastros. Caso real (José Bonifácio, 1.167 leads): 6
+  // pacientes criados em junho simplesmente não apareciam na busca do
+  // agendamento — nem por nome, nem por telefone — porque nunca chegavam
+  // a ser carregados. Eles existiam no banco o tempo todo.
+  // É o MESMO limite de 1.000 que já tinha mordido o painel de custos e
+  // o Inbox; agora busca de mil em mil até acabar de verdade.
+  const TAM_PAG = 1000;
+  let todosLeads = [];
+  let inicioLeads = 0;
+  while (true) {
+    const { data, error } = await db.from('leads').select('*')
+      .eq('clinic_id', clinic.id)
+      .order('created_at', { ascending: false })
+      .range(inicioLeads, inicioLeads + TAM_PAG - 1);
+    if (error) { console.error('leads:', error); break; }
+    const lote = data || [];
+    todosLeads = todosLeads.concat(lote);
+    if (lote.length < TAM_PAG) break;
+    inicioLeads += TAM_PAG;
+    if (inicioLeads > 100000) break; // trava de segurança
+  }
+  STATE.leads = todosLeads;
   document.getElementById('navLeadsBadge').textContent = currentLeads().length;
 }
 
