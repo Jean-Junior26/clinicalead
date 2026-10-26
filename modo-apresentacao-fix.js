@@ -23,6 +23,13 @@
 
    Este arquivo só LÊ e FILTRA. Nenhuma escrita (insert/update/
    delete) é tocada.
+
+   ⚠️ CORREÇÃO 26/10: a primeira versão procurava o cliente em
+   window.db e nunca achava. O index.html declara `const db`
+   (linha ~1401), e `const` no escopo de script NÃO vira
+   propriedade de window — fica só no escopo global léxico,
+   acessível como identificador solto `db`. Agora a busca é
+   feita com typeof em cima dos identificadores, não em window.
    ============================================================ */
 (function () {
   'use strict';
@@ -62,7 +69,6 @@
     } catch (e) { return false; }
   }
 
-  // deixa acessível pra outros fixes, se algum dia precisar
   window.modoApresentacaoAtivo = ativo;
 
   if (!ativo()) {
@@ -70,11 +76,26 @@
     return;
   }
 
+  // ── acha o cliente do Supabase ─────────────────────────────
+  // O app usa `const db`, que não existe em window. Então a busca
+  // é por identificador solto, com typeof pra não estourar erro
+  // quando o nome não existir.
+  function acharClientes() {
+    const achados = [];
+    try { if (typeof db !== 'undefined' && db && typeof db.from === 'function') achados.push(['db', db]); } catch (e) {}
+    try { if (typeof dbRef !== 'undefined' && dbRef && typeof dbRef.from === 'function') achados.push(['dbRef', dbRef]); } catch (e) {}
+    try { if (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.from === 'function') achados.push(['supabaseClient', supabaseClient]); } catch (e) {}
+    try { if (window.db && typeof window.db.from === 'function') achados.push(['window.db', window.db]); } catch (e) {}
+    try { if (window.supabaseClient && typeof window.supabaseClient.from === 'function') achados.push(['window.supabaseClient', window.supabaseClient]); } catch (e) {}
+    return achados;
+  }
+
   // ── intercepta as leituras da tabela 'clinicas' ────────────
-  // Envolve db.from('clinicas') e, SÓ no .select(), acrescenta
+  // Envolve cliente.from('clinicas') e, SÓ no .select(), acrescenta
   // um .in('id', [...]) com as clínicas liberadas. Os filtros do
   // Supabase se combinam com AND, então qualquer .eq()/.order()/
   // .single() que venha depois continua funcionando igual.
+  // Escritas (insert/update/delete) passam intactas.
   function instalar(cliente, nome) {
     if (!cliente || typeof cliente.from !== 'function') return false;
     if (cliente.__demoInstalado) return true;
@@ -107,15 +128,14 @@
     return true;
   }
 
-  // o app usa `db` (e em alguns fixes `window.supabaseClient`);
-  // tenta nos dois, e insiste um pouco caso ainda não exista.
   let tentativas = 0;
   (function tentar() {
-    const okDb = instalar(window.db, 'db');
-    const okSb = instalar(window.supabaseClient, 'supabaseClient');
-    if (okDb || okSb) return;
-    if (++tentativas < 40) return setTimeout(tentar, 150);
-    console.warn('[modo-apresentacao] não achei o cliente do Supabase. Filtro NÃO está ativo.');
+    const clientes = acharClientes();
+    let algum = false;
+    clientes.forEach(([nome, c]) => { if (instalar(c, nome)) algum = true; });
+    if (algum) return;
+    if (++tentativas < 60) return setTimeout(tentar, 150);
+    console.error('[modo-apresentacao] NÃO achei o cliente do Supabase. O filtro NÃO está ativo.');
   })();
 
   // ── rede de segurança ─────────────────────────────────────
@@ -131,10 +151,21 @@
           const b = document.getElementById('navClinicasBadge');
           if (b) b.textContent = STATE.clinics.length;
           if (typeof renderClinicSwitcher === 'function') renderClinicSwitcher();
+          console.warn('[modo-apresentacao] lista de clínicas ajustada: ' + antes + ' → ' + STATE.clinics.length);
         }
       }
     } catch (e) {}
   }
-  for (let i = 1; i <= 8; i++) setTimeout(limparState, i * 1000);
+  for (let i = 1; i <= 12; i++) setTimeout(limparState, i * 1000);
+
+  // atalho pra conferir no console se está tudo certo:
+  //   modoApresentacaoStatus()
+  window.modoApresentacaoStatus = function () {
+    const clientes = acharClientes();
+    console.log('ativo:', ativo());
+    console.log('clientes achados:', clientes.map(c => c[0]));
+    console.log('filtro instalado em:', clientes.filter(c => c[1].__demoInstalado).map(c => c[0]));
+    console.log('STATE.clinics:', (window.STATE?.clinics || []).map(c => c.nome || c.id));
+  };
 
 })();
