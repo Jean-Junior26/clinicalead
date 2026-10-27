@@ -208,6 +208,13 @@ module.exports = async function handler(req, res) {
         conteudo = `[${msg.type}]`; tipo = msg.type;
       }
 
+      // ⚠️ NOVO 27/10: guarda o created_at desta linha numa variável.
+      // É ele (precisão de milissegundo) que a trava anti-duplicata usa
+      // pra saber se chegou mensagem mais nova — o msg.timestamp da Meta
+      // só tem precisão de segundo e por isso a trava antiga não pegava
+      // mensagens enviadas dentro do mesmo segundo.
+      const meuCreatedAtMeta = new Date().toISOString();
+
       // 1. Grava a mensagem no histórico de mensagens (agora com media_url de verdade)
       await fetch(`${SUPABASE_URL}/rest/v1/mensagens`, {
         method: 'POST',
@@ -226,7 +233,7 @@ module.exports = async function handler(req, res) {
           // guardamos pra mostrar a citação no Inbox também.
           reply_to: msg.context?.id || null,
           instance_name: phoneNumberId,
-          created_at: new Date().toISOString(),
+          created_at: meuCreatedAtMeta,
         }),
       });
 
@@ -256,6 +263,28 @@ module.exports = async function handler(req, res) {
       // [[PROC]] (marca interesse) e [[VOZ]] (responde em áudio) agora
       // funcionam igual nos dois caminhos. [[SIMULAR]] foi removido de
       // vez do sistema (decisão do Jean), não existe mais em lugar nenhum.
+      // ⚠️ NOVO 27/10: TRAVA ANTI-RAJADA NO CAMINHO META.
+      // Era exatamente aqui que faltava a proteção que o caminho
+      // Evolution já tinha. Sem ela, quando o paciente mandava várias
+      // mensagens seguidas, cada invocação paralela do webhook gerava
+      // uma resposta própria — 4 mensagens em 15 segundos no caso que
+      // derrubou a WABA de Uberlândia em 26/10/2026.
+      //
+      // Espera 10s e desiste se chegou mensagem mais nova: a mais nova
+      // responde por todas, vendo o histórico completo.
+      if (await chegouMensagemMaisNova(clinica.id, telefoneLead, meuCreatedAtMeta, 10000)) {
+        await logDebug(clinica.id, telefoneLead, 'decisao_resposta', 'pulado', 'chegou mensagem mais nova — ela responde por esta');
+        return res.status(200).json({ ok: true, clinica: clinica.nome, gravado: true, brian: 'pulado', motivo: 'mensagem mais nova responde por esta' });
+      }
+
+      // Segunda rede: se o Brian já respondeu este contato nos últimos
+      // 25 segundos, não responde de novo. Pega o caso de duas
+      // invocações realmente simultâneas.
+      if (await brianJaRespondeuAgora(clinica.id, telefoneLead, 25)) {
+        await logDebug(clinica.id, telefoneLead, 'decisao_resposta', 'pulado', 'Brian já respondeu este contato há poucos segundos');
+        return res.status(200).json({ ok: true, clinica: clinica.nome, gravado: true, brian: 'pulado', motivo: 'resposta recente — evitando duplicata' });
+      }
+
       try {
         const respBrian = await fetch(`${SUPABASE_URL}/functions/v1/brian`, {
           method: 'POST',
@@ -1186,6 +1215,75 @@ module.exports = async function handler(req, res) {
     } catch (e) { }
   }
 
+  // ════════════════════════════════════════════════════════════
+  // ⚠️ NOVO 27/10/2026 — TRAVAS CONTRA RESPOSTA DUPLICADA
+  //
+  // O QUE ACONTECEU: em 26/10/2026 a Meta restringiu a WABA de
+  // Uberlândia por 30 dias ("Sending spam"). Uma das causas foi o
+  // Brian mandando RAJADA de respostas quase idênticas pro mesmo
+  // paciente — caso real medido no banco: 4 mensagens de
+  // boas-vindas pro telefone ...3173210736 entre 15:45:25.186 e
+  // 15:45:40.935, com textos diferentes entre si (ou seja, 4
+  // chamadas de IA separadas, não reenvio). Paciente que recebe
+  // 4 "Oi! Que bom que você chamou" seguidos bloqueia e denuncia,
+  // e denúncia é o que derruba a conta.
+  //
+  // POR QUE A TRAVA ANTIGA NÃO PEGOU: a trava de sequência que já
+  // existia (02/09) compara com msg.timestamp, que a Meta manda
+  // com precisão de SEGUNDO. As 4 mensagens do paciente chegaram
+  // dentro do MESMO segundo, então "existe mensagem mais nova?"
+  // dava falso pra todas e todas passavam. Pior: a consulta roda
+  // ANTES de a própria mensagem ser gravada, e o Vercel executa
+  // invocações em PARALELO — então nenhuma via a outra.
+  //
+  // O caminho EVOLUTION já tinha a proteção certa (debounce de
+  // 10s + recontagem usando o created_at da própria linha
+  // gravada, que tem precisão de milissegundo). O caminho META
+  // não tinha NADA: ia do brianDecide direto pra chamada da IA.
+  // Uberlândia é Meta. Por isso a rajada apareceu só lá.
+  // ════════════════════════════════════════════════════════════
+
+  // Espera um tempo e verifica se chegou mensagem MAIS NOVA deste
+  // contato. Se chegou, esta invocação desiste — a mais nova
+  // responde por todas, com o contexto completo no histórico.
+  // Compara por created_at (milissegundo), nunca por timestamp
+  // do WhatsApp (segundo).
+  async function chegouMensagemMaisNova(clinicId, phone, meuCreatedAt, esperaMs = 10000) {
+    try {
+      if (esperaMs > 0) await new Promise((r) => setTimeout(r, esperaMs));
+      const suf = String(phone).replace(/\D/g, '').slice(-8);
+      if (suf.length !== 8 || !meuCreatedAt) return false;
+      const resp = await fetch(
+        `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinicId}&phone=ilike.*${suf}&from_me=eq.false&created_at=gt.${encodeURIComponent(meuCreatedAt)}&select=id&limit=1`,
+        { headers: sbHeaders }
+      );
+      const arr = resp.ok ? await resp.json() : [];
+      return arr.length > 0;
+    } catch (e) {
+      return false; // falha de rede não deve calar o Brian
+    }
+  }
+
+  // Segunda rede de proteção: se o Brian JÁ respondeu este contato
+  // nos últimos N segundos, não responde de novo. Pega o caso
+  // extremo de duas invocações realmente simultâneas, que podem
+  // passar as duas pela checagem acima.
+  async function brianJaRespondeuAgora(clinicId, phone, segundos = 25) {
+    try {
+      const suf = String(phone).replace(/\D/g, '').slice(-8);
+      if (suf.length !== 8) return false;
+      const desde = new Date(Date.now() - segundos * 1000).toISOString();
+      const resp = await fetch(
+        `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinicId}&phone=ilike.*${suf}&from_me=eq.true&contact_name=eq.BRIAN_AUTO&created_at=gt.${encodeURIComponent(desde)}&select=id&limit=1`,
+        { headers: sbHeaders }
+      );
+      const arr = resp.ok ? await resp.json() : [];
+      return arr.length > 0;
+    } catch (e) {
+      return false;
+    }
+  }
+
   async function transcreverAudioWhisper(msgCompleta, instanceName) {
     const OPENAI_KEY = process.env.OPENAI_API_KEY;
     if (!OPENAI_KEY) return null;
@@ -2025,6 +2123,14 @@ module.exports = async function handler(req, res) {
                   const maisNovas = chkResp.ok ? await chkResp.json() : [];
                   if (maisNovas.length) continue;
                 } catch (e) { }
+
+                // ⚠️ NOVO 27/10: mesma rede de proteção que o caminho Meta
+                // ganhou — se o Brian já respondeu este contato nos últimos
+                // 25 segundos, não responde de novo.
+                if (await brianJaRespondeuAgora(clinic_id, phone, 25)) {
+                  await logDebug(clinic_id, phone, 'decisao_resposta', 'pulado', 'Brian já respondeu este contato há poucos segundos');
+                  continue;
+                }
 
                 let respBrian = await fetch(`${SUPABASE_URL}/functions/v1/brian`, {
                   method: 'POST',
