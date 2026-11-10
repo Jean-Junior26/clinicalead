@@ -14,23 +14,25 @@
 (function () {
   'use strict';
 
-  const EVO_URL = 'https://evolution-api-production-62cb.up.railway.app';
-  const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae000';
+  // 🔒 10/11/2026: chave da Evolution removida daqui — tudo passa pela ponte segura (evoRequest → /api/setup-webhook)
   const WEBHOOK_URL = 'https://clinicalead.vercel.app/api/webhook';
   const ADMIN_EMAIL = 'jeanjunior.digital@gmail.com';
 
   function getDb() { return (typeof db !== 'undefined') ? db : (window.supabaseClient || null); }
 
-  async function evoGet(path) {
-    const r = await fetch(EVO_URL + path, { headers: { apikey: EVO_KEY } });
-    return { ok: r.ok, status: r.status, data: r.ok ? await r.json() : await r.text() };
-  }
-  async function evoPost(path, body) {
-    const r = await fetch(EVO_URL + path, {
-      method: 'POST', headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+  async function evoPonte(method, path, body) {
+    const r = await fetch('/api/setup-webhook', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ acao: 'evo', method, path, body }),
     });
-    return { ok: r.ok, status: r.status, data: await r.text() };
+    const txt = await r.text();
+    let data; try { data = JSON.parse(txt); } catch { data = txt; }
+    return { ok: r.ok, status: r.status, data };
+  }
+  async function evoGet(path) { return evoPonte('GET', path); }
+  async function evoPost(path, body) {
+    const r = await evoPonte('POST', path, body);
+    return { ok: r.ok, status: r.status, data: typeof r.data === 'string' ? r.data : JSON.stringify(r.data) };
   }
 
   async function mapaEvolution() {
@@ -50,7 +52,12 @@
   async function temWebhook(instanceName) {
     try {
       const w = await evoGet('/webhook/find/' + instanceName);
-      return !!(w.ok && w.data && (w.data.url || (w.data.webhook && w.data.webhook.url)));
+      // ⚠️ 10/11/2026: antes bastava ter QUALQUER url — um webhook apontando
+      // pro endereço antigo/errado passava como "ok" e as mensagens recebidas
+      // nunca chegavam no Inbox. Agora exige a URL certa, ligado e com MESSAGES_UPSERT.
+      const d = (w.data && w.data.webhook) ? w.data.webhook : (w.data || {});
+      const evs = (d.events || []).map(e => String(e).toUpperCase().replace('.', '_'));
+      return !!(w.ok && d.url === WEBHOOK_URL && d.enabled !== false && (!evs.length || evs.includes('MESSAGES_UPSERT')));
     } catch (e) { return false; }
   }
 
@@ -63,6 +70,37 @@
   }
 
   // ── PROMOVE um número a PRINCIPAL (swap atômico e seguro) ──
+  // ⚠️ NOVO 10/11/2026 — CHECAGEM E CONSERTO DO WEBHOOK (caso José Bonifácio)
+  // Uso no console do CRM (logado como admin):  await checarWebhooks()
+  // Mostra, pra cada instância de cada clínica, se está conectada e se o
+  // webhook aponta pro lugar certo — e conserta na hora o que estiver errado.
+  window.checarWebhooks = async function (consertar = true) {
+    const _db = getDb();
+    const { data: cls } = await _db.from('clinicas').select('id, nome, whatsapp_instance');
+    const { data: extras } = await _db.from('instancias').select('clinic_id, instance_name');
+    const mapa = await mapaEvolution();
+    const linhas = [];
+    const todas = [
+      ...(cls || []).filter(c => c.whatsapp_instance).map(c => ({ clinica: c.nome, inst: c.whatsapp_instance, tipo: 'principal' })),
+      ...(extras || []).map(e => ({ clinica: ((cls || []).find(c => c.id === e.clinic_id) || {}).nome || e.clinic_id, inst: e.instance_name, tipo: 'extra' })),
+    ];
+    for (const t of todas) {
+      const w = await evoGet('/webhook/find/' + t.inst);
+      const d = (w.data && w.data.webhook) ? w.data.webhook : (w.data || {});
+      const certo = await temWebhook(t.inst);
+      let acao = certo ? 'ok' : '—';
+      if (!certo && consertar && mapa[t.inst]) {
+        const cfg = { enabled: true, url: WEBHOOK_URL, webhookByEvents: false, events: ['MESSAGES_UPSERT'] };
+        let r = await evoPost('/webhook/set/' + t.inst, { webhook: cfg });
+        if (!r.ok) r = await evoPost('/webhook/set/' + t.inst, cfg);
+        acao = r.ok ? '🔧 CONSERTADO' : '❌ falhou: ' + String(r.data).slice(0, 80);
+      }
+      linhas.push({ clinica: t.clinica, tipo: t.tipo, instancia: t.inst, estado: (mapa[t.inst] || {}).estado || 'NÃO EXISTE na Evolution', webhook_url: d.url || '(nenhum)', webhook_ok: certo, acao });
+    }
+    console.table(linhas);
+    return linhas;
+  };
+
   window.tornarPrincipal = async function (instanceName, clinicIdOpcional) {
     const _db = getDb();
     if (!_db) { alert('db indisponível'); return false; }
