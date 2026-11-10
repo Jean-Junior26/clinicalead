@@ -1958,8 +1958,52 @@ module.exports = async function handler(req, res) {
         const key = msg?.key || {};
         const jid = key?.remoteJid || '';
         const fromMe = key?.fromMe ?? false;
-        if (!jid || jid.includes('status@broadcast') || jid.includes('@g.us')) continue;
-        const phone = jid.replace('@s.whatsapp.net', '').replace('@c.us', '');
+        if (!jid || jid.includes('status@broadcast') || jid.includes('@g.us') || jid.includes('@newsletter')) continue;
+
+        // ⚠️ NOVO 10/11/2026 — CORREÇÃO DO "@lid" (caso José Bonifácio)
+        // O WhatsApp novo passou a identificar parte dos contatos por um
+        // código interno (ex: "184623551234567@lid") em vez do número.
+        // Antes o webhook gravava esse código como se fosse telefone, e
+        // a mensagem ia parar numa "conversa fantasma" que não batia com
+        // o paciente — por isso a resposta do Wilton pelo celular não
+        // aparecia na conversa do Inbox. Agora: pega o número real que a
+        // Evolution manda junto (remoteJidAlt / senderPn / participantAlt)
+        // e guarda o par código→número na tabela whatsapp_lid_map, pra
+        // resolver também as vezes em que o número real não vem junto.
+        let phone = jid.replace('@s.whatsapp.net', '').replace('@c.us', '');
+        if (jid.endsWith('@lid')) {
+          const lid = jid.replace('@lid', '');
+          const alt = [key?.remoteJidAlt, key?.senderPn, key?.participantAlt, msg?.senderPn, msg?.remoteJidAlt]
+            .find(v => typeof v === 'string' && v.includes('@s.whatsapp.net'));
+          let real = alt ? alt.replace('@s.whatsapp.net', '').replace(/\D/g, '') : null;
+          if (real && clinic_id) {
+            try {
+              await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_lid_map?on_conflict=clinic_id,lid`, {
+                method: 'POST',
+                headers: { ...sbHeaders, Prefer: 'resolution=merge-duplicates,return=minimal' },
+                body: JSON.stringify({ clinic_id, lid, phone: real, atualizado_em: new Date().toISOString() }),
+              });
+            } catch (e) { }
+          }
+          if (!real && clinic_id) {
+            try {
+              const mapResp = await fetch(
+                `${SUPABASE_URL}/rest/v1/whatsapp_lid_map?clinic_id=eq.${clinic_id}&lid=eq.${encodeURIComponent(lid)}&select=phone&limit=1`,
+                { headers: sbHeaders }
+              );
+              const mapArr = mapResp.ok ? await mapResp.json() : [];
+              if (mapArr[0]?.phone) real = mapArr[0].phone;
+            } catch (e) { }
+          }
+          if (real) {
+            phone = real;
+          } else {
+            // sem número real: grava mesmo assim (não perde a mensagem),
+            // mas registra no log pra gente achar e corrigir
+            phone = jid;
+            await logDebug(clinic_id, jid, 'lid_sem_numero', 'aviso', JSON.stringify(key).slice(0, 300));
+          }
+        }
 
         if (!fromMe && clinic_id) {
           let deveBloquear = false;
