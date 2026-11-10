@@ -1332,16 +1332,17 @@ const SUPABASE_URL = 'https://zcwntpkiispbhjjgidih.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_G6xEiLO4lcNaJafm9RA2tA_QLf4E2FV';
 
 // ── EVOLUTION API (WhatsApp) ──────────────────
-const EVO_URL = 'https://evolution-api-production-62cb.up.railway.app';
-const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae000';
-
+// 🔒 10/11/2026: a chave mestra da Evolution NÃO fica mais aqui (estava
+// visível pra qualquer um no código-fonte da página). Agora toda
+// operação passa pela ponte segura /api/setup-webhook (acao:'evo'),
+// que confere o login antes de repassar. Mesma assinatura de antes:
+// evoRequest(method, path, body) devolve o JSON da Evolution.
 async function evoRequest(method, path, body=null) {
-  const opts = {
-    method,
-    headers: { 'apikey': EVO_KEY, 'Content-Type': 'application/json' },
-  };
-  if (body) opts.body = JSON.stringify(body);
-  const r = await fetch(EVO_URL + path, opts);
+  const r = await fetch('/api/setup-webhook', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ acao: 'evo', method, path, body }),
+  });
   return r.json();
 }
 
@@ -1399,6 +1400,31 @@ async function sendAutomation(lead, autoType) {
 }
 const { createClient } = supabase;
 const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// 🔒 NOVO 10/11/2026 — toda chamada pras rotas /api/ do próprio CRM
+// leva o login junto (Authorization), sem precisar mexer em cada um
+// dos arquivos que chamam /api/send-message, /api/send-media etc.
+// As rotas agora recusam quem não está logado.
+(function () {
+  const _fetchOriginal = window.fetch.bind(window);
+  window.fetch = async function (input, init) {
+    try {
+      const url = typeof input === 'string' ? input : (input && input.url) || '';
+      const ehNossaApi = url.startsWith('/api/') || url.startsWith(location.origin + '/api/');
+      if (ehNossaApi) {
+        const { data } = await db.auth.getSession();
+        const token = data?.session?.access_token;
+        if (token) {
+          init = Object.assign({}, init || {});
+          const h = new Headers(init.headers || (typeof input !== 'string' && input.headers) || {});
+          if (!h.has('Authorization')) h.set('Authorization', 'Bearer ' + token);
+          init.headers = h;
+        }
+      }
+    } catch (e) { console.warn('[auth-fetch]', e); }
+    return _fetchOriginal(input, init);
+  };
+})();
 
 // ── STATE ─────────────────────────────────────
 let STATE = {
@@ -4098,7 +4124,7 @@ async function setupWebhookManual(instanceName) {
   toast('Configurando webhook...');
   try {
     await evoRequest('POST', `/webhook/set/${instanceName}`, {
-      url: 'https://zcwntpkiispbhjjgidih.supabase.co/rest/v1/rpc/whatsapp_webhook',
+      url: 'https://clinicalead.vercel.app/api/webhook',
       webhook_by_events: false,
       webhook_base64: false,
       events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE'],
@@ -4106,7 +4132,8 @@ async function setupWebhookManual(instanceName) {
     toast('Webhook configurado! ✓');
   } catch(e) {
     // Generate the Railway console command for manual setup
-    const cmd = `node -e "const h=require('http');const d=JSON.stringify({url:'https://zcwntpkiispbhjjgidih.supabase.co/rest/v1/rpc/whatsapp_webhook',webhook_by_events:false,webhook_base64:false,events:['MESSAGES_UPSERT']});h.request({host:'localhost',port:8080,path:'/webhook/set/${instanceName}',method:'POST',headers:{'apikey':'185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae000','Content-Type':'application/json','Content-Length':d.length}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>console.log(b))}).end(d);"`;
+    // 🔒 10/11/2026: o comando antigo pro console do Railway levava a chave mestra embutida — removido.
+    const cmd = 'Abra Gestão → WhatsApp e use "Tornar principal" / reconectar: o webhook é configurado automaticamente pela ponte segura.';
     // Copy to clipboard
     try {
       await navigator.clipboard.writeText(cmd);
@@ -4119,7 +4146,7 @@ async function setupWebhookManual(instanceName) {
 
 async function setupWebhookAutomatic(instanceName) {
   try {
-    const webhookUrl = 'https://zcwntpkiispbhjjgidih.supabase.co/rest/v1/rpc/whatsapp_webhook';
+    const webhookUrl = 'https://clinicalead.vercel.app/api/webhook';
     // Try to set webhook via Evolution API
     // Note: direct call may fail due to CORS — handled gracefully
     await evoRequest('POST', `/webhook/set/${instanceName}`, {
@@ -4135,7 +4162,7 @@ async function setupWebhookAutomatic(instanceName) {
     console.log('Webhook config note:', e.message);
     await db.from('clinicas').update({
       webhook_configured: false,
-      webhook_url: 'https://zcwntpkiispbhjjgidih.supabase.co/rest/v1/rpc/whatsapp_webhook'
+      webhook_url: 'https://clinicalead.vercel.app/api/webhook'
     }).eq('whatsapp_instance', instanceName);
   }
 }
@@ -4388,7 +4415,6 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   <script src="simulacoes-pagina-fix.js"></script>
   <script src="/disparos-fix.js"></script>
   <script src="/whatsapp-oficial-conectar-fix.js"></script>
-  <script src="/modo-apresentacao-fix.js"></script>
   <script src="/modo-apresentacao-fix.js"></script>
 </body>
 </html>
