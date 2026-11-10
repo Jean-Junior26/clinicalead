@@ -95,12 +95,19 @@
     // 3) envios já feitos (tarefas_resolvidas com chave regra:...)
     let feitos = {};
     try {
-      const { data } = await db.from('tarefas_resolvidas')
-        .select('tarefa_chave, resolvida_em').eq('clinic_id', clinic.id);
-      (data || []).forEach(t => {
-        const m = String(t.tarefa_chave || '').match(/^regra:[^:]+:(.+)$/);
-        if (m) { const leadId = m[1]; feitos[leadId] = (feitos[leadId] || 0) + 1; }
-      });
+      // ⚠️ 10/11/2026: lê em páginas (o Supabase corta em 1000 linhas)
+      for (let pg = 0; pg < 50; pg++) {
+        const { data } = await db.from('tarefas_resolvidas')
+          .select('tarefa_chave, resolvida_em').eq('clinic_id', clinic.id)
+          .like('tarefa_chave', 'regra:%')
+          .order('tarefa_chave', { ascending: true })
+          .range(pg * 1000, pg * 1000 + 999);
+        (data || []).forEach(t => {
+          const m = String(t.tarefa_chave || '').match(/^regra:[^:]+:(.+)$/);
+          if (m) { const leadId = m[1]; feitos[leadId] = (feitos[leadId] || 0) + 1; }
+        });
+        if (!data || data.length < 1000) break;
+      }
     } catch (e) {}
 
     // 4) conversas com follow-up bloqueado
