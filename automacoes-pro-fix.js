@@ -84,6 +84,7 @@
     }
     f += `, <b>então</b> ${rotuloAcao(r.acao)}`;
     if (r.acao === 'mudar_status' && r.nova_status) f += ` para "${r.nova_status}"`;
+    if (r.envio_hora_inicio && r.envio_hora_fim) f += ` · ⏰ entre ${String(r.envio_hora_inicio).slice(0,5)} e ${String(r.envio_hora_fim).slice(0,5)} (máx ${r.envio_max_por_hora || 20}/h)`;
     return f;
   }
 
@@ -256,6 +257,26 @@
             </select>
           </div>
 
+          <div id="apBlocoHorario" style="display:none;background:var(--bg-elevated);border-radius:10px;padding:14px;">
+            <label class="form-label" style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:8px;">
+              <input type="checkbox" id="apHorarioOn" onchange="apAtualizarCampos()" ${r.envio_hora_inicio ? 'checked' : ''}/>
+              <span>⏰ <b>Escolher horário de envio</b></span>
+            </label>
+            <div id="apHorarioCampos" style="display:${r.envio_hora_inicio ? 'block' : 'none'};margin-top:10px;font-size:13px;line-height:2.2;">
+              Enviar entre
+              <input type="time" class="form-input" id="apHoraIni" value="${r.envio_hora_inicio || '09:00'}" style="display:inline-block;width:auto;font-size:13px;padding:4px 8px;"/>
+              e
+              <input type="time" class="form-input" id="apHoraFim" value="${r.envio_hora_fim || '11:00'}" style="display:inline-block;width:auto;font-size:13px;padding:4px 8px;"/>
+              <br>no máximo
+              <input type="number" class="form-input" id="apMaxHora" value="${r.envio_max_por_hora || 20}" min="1" max="60" style="width:64px;display:inline-block;font-size:13px;padding:4px 8px;"/>
+              mensagens por hora
+              <div style="font-size:11px;color:var(--gold);margin-top:6px;background:var(--gold-pale);border:1px solid var(--gold-border);border-radius:8px;padding:8px 10px;line-height:1.5;">
+                🛡️ <b>Anti-bloqueio:</b> o sistema <b>não</b> manda tudo de uma vez às 9h — ele <b>espalha</b> os envios dentro da janela, com intervalos aleatórios, respeitando o limite por hora. O que não couber na janela fica pro dia seguinte, no mesmo horário.
+                Recomendado: janela de <b>2 horas ou mais</b> e até <b>20/hora</b> (número novo ou já restringido: <b>10/hora</b>).
+              </div>
+            </div>
+          </div>
+
           <div id="apBlocoProcedimento" style="display:none;">
             <label class="form-label" style="font-size:12px;color:var(--text-muted);">Só para o procedimento (opcional)</label>
             <input type="text" class="form-input" id="apCondProc" placeholder="Ex: lentes, implante, prótese... (vazio = todos os leads)" style="width:100%;" value="${(r.condicao && r.condicao.procedimento) || ''}"/>
@@ -342,6 +363,11 @@
     const blocoMsg = document.getElementById('apBlocoMensagem');
     const blocoStatus = document.getElementById('apBlocoStatus');
     if (blocoMsg) blocoMsg.style.display = (acao === 'mensagem' || acao === 'mensagem_ia' || acao === 'tarefa') ? 'block' : 'none';
+    // ⚠️ NOVO 10/11/2026: horário de envio (só pra ação que manda mensagem)
+    const blocoHora = document.getElementById('apBlocoHorario');
+    if (blocoHora) blocoHora.style.display = (acao === 'mensagem' || acao === 'mensagem_ia') ? 'block' : 'none';
+    const camposHora = document.getElementById('apHorarioCampos');
+    if (camposHora) camposHora.style.display = document.getElementById('apHorarioOn')?.checked ? 'block' : 'none';
     // hint do follow-up IA (só quando a ação é mensagem_ia) + cadeado se a clínica não tem Brian
     const hintIA = document.getElementById('apHintIA');
     if (hintIA) {
@@ -403,21 +429,33 @@
 
     if ((acao === 'mensagem' || acao === 'mensagem_ia' || acao === 'tarefa') && !mensagem) { setErro(acao === 'mensagem_ia' ? 'Escreva a mensagem plano B (usada quando a IA não roda).' : 'Escreva a mensagem.'); return; }
 
+    // ⚠️ NOVO 10/11/2026: janela de horário de envio (anti-ban)
+    let envio_hora_inicio = null, envio_hora_fim = null, envio_max_por_hora = null;
+    if ((acao === 'mensagem' || acao === 'mensagem_ia') && document.getElementById('apHorarioOn')?.checked) {
+      envio_hora_inicio = document.getElementById('apHoraIni').value || null;
+      envio_hora_fim = document.getElementById('apHoraFim').value || null;
+      envio_max_por_hora = Math.min(60, Math.max(1, parseInt(document.getElementById('apMaxHora').value) || 20));
+      if (!envio_hora_inicio || !envio_hora_fim) { setErro('Preencha o horário de início e fim do envio.'); return; }
+      if (envio_hora_fim <= envio_hora_inicio) { setErro('O horário final precisa ser depois do inicial.'); return; }
+    }
+
     const dados = {
       nome, evento, espera_valor, espera_unidade, acao, mensagem, nova_status,
       imagem_url,
       condicao,
+      envio_hora_inicio, envio_hora_fim, envio_max_por_hora,
       ativo: true,
       global,
       clinic_id: global ? null : clinic.id,
     };
 
     try {
-      if (idExistente) {
-        await db.from('automacoes_regras').update(dados).eq('id', idExistente);
-      } else {
-        await db.from('automacoes_regras').insert(dados);
-      }
+      // ⚠️ 10/11/2026: antes o erro do banco era ignorado (fechava o modal
+      // como se tivesse salvo). Agora mostra o erro de verdade.
+      const { error: errSalvar } = idExistente
+        ? await db.from('automacoes_regras').update(dados).eq('id', idExistente)
+        : await db.from('automacoes_regras').insert(dados);
+      if (errSalvar) throw errSalvar;
       document.getElementById('apModal').remove();
       if (typeof toast === 'function') toast(idExistente ? 'Automação salva ✓' : 'Automação criada! 🎉');
       await carregarRegras();
