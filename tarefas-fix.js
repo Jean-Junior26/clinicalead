@@ -65,18 +65,34 @@ async function tarefasCarregarDados() {
   // fácil — e as tarefas concluídas que ficavam "depois da linha 1000"
   // simplesmente não eram lidas e reapareciam. Agora: ignora as chaves
   // "regra:" (não são tarefas) e lê em páginas de 1000 até acabar.
-  TAREFAS.resolvidas = {};
-  for (let pagina = 0; pagina < 50; pagina++) {
+  // ⚠️ AJUSTE 10/11 (2ª rodada): a 1ª versão parava de ler quando uma
+  // página vinha com menos de 1000 — mas se o Supabase do projeto estiver
+  // configurado pra devolver MENOS que 1000 por vez, ela parava logo na
+  // 1ª página e as conclusões continuavam "sumindo". Agora avança pelo
+  // tamanho que realmente veio e só para quando vier página VAZIA.
+  // Também monta tudo numa variável local e só troca no final — antes,
+  // duas cargas ao mesmo tempo (o painel recarrega várias vezes) podiam
+  // zerar a lista uma da outra no meio do caminho.
+  const minhaCarga = (TAREFAS._cargaId = (TAREFAS._cargaId || 0) + 1);
+  const resolvidasNovas = {};
+  let offset = 0, totalLidas = 0, falhou = false;
+  for (let volta = 0; volta < 200; volta++) {
     const { data: res, error: errRes } = await db.from('tarefas_resolvidas')
       .select('tarefa_chave, adiada_ate')
       .eq('clinic_id', clinic.id)
       .not('tarefa_chave', 'like', 'regra:%')
       .order('tarefa_chave', { ascending: true })
-      .range(pagina * 1000, pagina * 1000 + 999);
-    if (errRes) { console.error('[tarefas] erro ao ler resolvidas:', errRes); break; }
-    (res || []).forEach(r => { TAREFAS.resolvidas[r.tarefa_chave] = r; });
-    if (!res || res.length < 1000) break;
+      .range(offset, offset + 999);
+    if (errRes) { console.error('[tarefas] erro ao ler resolvidas:', errRes); falhou = true; break; }
+    if (!res || !res.length) break;
+    res.forEach(r => { resolvidasNovas[r.tarefa_chave] = r; });
+    offset += res.length;
+    totalLidas += res.length;
   }
+  if (minhaCarga !== TAREFAS._cargaId) return false; // outra carga mais nova assumiu
+  // se a leitura falhou no meio, não joga fora o que já se sabia
+  TAREFAS.resolvidas = falhou ? Object.assign({}, TAREFAS.resolvidas || {}, resolvidasNovas) : resolvidasNovas;
+  console.log(`[tarefas] ${totalLidas} tarefas concluídas/adiadas carregadas`);
 
   // ── ÚLTIMA MENSAGEM por lead (pra saber se já houve resposta do Brian/humano) ──
   // Um lead só está "esfriando" se a última mensagem foi DELE (esperando resposta).
