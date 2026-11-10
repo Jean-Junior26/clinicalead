@@ -1,5 +1,52 @@
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  // ════════════════════════════════════════════════════════════
+  // 🔒 NOVO 10/11/2026 — PORTARIA DE SEGURANÇA
+  // Antes, qualquer pessoa na internet podia chamar esta rota e mandar
+  // mensagem pelo WhatsApp de qualquer clínica (bastava saber o id).
+  // Agora só passa quem está LOGADO no CRM e tem acesso àquela clínica
+  // (dono, colaborador ou admin geral). Chamada interna de servidor
+  // (Edge Function) passa usando a SERVICE KEY no Authorization.
+  // O index.html anexa o login automaticamente em toda chamada /api/.
+  // ════════════════════════════════════════════════════════════
+  const __SB_URL = process.env.SUPABASE_URL || 'https://zcwntpkiispbhjjgidih.supabase.co';
+  const __SB_KEY = process.env.SUPABASE_SERVICE_KEY;
+  const __ADMIN_EMAIL = 'jeanjunior.digital@gmail.com';
+  async function __portaria(clinicIdPedido, instancePedida, soUsuario) {
+    const auth = String(req.headers?.authorization || '');
+    const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+    if (!token) return { ok: false, status: 401, erro: 'Faça login no CRM de novo (sessão ausente)' };
+    if (__SB_KEY && token === __SB_KEY) return { ok: true, interno: true, user: null };
+    const sbH = { apikey: __SB_KEY, Authorization: `Bearer ${__SB_KEY}` };
+    const uResp = await fetch(`${__SB_URL}/auth/v1/user`, { headers: { apikey: __SB_KEY, Authorization: `Bearer ${token}` } });
+    if (!uResp.ok) return { ok: false, status: 401, erro: 'Sessão expirada — saia e entre de novo no CRM' };
+    const user = await uResp.json();
+    if (!user?.id) return { ok: false, status: 401, erro: 'Sessão inválida' };
+    const ehAdmin = String(user.email || '').toLowerCase() === __ADMIN_EMAIL;
+    if (soUsuario) return { ok: true, user, ehAdmin };
+    let clinicId = clinicIdPedido || null;
+    if (!clinicId && instancePedida) {
+      const inst = encodeURIComponent(instancePedida);
+      const a = await fetch(`${__SB_URL}/rest/v1/clinicas?whatsapp_instance=eq.${inst}&select=id&limit=1`, { headers: sbH });
+      const aa = a.ok ? await a.json() : [];
+      clinicId = aa[0]?.id || null;
+      if (!clinicId) {
+        const b = await fetch(`${__SB_URL}/rest/v1/instancias?instance_name=eq.${inst}&select=clinic_id&limit=1`, { headers: sbH });
+        const bb = b.ok ? await b.json() : [];
+        clinicId = bb[0]?.clinic_id || null;
+      }
+    }
+    if (ehAdmin) return { ok: true, user, ehAdmin, clinicId };
+    if (!clinicId) return { ok: false, status: 403, erro: 'Clínica não identificada para este pedido' };
+    const cid = encodeURIComponent(clinicId);
+    const dono = await fetch(`${__SB_URL}/rest/v1/clinicas?id=eq.${cid}&user_id=eq.${user.id}&select=id&limit=1`, { headers: sbH });
+    if (dono.ok && (await dono.json()).length) return { ok: true, user, ehAdmin, clinicId };
+    const colab = await fetch(`${__SB_URL}/rest/v1/clinic_users?clinic_id=eq.${cid}&user_id=eq.${user.id}&select=id&limit=1`, { headers: sbH });
+    if (colab.ok && (await colab.json()).length) return { ok: true, user, ehAdmin, clinicId };
+    return { ok: false, status: 403, erro: 'Sem permissão para esta clínica' };
+  }
+  const __acesso = await __portaria(req.body?.clinic_id, req.body?.instance);
+  if (!__acesso.ok) return res.status(__acesso.status).json({ error: __acesso.erro });
 
   // ⚠️ NOVO 01/08 — finaliza o Embedded Signup: troca o "code" que o
   // botão do frontend recebeu por um token de acesso de verdade, busca
@@ -166,7 +213,7 @@ export default async function handler(req, res) {
   }
 
   const EVO_URL = 'https://evolution-api-production-62cb.up.railway.app';
-  const EVO_KEY = '185aff001ce6bb5b9cadec59294ead845c35217a1688d5d77f58a668d98ae000';
+  const EVO_KEY = process.env.EVOLUTION_API_KEY; // 🔒 10/11/2026: chave saiu do código, vem da Vercel
   const SUPABASE_URL = process.env.SUPABASE_URL || 'https://zcwntpkiispbhjjgidih.supabase.co';
   const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
