@@ -58,11 +58,25 @@ async function tarefasCarregarDados() {
   } catch (ePed) { console.warn('[tarefas] falha ao buscar pedidos de remarcar/cancelar:', ePed); }
 
   // Tarefas já resolvidas/adiadas
-  const { data: res } = await db.from('tarefas_resolvidas')
-    .select('tarefa_chave, adiada_ate')
-    .eq('clinic_id', clinic.id);
+  // ⚠️ CORREÇÃO 10/11/2026 — "concluí a tarefa, dei F5 e ela voltou"
+  // O Supabase devolve no MÁXIMO 1000 linhas por consulta. Essa tabela
+  // também guarda o registro de cada envio das Automações PRO (chaves
+  // "regra:..."), então em clínica com muito movimento passava de 1000
+  // fácil — e as tarefas concluídas que ficavam "depois da linha 1000"
+  // simplesmente não eram lidas e reapareciam. Agora: ignora as chaves
+  // "regra:" (não são tarefas) e lê em páginas de 1000 até acabar.
   TAREFAS.resolvidas = {};
-  (res || []).forEach(r => { TAREFAS.resolvidas[r.tarefa_chave] = r; });
+  for (let pagina = 0; pagina < 50; pagina++) {
+    const { data: res, error: errRes } = await db.from('tarefas_resolvidas')
+      .select('tarefa_chave, adiada_ate')
+      .eq('clinic_id', clinic.id)
+      .not('tarefa_chave', 'like', 'regra:%')
+      .order('tarefa_chave', { ascending: true })
+      .range(pagina * 1000, pagina * 1000 + 999);
+    if (errRes) { console.error('[tarefas] erro ao ler resolvidas:', errRes); break; }
+    (res || []).forEach(r => { TAREFAS.resolvidas[r.tarefa_chave] = r; });
+    if (!res || res.length < 1000) break;
+  }
 
   // ── ÚLTIMA MENSAGEM por lead (pra saber se já houve resposta do Brian/humano) ──
   // Um lead só está "esfriando" se a última mensagem foi DELE (esperando resposta).
@@ -450,6 +464,7 @@ function tarefasRenderCard() {
       <h3><i class="ti ti-checklist" style="margin-right:6px;color:var(--gold);font-size:16px;"></i>Tarefas de hoje</h3>
       <span style="font-size:11px;color:var(--text-muted);">
         ${lista.length} pendente${lista.length === 1 ? '' : 's'}${urgentes ? ` · <span style="color:var(--coral);font-weight:600;">${urgentes} urgente${urgentes === 1 ? '' : 's'}</span>` : ''}
+        ${lista.length ? `<button class="btn btn-sm" onclick="tarefasLimparTodas()" title="Marcar todas as tarefas da lista como concluídas" style="margin-left:10px;"><i class="ti ti-clear-all"></i> Limpar todas</button>` : ''}
       </span>
     </div>`;
 
@@ -556,10 +571,17 @@ function tarefasMostrarPopup() {
 async function tarefaConcluir(chave) {
   const clinic = currentClinic();
   if (!clinic) return;
-  await db.from('tarefas_resolvidas').upsert(
+  // ⚠️ 10/11/2026: antes o erro do banco era ignorado — a tarefa sumia da
+  // tela mas não era salva, e voltava no F5 sem ninguém saber por quê.
+  const { error: errConcl } = await db.from('tarefas_resolvidas').upsert(
     { clinic_id: clinic.id, tarefa_chave: chave, adiada_ate: null, resolvida_em: new Date().toISOString() },
     { onConflict: 'clinic_id,tarefa_chave' }
   );
+  if (errConcl) {
+    console.error('[tarefas] erro ao concluir:', errConcl);
+    toast('Não consegui salvar a conclusão: ' + (errConcl.message || 'erro no banco'), 'error');
+    return;
+  }
   // se for tarefa de conversa escalada do Brian, desmarca o escalado (não reaparece)
   if (String(chave).startsWith('brian_escalou:')) {
     try {
@@ -578,14 +600,66 @@ async function tarefaConcluir(chave) {
   toast('Tarefa concluída! ✓');
 }
 
+// ⚠️ NOVO 10/11/2026 — LIMPAR TODAS (pra clínica com tarefa acumulada)
+// Marca como concluídas TODAS as tarefas que estão na lista agora.
+// Pode escolher limpar só as de uma prioridade (ex: só "relacionamento").
+async function tarefasLimparTodas() {
+  const clinic = currentClinic();
+  if (!clinic) return;
+  const lista = (TAREFAS.lista || []).slice();
+  if (!lista.length) return;
+  const urg = lista.filter(t => t.prio === 1).length;
+  const resp = prompt(
+    `Limpar tarefas acumuladas (${lista.length} no total)\n\n` +
+    `Digite:\n  1 = limpar TODAS (${lista.length})\n  2 = todas MENOS as urgentes (${lista.length - urg})\n` +
+    `  3 = só as de relacionamento (${lista.filter(t => t.prio === 3).length})\n\n` +
+    `Isso marca como concluídas (não apaga paciente, consulta nem mensagem).`, '2');
+  if (resp === null) return;
+  const op = String(resp).trim();
+  const alvo = op === '1' ? lista : op === '2' ? lista.filter(t => t.prio !== 1) : op === '3' ? lista.filter(t => t.prio === 3) : null;
+  if (!alvo) { toast('Opção inválida — digite 1, 2 ou 3', 'error'); return; }
+  if (!alvo.length) { toast('Nenhuma tarefa nesse filtro'); return; }
+
+  const agora = new Date().toISOString();
+  const linhas = alvo.map(t => ({ clinic_id: clinic.id, tarefa_chave: t.chave, adiada_ate: null, resolvida_em: agora }));
+  let salvas = 0;
+  for (let i = 0; i < linhas.length; i += 200) {
+    const lote = linhas.slice(i, i + 200);
+    const { error } = await db.from('tarefas_resolvidas').upsert(lote, { onConflict: 'clinic_id,tarefa_chave' });
+    if (error) {
+      console.error('[tarefas] erro ao limpar em massa:', error);
+      toast(`Parei no meio: ${salvas} limpas, erro no banco (${error.message || 'desconhecido'})`, 'error');
+      break;
+    }
+    lote.forEach(l => { TAREFAS.resolvidas[l.tarefa_chave] = { adiada_ate: null }; });
+    salvas += lote.length;
+  }
+  // tarefas de conversa escalada do Brian: desmarca o escalado também
+  const sufixos = alvo.filter(t => String(t.chave).startsWith('brian_escalou:')).map(t => t.chave.split(':')[1]);
+  for (const suf of sufixos) {
+    try {
+      await db.from('brian_conversa').update({ escalado: false }).eq('clinic_id', clinic.id).ilike('phone', `%${suf}%`);
+    } catch (e) { console.error('[tarefas] desescalar', e); }
+  }
+  tarefasGerar();
+  tarefasRenderCard();
+  tarefasAtualizarBadge();
+  if (salvas === linhas.length) toast(`${salvas} tarefa${salvas === 1 ? '' : 's'} limpa${salvas === 1 ? '' : 's'} ✓`);
+}
+
 async function tarefaAdiar(chave) {
   const clinic = currentClinic();
   if (!clinic) return;
   const amanha = tDiasFrente(1);
-  await db.from('tarefas_resolvidas').upsert(
+  const { error: errAdiar } = await db.from('tarefas_resolvidas').upsert(
     { clinic_id: clinic.id, tarefa_chave: chave, adiada_ate: amanha, resolvida_em: new Date().toISOString() },
     { onConflict: 'clinic_id,tarefa_chave' }
   );
+  if (errAdiar) {
+    console.error('[tarefas] erro ao adiar:', errAdiar);
+    toast('Não consegui salvar o adiamento: ' + (errAdiar.message || 'erro no banco'), 'error');
+    return;
+  }
   TAREFAS.resolvidas[chave] = { adiada_ate: amanha };
   tarefasGerar();
   tarefasRenderCard();
