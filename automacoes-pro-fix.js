@@ -50,9 +50,14 @@
   async function carregarRegras() {
     const clinic = currentClinic();
     if (!clinic) { AP.regras = []; return; }
+    // ⚠️ 11/11/2026 — UNIDADES INDEPENDENTES: cada clínica vê e roda só as
+    // PRÓPRIAS regras. As antigas regras globais ("do sistema") viraram
+    // cópias dentro de cada clínica e ficam guardadas só como MODELO
+    // (botão "Adicionar modelos prontos"), sem disparar pra ninguém.
     const { data: regras } = await db.from('automacoes_regras')
       .select('*')
-      .or(`global.eq.true,clinic_id.eq.${clinic.id}`)
+      .eq('clinic_id', clinic.id)
+      .or('global.is.null,global.eq.false')
       .order('created_at', { ascending: false });
     AP.regras = regras || [];
 
@@ -61,6 +66,35 @@
       .select('regra_id').eq('clinic_id', clinic.id);
     AP.desativadas = new Set((off || []).map(o => o.regra_id));
   }
+
+  // ⚠️ NOVO 11/11/2026 — copia as regras-modelo (antigas globais) pra esta
+  // unidade, todas DESLIGADAS. Pula as que já existem com o mesmo nome.
+  window.apCopiarModelos = async function () {
+    const clinic = currentClinic();
+    if (!clinic) return;
+    try {
+      const { data: modelos, error } = await db.from('automacoes_regras').select('*').eq('global', true);
+      if (error) throw error;
+      const jaTem = new Set((AP.regras || []).map(r => (r.nome || '') + '|' + (r.evento || '')));
+      const novos = (modelos || []).filter(m => !jaTem.has((m.nome || '') + '|' + (m.evento || '')));
+      if (!novos.length) { toast('Esta unidade já tem todos os modelos 👍'); return; }
+      if (!confirm(`Adicionar ${novos.length} modelo(s) nesta unidade?\n\nEles entram DESLIGADOS — você revisa e liga só os que quiser.`)) return;
+      const linhas = novos.map(m => {
+        const c = Object.assign({}, m);
+        delete c.id; delete c.created_at; delete c.updated_at;
+        c.global = false; c.clinic_id = clinic.id; c.ativo = false;
+        return c;
+      });
+      const { error: e2 } = await db.from('automacoes_regras').insert(linhas);
+      if (e2) throw e2;
+      toast(`${linhas.length} modelo(s) adicionados (desligados) ✓`);
+      await carregarRegras();
+      renderLista();
+    } catch (e) {
+      console.error('[automacoes-pro] copiar modelos', e);
+      toast('Erro ao copiar modelos: ' + (e.message || ''), 'error');
+    }
+  };
 
   // uma regra está ativa PRA ESTA CLÍNICA?
   function regraAtivaAqui(r) {
@@ -102,6 +136,7 @@
           <h1 style="margin:0;">Automações</h1>
           <p style="color:var(--text-muted);font-size:13px;margin:4px 0 0;">Crie mensagens, lembretes e tarefas automáticas</p>
         </div>
+        <button class="btn" onclick="apCopiarModelos()" title="Copia as automações-modelo pra esta unidade, DESLIGADAS — você revisa e liga as que quiser"><i class="ti ti-copy"></i> Adicionar modelos prontos</button>
         <button class="btn btn-primary" onclick="apAbrirCriar()"><i class="ti ti-plus"></i> Criar automação</button>
       </div>
       <div id="apLista"></div>`;
@@ -129,7 +164,8 @@
 
     if (!AP.regras.length) {
       cont.innerHTML = `<div class="card" style="padding:30px;text-align:center;color:var(--text-secondary);">
-        Nenhuma automação ainda. Clique em <b>Criar automação</b> para começar! 🚀</div>`;
+        Nenhuma automação nesta unidade ainda. Clique em <b>Criar automação</b> ou em <b>Adicionar modelos prontos</b> para começar! 🚀<br>
+        <span style="font-size:12px;color:var(--text-muted);">Cada unidade é independente: só é enviado o que estiver ligado aqui.</span></div>`;
       return;
     }
 
@@ -327,11 +363,7 @@
             <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Ex.: "3 dias antes", "no dia", "2 dias depois". Aplica a todas as mensalidades dos pacientes.</div>
           </div>
 
-          ${admin ? `
-          <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
-            <input type="checkbox" id="apGlobal" ${r.global ? 'checked' : ''}>
-            <span>Disponibilizar para <b>todas as clínicas</b> (automação do sistema)</span>
-          </label>` : ''}
+          <!-- 11/11/2026: opção "todas as clínicas" removida — cada unidade é independente -->
 
           <button class="btn btn-primary" onclick="apSalvar('${ehEdicao ? r.id : ''}')" style="width:100%;">
             <i class="ti ti-device-floppy"></i> ${ehEdicao ? 'Salvar alterações' : 'Criar automação'}
@@ -424,8 +456,7 @@
     const condProcTxt = (evento === 'dias_sem_resposta') ? ((document.getElementById('apCondProc')?.value || '').trim()) : '';
     const condicao = condProcTxt ? { procedimento: condProcTxt } : null;
     const nova_status = (acao === 'mudar_status') ? document.getElementById('apNovoStatus').value : null;
-    const ehGlobalCheck = document.getElementById('apGlobal');
-    const global = ehGlobalCheck ? ehGlobalCheck.checked : false;
+    const global = false; // 11/11/2026: toda regra nova é da própria unidade
 
     if ((acao === 'mensagem' || acao === 'mensagem_ia' || acao === 'tarefa') && !mensagem) { setErro(acao === 'mensagem_ia' ? 'Escreva a mensagem plano B (usada quando a IA não roda).' : 'Escreva a mensagem.'); return; }
 
