@@ -6,49 +6,97 @@
 // ============================================================
 
 // Abre o Inbox interno na conversa de um telefone
-async function abrirInboxConversa(telefone) {
+// ⚠️ REESCRITO 11/11/2026 — "clico no WhatsApp do lead e não acha a
+// conversa / quando acha, vai pro primeiro da lista" (Follow-ups de JB)
+// Problemas da versão anterior:
+//  1) o Inbox só carrega as ~8000 mensagens mais RECENTES da clínica —
+//     lead com conversa mais antiga (o caso típico de follow-up!) não
+//     estava na lista e a busca desistia;
+//  2) lead que nunca trocou mensagem não tinha conversa nenhuma pra abrir;
+//  3) em clínica com 2 números (JB), o filtro de número podia ESCONDER a
+//     conversa certa — e a tela continuava mostrando o topo da lista;
+//  4) um segundo carregamento do Inbox (disparado pela troca de página)
+//     chegava depois e redesenhava a lista por cima.
+// Agora: carrega o Inbox, procura pelo final do telefone (8 dígitos); se
+// não estiver na lista, busca o histórico DAQUELE telefone direto no banco;
+// se não tiver histórico, cria a conversa vazia (pra mandar a 1ª msg);
+// ajusta o filtro de número, abre, rola até ela e confere de novo depois.
+async function abrirInboxConversa(telefone, nomeOpcional) {
   const digitos = String(telefone || '').replace(/\D/g, '');
-  if (!digitos) { if (typeof toast === 'function') toast('Paciente sem telefone cadastrado', 'error'); return; }
-
-  // 1. Vai para a página do Inbox
-  if (typeof showPage === 'function') showPage('inbox');
-
-  // ⚠️ AJUSTE 12/07: força um carregamento FRESCO do inbox aqui mesmo,
-  // em vez de só esperar que outra parte do sistema já tenha carregado
-  // a tempo. Antes disso, dava corrida de tempo: ao vir de outra página
-  // (ex: Agenda), o Inbox podia ainda não ter terminado de carregar (ou
-  // estar com dado de outra clínica/momento), e a busca desistia achando
-  // "não existe conversa" mesmo quando ela existia de verdade.
-  if (typeof loadInboxChats === 'function') {
-    try { await loadInboxChats(); } catch (e) { console.error('[abrirInboxConversa] falha ao recarregar:', e); }
-  }
-
-  // 2. Espera os chats carregarem e tenta abrir o do paciente
-  // compara pelos últimos 8 dígitos — mesma convenção usada no resto do
-  // sistema (webhook.js, disparar-automacoes). Usar 8 em vez de 9 é
-  // proposital: é resistente ao problema do "9º dígito" do celular
-  // brasileiro (o número pode chegar salvo com ou sem esse dígito extra
-  // dependendo da origem, e só os últimos 8 são garantidamente iguais
-  // nos dois formatos).
+  if (digitos.length < 8) { if (typeof toast === 'function') toast('Lead sem telefone válido cadastrado', 'error'); return; }
   const alvo = digitos.slice(-8);
-  let tentativas = 0;
+  const clinic = (typeof currentClinic === 'function') ? currentClinic() : null;
+  if (!clinic) return;
 
-  const tentarAbrir = () => {
-    tentativas++;
-    if (typeof INBOX === 'undefined' || !INBOX.chats || !INBOX.chats.length) {
-      if (tentativas < 20) return setTimeout(tentarAbrir, 300);
+  if (typeof showPage === 'function') showPage('inbox');
+  if (typeof loadInboxChats === 'function') {
+    try { await loadInboxChats(); } catch (e) { console.error('[abrirInboxConversa] recarregar:', e); }
+  }
+  if (typeof INBOX === 'undefined') return;
+  if (!Array.isArray(INBOX.chats)) INBOX.chats = [];
+
+  const daLista = () => INBOX.chats
+    .filter(c => String(c.phone || '').replace(/\D/g, '').slice(-8) === alvo)
+    .sort((a, b) => (b.time || 0) - (a.time || 0));
+
+  let chat = daLista()[0];
+
+  // não está entre as conversas carregadas → busca o histórico dele no banco
+  if (!chat) {
+    try {
+      const { data: msgs } = await db.from('mensagens').select('*')
+        .eq('clinic_id', clinic.id)
+        .ilike('phone', `%${alvo}`)
+        .order('created_at', { ascending: true })
+        .limit(1000);
+      const lead = (STATE.leads || []).find(l => String(l.telefone || '').replace(/\D/g, '').slice(-8) === alvo);
+      const lista = msgs || [];
+      const ultima = lista[lista.length - 1];
+      const inst = (ultima && ultima.instance_name) || clinic.whatsapp_instance || 'sem_numero';
+      let temVarios = false;
+      try { temVarios = INBOX.chats.some(c => String(c.id || '').includes('|')); } catch (e) { }
+      chat = {
+        id: temVarios ? (alvo + '|' + inst) : alvo,
+        phone: (ultima && String(ultima.phone || '').replace(/\D/g, '')) || digitos,
+        instance_name: inst,
+        name: (lead && lead.nome) || nomeOpcional || digitos,
+        lastMsg: ultima ? ((typeof formatLastMsg === 'function') ? formatLastMsg(ultima) : (ultima.content || '')) : 'Nenhuma mensagem ainda',
+        time: ultima ? new Date(ultima.created_at) : new Date(),
+        unread: 0, lead, messages: lista,
+      };
+      INBOX.chats = INBOX.chats.filter(c => c.id !== chat.id);
+      INBOX.chats.unshift(chat);
+    } catch (e) {
+      console.error('[abrirInboxConversa] buscar histórico:', e);
+      if (typeof toast === 'function') toast('Não consegui buscar a conversa deste lead', 'error');
       return;
     }
-    const chat = INBOX.chats.find(c => (c.phone || '').replace(/\D/g, '').slice(-8) === alvo);
-    if (chat) {
-      if (typeof openChat === 'function') openChat(chat.id);
-    } else {
-      // Conversa ainda não existe (paciente nunca trocou mensagem).
-      if (typeof toast === 'function') toast('Ainda não há conversa com este paciente no Inbox', 'info');
-      if (tentativas < 8) return setTimeout(tentarAbrir, 400);
-    }
+  }
+
+  const abrir = async () => {
+    // garante que o filtro de número não esconda a conversa
+    try {
+      if (typeof INBOXNUM !== 'undefined' && INBOXNUM.ativa && INBOXNUM.ativa !== 'todos' &&
+          chat.instance_name && INBOXNUM.ativa !== chat.instance_name && typeof selecionarNumeroInbox === 'function') {
+        selecionarNumeroInbox('todos');
+      }
+    } catch (e) { }
+    if (!INBOX.chats.some(c => c.id === chat.id)) { INBOX.chats.unshift(chat); }
+    if (typeof renderInboxList === 'function') renderInboxList();
+    if (typeof openChat === 'function') await openChat(chat.id);
+    // rola a lista até a conversa
+    try {
+      const item = [...document.querySelectorAll('#inboxList .inbox-item')]
+        .find(el => (el.getAttribute('onclick') || '').includes(`'${chat.id}'`));
+      if (item) item.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    } catch (e) { }
   };
-  setTimeout(tentarAbrir, 400);
+
+  await abrir();
+  // se outro carregamento do Inbox redesenhar por cima, reabre a certa
+  setTimeout(() => {
+    try { if (!INBOX.activeChat || INBOX.activeChat.id !== chat.id || !INBOX.chats.some(c => c.id === chat.id)) abrir(); } catch (e) { }
+  }, 1500);
 }
 
 // ── Substitui as funções antigas que abriam o WhatsApp Web ───
@@ -58,6 +106,7 @@ async function abrirInboxConversa(telefone) {
   function aplicarOverride() {
     if (typeof window !== 'undefined') {
       window.tarefaWhats = function (telefone) { abrirInboxConversa(telefone); };
+      window.abrirInboxConversa = abrirInboxConversa;
       window.irInbox = function (telefone) { abrirInboxConversa(telefone); };
       window.tarefaAbrirInbox = function (telefone) { abrirInboxConversa(telefone); };
     }
