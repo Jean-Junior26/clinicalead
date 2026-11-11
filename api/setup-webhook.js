@@ -75,6 +75,9 @@ export default async function handler(req, res) {
     { m: 'POST',   re: /^\/webhook\/set\/([^/?#]+)$/,                  inst: 1 },
     { m: 'POST',   re: /^\/message\/sendWhatsAppAudio\/([^/?#]+)$/,    inst: 1 },
     { m: 'POST',   re: /^\/message\/sendText\/([^/?#]+)$/,             inst: 1 },
+    // 11/11/2026: configurações da instância (ignorar grupos/status etc.)
+    { m: 'GET',    re: /^\/settings\/find\/([^/?#]+)$/,                inst: 1 },
+    { m: 'POST',   re: /^\/settings\/set\/([^/?#]+)$/,                 inst: 1 },
   ];
 
   const acao = req.body?.acao || 'setup_webhook';
