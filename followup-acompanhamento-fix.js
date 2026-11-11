@@ -73,12 +73,20 @@
     // 1) leads em aberto (mesma regra do motor: fora de fechado/compareceu)
     let leads = [];
     try {
-      const { data } = await db.from('leads')
-        .select('id, nome, telefone, procedimento, status, created_at')
-        .eq('clinic_id', clinic.id)
-        .not('status', 'in', '(fechado,compareceu)')
-        .order('created_at', { ascending: false });
-      leads = data || [];
+      // ⚠️ 11/11/2026: paginado — o Supabase corta em 1000 linhas e
+      // clínica com muitos leads em aberto ficava com a lista incompleta
+      for (let off = 0, volta = 0; volta < 50; volta++) {
+        const { data, error } = await db.from('leads')
+          .select('id, nome, telefone, procedimento, status, created_at')
+          .eq('clinic_id', clinic.id)
+          .not('status', 'in', '(fechado,compareceu)')
+          .order('created_at', { ascending: false })
+          .range(off, off + 999);
+        if (error) throw error;
+        if (!data || !data.length) break;
+        leads = leads.concat(data);
+        off += data.length;
+      }
     } catch (e) { if (lista) lista.innerHTML = '<div style="padding:20px;color:var(--coral);">Erro ao carregar leads.</div>'; return; }
 
     // 2) regras de follow-up ativas (pra saber as faixas de dias)
@@ -96,17 +104,18 @@
     let feitos = {};
     try {
       // ⚠️ 10/11/2026: lê em páginas (o Supabase corta em 1000 linhas)
-      for (let pg = 0; pg < 50; pg++) {
+      for (let off = 0, pg = 0; pg < 100; pg++) {
         const { data } = await db.from('tarefas_resolvidas')
           .select('tarefa_chave, resolvida_em').eq('clinic_id', clinic.id)
           .like('tarefa_chave', 'regra:%')
           .order('tarefa_chave', { ascending: true })
-          .range(pg * 1000, pg * 1000 + 999);
-        (data || []).forEach(t => {
+          .range(off, off + 999);
+        if (!data || !data.length) break;
+        data.forEach(t => {
           const m = String(t.tarefa_chave || '').match(/^regra:[^:]+:(.+)$/);
           if (m) { const leadId = m[1]; feitos[leadId] = (feitos[leadId] || 0) + 1; }
         });
-        if (!data || data.length < 1000) break;
+        off += data.length;
       }
     } catch (e) {}
 
@@ -212,34 +221,16 @@
   }
 
   // ── AÇÕES ──
-  // Abre o inbox e tenta posicionar na conversa do lead. Simples e à prova de travamento.
+  // ⚠️ REESCRITO 11/11/2026: usa a mesma rotina da Agenda/Tarefas
+  // (abrirInboxConversa, em agenda-inbox-fix.js), que agora acha a conversa
+  // mesmo quando ela é antiga, cria a conversa se o lead nunca trocou
+  // mensagem e não deixa o filtro de número esconder a conversa certa.
   window.fuAbrirConversa = async function (sufixo, nome, telefoneCompleto) {
     try {
-      // monta a chave "telefone|instance_name" se der; senão só navega pro inbox
-      let chave = null;
-      try {
-        if (typeof INBOX !== 'undefined' && INBOX && Array.isArray(INBOX.chats)) {
-          const achou = INBOX.chats.find(c => c && String(c.phone || '').replace(/\D/g, '').slice(-8) === String(sufixo));
-          if (achou && achou.id) chave = achou.id;
-        }
-      } catch (e) {}
-
-      // navega pro inbox
-      try {
-        const navInbox = document.querySelector('.nav-item[onclick*="inbox"], #navInbox') ||
-          [...document.querySelectorAll('.nav-item')].find(n => /inbox|whatsapp/i.test(n.textContent));
-        if (navInbox) navInbox.click();
-        else if (typeof showPage === 'function') showPage('inbox');
-      } catch (e) { console.warn('[fu] nav inbox', e); }
-
-      // tenta abrir a conversa específica (se achou a chave), sem travar se falhar
-      if (chave) {
-        setTimeout(() => {
-          try { if (typeof openChat === 'function') openChat(chave); } catch (e) { console.warn('[fu] openChat', e); }
-        }, 500);
-      } else {
-        if (typeof toast === 'function') toast('Abri o WhatsApp — procure por ' + (nome || 'o lead') + ' na lista', 'info');
-      }
+      const tel = String(telefoneCompleto || '').replace(/\D/g, '') || String(sufixo || '');
+      if (typeof window.abrirInboxConversa === 'function') return await window.abrirInboxConversa(tel, nome);
+      if (typeof abrirInboxConversa === 'function') return await abrirInboxConversa(tel, nome);
+      if (typeof showPage === 'function') showPage('inbox');
     } catch (e) {
       console.error('[fu] fuAbrirConversa', e);
     }
