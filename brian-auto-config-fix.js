@@ -65,7 +65,7 @@
       </div>
 
       <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">Horário de funcionamento</div>
-      <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">Marque os dias e horários de atendimento. Fora disso, o Brian assume (se ligado acima).</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">Marque os dias e horários de atendimento. Fora disso, o Brian assume (se ligado acima).<br>🍽️ <b>Pausa</b> (opcional): intervalo em que a recepção não está no WhatsApp, como o almoço — nesse período o Brian responde na hora. Deixe em branco se não tiver. <i>(Isso não mexe na agenda: os horários de consulta continuam vindo da grade da agenda.)</i></div>
       <div id="brianHorarios" style="display:flex;flex-direction:column;gap:6px;margin-bottom:18px;">
         ${DIAS.map(d => {
           const h = horario[d.k];
@@ -79,6 +79,10 @@
             <input type="time" class="brian-dia-abre form-input" data-dia="${d.k}" value="${aberto ? h.abre : '08:00'}" style="width:114px;padding:4px 8px;" ${aberto ? '' : 'disabled'}>
             <span style="color:var(--text-muted);">até</span>
             <input type="time" class="brian-dia-fecha form-input" data-dia="${d.k}" value="${aberto ? h.fecha : '18:00'}" style="width:114px;padding:4px 8px;" ${aberto ? '' : 'disabled'}>
+            <span style="color:var(--text-muted);margin-left:6px;" title="Intervalo em que a recepção NÃO está no WhatsApp (ex.: almoço). Nesse intervalo o Brian responde na hora, como se a clínica estivesse fechada. Deixe em branco se não tiver pausa.">🍽️ pausa</span>
+            <input type="time" class="brian-dia-pausa-ini form-input" data-dia="${d.k}" value="${aberto && h.pausa_ini ? h.pausa_ini : ''}" style="width:104px;padding:4px 8px;" ${aberto ? '' : 'disabled'}>
+            <span style="color:var(--text-muted);">até</span>
+            <input type="time" class="brian-dia-pausa-fim form-input" data-dia="${d.k}" value="${aberto && h.pausa_fim ? h.pausa_fim : ''}" style="width:104px;padding:4px 8px;" ${aberto ? '' : 'disabled'}>
           </div>`;
         }).join('')}
       </div>
@@ -111,6 +115,8 @@
         const fecha = sec.querySelector(`.brian-dia-fecha[data-dia="${dia}"]`);
         if (abre) abre.disabled = !this.checked;
         if (fecha) fecha.disabled = !this.checked;
+        sec.querySelectorAll(`.brian-dia-pausa-ini[data-dia="${dia}"], .brian-dia-pausa-fim[data-dia="${dia}"]`)
+          .forEach(el => { el.disabled = !this.checked; });
       });
     });
 
@@ -131,16 +137,28 @@
     const escopo = escopoEl ? escopoEl.value : 'completo';
 
     const horario = {};
+    let erroPausa = '';
     DIAS.forEach(d => {
       const on = document.querySelector(`.brian-dia-on[data-dia="${d.k}"]`);
       if (on && on.checked) {
         const abre = document.querySelector(`.brian-dia-abre[data-dia="${d.k}"]`).value || '08:00';
         const fecha = document.querySelector(`.brian-dia-fecha[data-dia="${d.k}"]`).value || '18:00';
-        horario[d.k] = { abre, fecha };
+        const faixa = { abre, fecha };
+        // ⚠️ NOVO 12/11/2026: pausa (almoço) opcional por dia
+        const pIni = (document.querySelector(`.brian-dia-pausa-ini[data-dia="${d.k}"]`) || {}).value || '';
+        const pFim = (document.querySelector(`.brian-dia-pausa-fim[data-dia="${d.k}"]`) || {}).value || '';
+        if (pIni || pFim) {
+          if (!pIni || !pFim) erroPausa = `${d.nome}: preencha o início E o fim da pausa (ou deixe os dois em branco).`;
+          else if (pFim <= pIni) erroPausa = `${d.nome}: o fim da pausa precisa ser depois do início.`;
+          else if (pIni < abre || pFim > fecha) erroPausa = `${d.nome}: a pausa precisa ficar dentro do horário de funcionamento (${abre}–${fecha}).`;
+          else { faixa.pausa_ini = pIni; faixa.pausa_fim = pFim; }
+        }
+        horario[d.k] = faixa;
       } else {
         horario[d.k] = null;
       }
     });
+    if (erroPausa) { set(erroPausa); return; }
 
     set('Salvando…');
     try {
