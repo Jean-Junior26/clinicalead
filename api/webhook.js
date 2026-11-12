@@ -520,6 +520,9 @@ module.exports = async function handler(req, res) {
       const faixa = horario[diaKey];
       if (!faixa || !faixa.abre || !faixa.fecha) return false;
       const hhmm = `${String(agora.getUTCHours()).padStart(2, '0')}:${String(agora.getUTCMinutes()).padStart(2, '0')}`;
+      // ⚠️ NOVO 12/11/2026: pausa do dia (ex.: almoço) — a recepção não está
+      // no WhatsApp, então conta como FORA do horário (o Brian pode responder).
+      if (faixa.pausa_ini && faixa.pausa_fim && hhmm >= faixa.pausa_ini && hhmm < faixa.pausa_fim) return false;
       return hhmm >= faixa.abre && hhmm <= faixa.fecha;
     } catch (e) { return false; }
   }
