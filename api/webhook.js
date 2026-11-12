@@ -377,6 +377,15 @@ module.exports = async function handler(req, res) {
       if (modo !== 'sempre') {
         const dentro = dentroDoHorario(cfg.horario_funcionamento);
         if (dentro) {
+          // ⚠️ REESCRITO 12/11/2026 — MODO CAUTELOSO SEM EXCEÇÃO
+          // Regra: dentro do horário, quem atende é a RECEPÇÃO. O Brian só
+          // continua uma conversa que ELE MESMO está conduzindo agora (a
+          // última mensagem nossa, nas últimas 6h, foi dele). Antes existia
+          // uma exceção (11/08): se o contato JÁ TINHA conversado alguma vez,
+          // o Brian respondia na hora — na prática isso fazia ele atender
+          // justamente PACIENTE ANTIGO em horário comercial (caso JB, 12/11).
+          // Exceção removida. Se a recepção não responder, o resgate
+          // automático (disparar-automacoes) assume depois de ~15 min.
           let brianAssumiu = false;
           try {
             const seisHoras = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
@@ -385,36 +394,8 @@ module.exports = async function handler(req, res) {
               { headers: sbHeaders }
             );
             const uArrR = ultR.ok ? await ultR.json() : [];
-            if (uArrR[0]) {
-              // teve mensagem nossa nas últimas 6h — só é seguro se foi o
-              // próprio Brian; se foi humano, ele que continue
-              brianAssumiu = uArrR[0].contact_name === 'BRIAN_AUTO' || uArrR[0].contact_name === 'BRIAN_FOLLOWUP';
-            } else {
-              // ⚠️ CORREÇÃO 11/08 (ajuste fino da correção de 10/08): sem
-              // mensagem nossa nas últimas 6h pode significar DUAS coisas
-              // bem diferentes pro modo Cauteloso — (1) conversa CHEGANDO
-              // AGORA pela primeira vez (nunca respondemos nada ainda —
-              // aqui o Cauteloso deve MESMO segurar o Brian, dar a
-              // primeira chance pro humano, que é o objetivo do modo); ou
-              // (2) conversa ANTIGA reativando depois de dias de silêncio
-              // (caso real: Denise, Camaquã, 10 dias parada) — aqui é
-              // seguro o Brian responder, não tem humano "no meio" de
-              // nada. A correção de ontem tratava as DUAS iguais (sempre
-              // seguro), o que fez o Brian atender direto até em conversa
-              // NOVA em horário comercial em Uberlândia — o oposto do que
-              // o modo Cauteloso deveria fazer. Agora verifica se JÁ
-              // existiu QUALQUER mensagem nossa antes (sem limite de
-              // tempo) — só nesse caso (conversa com histórico, só
-              // silenciosa há um tempo) libera o Brian; conversa 100%
-              // nova continua esperando o humano, como antes.
-              const historicoResp = await fetch(
-                `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixo}&from_me=eq.true&select=id&limit=1`,
-                { headers: sbHeaders }
-              );
-              const historicoArr = historicoResp.ok ? await historicoResp.json() : [];
-              brianAssumiu = historicoArr.length > 0; // já teve conversa antes = seguro; nunca respondemos = espera o humano
-            }
-          } catch (e) { }
+            brianAssumiu = !!(uArrR[0] && uArrR[0].contact_name === 'BRIAN_AUTO');
+          } catch (e) { brianAssumiu = false; }
           if (!brianAssumiu) return motivo(false, 'dentro do horário de atendimento (modo Cauteloso: humano assume)');
         }
       }
@@ -462,17 +443,36 @@ module.exports = async function handler(req, res) {
       if (disp <= 0) return motivo(false, 'sem saldo de mensagens');
 
       const leadResp = await fetch(
-        `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinic_id}&telefone=ilike.*${sufixo}&select=id,status&limit=1`,
+        `${SUPABASE_URL}/rest/v1/leads?clinic_id=eq.${clinic_id}&telefone=ilike.*${sufixo}&select=id,status`,
         { headers: sbHeaders }
       );
       const leadArr = leadResp.ok ? await leadResp.json() : [];
       const jaEhLead = leadArr.length > 0;
 
+      // ⚠️ REESCRITO 12/11/2026 — "SÓ LEADS NOVOS" DE VERDADE
+      // Antes só reconhecia paciente pelo status "compareceu"/"fechado".
+      // Agora é PACIENTE (Brian não atende) se QUALQUER cadastro com esse
+      // telefone tiver: status compareceu/fechado/agendado, OU qualquer
+      // consulta registrada, OU mensalidade (paciente de ortodontia).
+      // Na dúvida (erro ao consultar), trata como paciente e NÃO responde.
       if (cfg.escopo === 'somente_leads' && jaEhLead) {
-        const statusPaciente = ['compareceu', 'fechado'];
-        if (statusPaciente.includes(leadArr[0].status)) {
-          return motivo(false, 'modo "somente leads": contato já é paciente conhecido');
+        let ehPaciente = leadArr.some(l => ['compareceu', 'fechado', 'agendado'].includes(l.status));
+        if (!ehPaciente) {
+          try {
+            const ids = leadArr.map(l => l.id).filter(Boolean).join(',');
+            if (ids) {
+              const cResp = await fetch(`${SUPABASE_URL}/rest/v1/consultas?clinic_id=eq.${clinic_id}&lead_id=in.(${ids})&select=id&limit=1`, { headers: sbHeaders });
+              if (!cResp.ok) throw new Error('consultas ' + cResp.status);
+              const cArr = await cResp.json();
+              if (cArr.length) ehPaciente = true;
+              if (!ehPaciente) {
+                const mResp = await fetch(`${SUPABASE_URL}/rest/v1/mensalidade_parcelas?clinic_id=eq.${clinic_id}&lead_id=in.(${ids})&select=id&limit=1`, { headers: sbHeaders });
+                if (mResp.ok && (await mResp.json()).length) ehPaciente = true;
+              }
+            }
+          } catch (e) { ehPaciente = true; }
         }
+        if (ehPaciente) return motivo(false, 'modo "somente leads": contato já é paciente (status, consulta ou mensalidade)');
       }
 
       if (!jaEhLead) {
