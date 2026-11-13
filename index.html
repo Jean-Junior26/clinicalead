@@ -4102,10 +4102,24 @@ function createLeadFromChat(chatId) {
 }
 
 async function reconectarWhatsApp(instanceName) {
+  // ⚠️ REESCRITO 13/11/2026 — antes, se a instância não existisse mais na
+  // Evolution (apagada/corrompida), a tela dizia "Instância já conectada!"
+  // (errado) e não deixava gerar QR. Agora: confere o estado; se estiver
+  // conectada de verdade, avisa; se não existir, RECRIA com o mesmo nome
+  // (o cadastro da clínica continua valendo) e mostra o QR. Quando conectar,
+  // já configura webhook e "ignorar grupos".
   toast('Gerando QR code...');
   try {
-    const data = await evoRequest('GET', `/instance/connect/${instanceName}`);
-    if (data.base64) {
+    const st = await evoRequest('GET', `/instance/connectionState/${instanceName}`);
+    if (st?.instance?.state === 'open') { toast('Esse WhatsApp já está conectado ✅'); return; }
+    let data = await evoRequest('GET', `/instance/connect/${instanceName}`);
+    if (!data?.base64) {
+      // instância sumiu → recria com o mesmo nome
+      const cr = await evoRequest('POST', '/instance/create', { instanceName, qrcode: true, integration: 'WHATSAPP-BAILEYS' });
+      data = cr?.qrcode || null;
+      if (!data?.base64) { await new Promise(r => setTimeout(r, 2000)); data = await evoRequest('GET', `/instance/connect/${instanceName}`); }
+    }
+    if (data?.base64) {
       const img = document.createElement('img');
       img.src = data.base64;
       img.style = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;width:300px;height:300px;background:white;padding:16px;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.8);cursor:pointer;';
@@ -4113,11 +4127,27 @@ async function reconectarWhatsApp(instanceName) {
       img.onclick = () => img.remove();
       document.body.appendChild(img);
       toast('Escaneie o QR code com o WhatsApp!');
+      // espera conectar (até 3 min) e configura sozinho
+      for (let t = 0; t < 36; t++) {
+        await new Promise(r => setTimeout(r, 5000));
+        const s = await evoRequest('GET', `/instance/connectionState/${instanceName}`);
+        if (s?.instance?.state === 'open') {
+          img.remove();
+          try {
+            await fetch('/api/setup-webhook', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instance: instanceName }) });
+            await evoRequest('POST', `/settings/set/${instanceName}`, { rejectCall: false, msgCall: '', groupsIgnore: true, alwaysOnline: false, readMessages: false, readStatus: false, syncFullHistory: false });
+          } catch (e) { console.warn('[reconectar] pós-conexão', e); }
+          toast('WhatsApp conectado! 🎉');
+          break;
+        }
+      }
     } else {
-      toast('Instância já conectada!');
+      toast('Não consegui gerar o QR — use "Conectar WhatsApp → Gerar QR Code"', 'error');
+      console.warn('[reconectar] resposta sem QR:', data);
     }
   } catch(e) {
     toast('Erro ao gerar QR code', 'error');
+    console.error('[reconectar]', e);
   }
 }// ── WEBHOOK AUTO SETUP ───────────────────────
 async function setupWebhookManual(instanceName) {
