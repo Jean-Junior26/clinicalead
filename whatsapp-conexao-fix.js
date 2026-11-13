@@ -80,81 +80,63 @@
   // ── SOBRESCREVE gerarQRCode ──────────────────────────────────
   // Cria uma instância NOVA e ÚNICA toda vez (limpa as velhas antes).
   window.gerarQRCode = async function () {
+    // ⚠️ REESCRITO 13/11/2026: a conexão agora é feita PELO SERVIDOR
+    // (/api/setup-webhook, acao 'conectar_qr'). Funciona igual pra admin,
+    // dono e recepção — e se algo der errado, mostra o MOTIVO real em vez
+    // de só "Erro ao gerar QR Code".
     const btn = document.getElementById('btnGerarQR');
     const st = document.getElementById('waStatus');
     const clinic = window.__waClinicAlvo || (typeof currentClinic === 'function' ? currentClinic() : null);
     if (!clinic) { if (st) st.textContent = 'Erro: clínica não identificada'; return; }
-
+    const setErro = (msg) => {
+      if (st) st.innerHTML = `<span style="color:var(--coral,#C0624A);font-weight:600;">⚠️ ${msg}</span>`;
+      if (btn) { btn.innerHTML = '<i class="ti ti-qrcode"></i> Gerar QR Code'; btn.disabled = false; }
+    };
     if (btn) { btn.innerHTML = '<i class="ti ti-loader"></i> Preparando...'; btn.disabled = true; }
+    if (st) st.textContent = 'Limpando conexão antiga e gerando QR Code... (uns 10 segundos)';
+    if (window.qrInterval) clearInterval(window.qrInterval);
+    if (window.qrRefreshInterval) clearInterval(window.qrRefreshInterval);
+
+    const chamar = async (corpo) => {
+      const r = await fetch('/api/setup-webhook', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corpo) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || ('falha ' + r.status));
+      return j;
+    };
 
     try {
-      // 1) limpa instâncias antigas/sujas dessa clínica
-      if (st) st.textContent = 'Limpando conexões antigas...';
-      await limparInstanciasAntigas(clinic);
-
-      // 2) cria uma instância NOVA e única
-      const novaInst = nomeInstanciaNovo(clinic);
+      const res = await chamar({ acao: 'conectar_qr', clinic_id: clinic.id });
+      const novaInst = res.instance;
       window.currentWAInstance = novaInst;
-      if (st) st.textContent = 'Gerando QR Code...';
-      await createWhatsAppInstance(novaInst);
-      await new Promise(r => setTimeout(r, 2000));
+      const cLocal = STATE.clinics.find(c => c.id === clinic.id);
+      if (cLocal) cLocal.whatsapp_instance = novaInst;
 
-      // 3) pega o QR
-      const data = await getQRCode(novaInst);
-      if (data?.base64) {
-        document.getElementById('qrCodeImg').src = data.base64;
-        document.getElementById('qrCodeArea').style.display = 'block';
-        if (st) st.textContent = 'Aguardando leitura do QR Code...';
-        if (btn) { btn.innerHTML = '<i class="ti ti-refresh"></i> Atualizar QR Code'; btn.disabled = false; }
+      document.getElementById('qrCodeImg').src = res.base64;
+      document.getElementById('qrCodeArea').style.display = 'block';
+      if (st) st.textContent = 'Escaneie o QR Code: WhatsApp → Aparelhos conectados → Conectar um aparelho';
+      if (btn) { btn.innerHTML = '<i class="ti ti-refresh"></i> Gerar outro QR Code'; btn.disabled = false; }
 
-        // 4) fica checando se conectou
-        if (window.qrInterval) clearInterval(window.qrInterval);
-        window.qrInterval = setInterval(async () => {
-          try {
-            const s = await getInstanceStatus(novaInst);
-            if (s?.instance?.state === 'open') {
-              clearInterval(window.qrInterval);
-              // registra o webhook da instância nova
-              try {
-                await fetch('/api/setup-webhook', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ instance: novaInst }),
-                });
-              } catch (e) { console.warn('[wa-conexao] setup-webhook:', e.message); }
-              // grava a instância nova no banco (pela clínica alvo — id certo)
-              // ⚠️ FIX 22/07: antes não checava erro aqui. Se o UPDATE falhasse
-              // (ex: RLS bloqueando dono/colaborador — só o admin geral tinha
-              // permissão de escrita em 'clinicas'), o código seguia em frente
-              // e mostrava "conectado com sucesso" mesmo SEM ter gravado nada
-              // no banco — o WhatsApp ficava "conectado" no Evolution mas
-              // invisível pro CRM (Brian não liberava, inbox não recebia).
-              // Agora checa o erro e avisa de verdade em vez de fingir sucesso.
-              const { error: erroSalvarInstancia } = await getDb().from('clinicas').update({ whatsapp_instance: novaInst }).eq('id', clinic.id);
-              if (erroSalvarInstancia) {
-                console.error('[wa-conexao] ❌ ERRO ao salvar whatsapp_instance no banco:', erroSalvarInstancia.message);
-                if (st) st.innerHTML = `<span style="color:var(--coral,#C0624A);font-weight:600;">⚠️ O WhatsApp conectou no celular, mas houve um erro ao salvar no sistema (${erroSalvarInstancia.message}). Avise o suporte — o número não vai funcionar até isso ser corrigido.</span>`;
-                if (btn) btn.style.display = 'none';
-                return; // não finge sucesso — trava aqui pra não confundir o usuário
-              }
-              const cLocal = STATE.clinics.find(c => c.id === clinic.id);
-              if (cLocal) cLocal.whatsapp_instance = novaInst;
-              if (st) st.innerHTML = '<span style="color:var(--gold);font-weight:600;">✅ WhatsApp conectado com sucesso!</span>';
-              document.getElementById('qrCodeArea').style.display = 'none';
-              if (btn) btn.style.display = 'none';
-              if (typeof renderClinicas === 'function') renderClinicas();
-              console.log('[wa-conexao] ✅ conectado e gravado:', novaInst);
-            }
-          } catch (e) { /* ainda não conectou, segue tentando */ }
-        }, 3000);
-      } else {
-        if (st) st.textContent = 'Erro ao gerar QR Code. Tente novamente.';
-        if (btn) { btn.innerHTML = '<i class="ti ti-qrcode"></i> Gerar QR Code'; btn.disabled = false; }
-      }
+      let voltas = 0;
+      window.qrInterval = setInterval(async () => {
+        voltas++;
+        if (voltas > 100) { clearInterval(window.qrInterval); setErro('O QR expirou. Clique em Gerar QR Code de novo.'); return; }
+        try {
+          // a cada ~21s pede um QR novo (o do WhatsApp expira)
+          const s2 = await chamar({ acao: 'status_qr', clinic_id: clinic.id, instance: novaInst, renovar: voltas % 7 === 0 });
+          if (s2.base64) document.getElementById('qrCodeImg').src = s2.base64;
+          if (s2.state === 'open') {
+            clearInterval(window.qrInterval);
+            if (st) st.innerHTML = '<span style="color:var(--gold);font-weight:600;">✅ WhatsApp conectado com sucesso! Aguarde uns minutinhos antes de testar.</span>';
+            document.getElementById('qrCodeArea').style.display = 'none';
+            if (btn) btn.style.display = 'none';
+            if (typeof renderClinicas === 'function') renderClinicas();
+            console.log('[wa-conexao] ✅ conectado:', novaInst);
+          }
+        } catch (e) { /* segue tentando */ }
+      }, 3000);
     } catch (e) {
       console.error('[wa-conexao] erro:', e.message);
-      if (st) st.textContent = 'Erro ao gerar QR Code. Tente novamente.';
-      if (btn) { btn.innerHTML = '<i class="ti ti-qrcode"></i> Gerar QR Code'; btn.disabled = false; }
+      setErro(e.message);
     }
   };
 
