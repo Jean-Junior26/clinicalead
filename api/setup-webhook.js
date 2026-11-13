@@ -82,6 +82,87 @@ export default async function handler(req, res) {
 
   const acao = req.body?.acao || 'setup_webhook';
 
+  // ════════════════════════════════════════════════════════════
+  // ⚠️ NOVO 13/11/2026 — CONECTAR WHATSAPP PELO SERVIDOR (QR Code)
+  // Antes a tela fazia tudo pelo navegador: limpar instância velha,
+  // criar a nova e GRAVAR no cadastro da clínica. Pra login que não é
+  // admin (ex.: recepção), o banco às vezes bloqueava a gravação e a
+  // tela só dizia "Erro ao gerar QR Code". Agora o servidor faz tudo
+  // com permissão total, depois de conferir que a pessoa é da clínica:
+  //   { acao:'conectar_qr', clinic_id }          → limpa, cria, grava, devolve o QR
+  //   { acao:'status_qr', clinic_id, instance }  → estado; quando "open",
+  //                                                 configura webhook + ignorar grupos
+  // ════════════════════════════════════════════════════════════
+  if (acao === 'conectar_qr' || acao === 'status_qr') {
+    const clinicId = req.body?.clinic_id;
+    if (!clinicId) return res.status(400).json({ error: 'clinic_id obrigatório' });
+    const acessoC = await __portaria(clinicId, null);
+    if (!acessoC.ok) return res.status(acessoC.status).json({ error: acessoC.erro });
+    const sbH = { apikey: __SB_KEY, Authorization: `Bearer ${__SB_KEY}`, 'Content-Type': 'application/json' };
+    const evo = async (method, path, body) => {
+      const r = await fetch(EVO_URL + path, { method, headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+      const t = await r.text(); let j; try { j = JSON.parse(t); } catch { j = t; }
+      return { ok: r.ok, status: r.status, data: j };
+    };
+    const cR = await fetch(`${__SB_URL}/rest/v1/clinicas?id=eq.${encodeURIComponent(clinicId)}&select=id,nome,whatsapp_instance,tipo_conexao_whatsapp`, { headers: sbH });
+    const clinic = (cR.ok ? await cR.json() : [])[0];
+    if (!clinic) return res.status(404).json({ error: 'Clínica não encontrada' });
+
+    if (acao === 'status_qr') {
+      const inst = String(req.body?.instance || '');
+      if (!inst || (inst !== clinic.whatsapp_instance && !inst.includes(String(clinic.id).slice(0, 8)))) {
+        return res.status(403).json({ error: 'Instância não pertence a esta clínica' });
+      }
+      const st = await evo('GET', `/instance/connectionState/${encodeURIComponent(inst)}`);
+      const state = st.data?.instance?.state || st.data?.state || 'desconhecido';
+      if (state === 'open') {
+        await evo('POST', `/webhook/set/${encodeURIComponent(inst)}`, { webhook: { enabled: true, url: WEBHOOK_URL, byEvents: false, base64: false, events: ['MESSAGES_UPSERT'] } });
+        await evo('POST', `/settings/set/${encodeURIComponent(inst)}`, { rejectCall: false, msgCall: '', groupsIgnore: true, alwaysOnline: false, readMessages: false, readStatus: false, syncFullHistory: false });
+      }
+      // QR atualizado (o do WhatsApp expira rápido)
+      let base64 = null;
+      if (state !== 'open' && req.body?.renovar) {
+        const q = await evo('GET', `/instance/connect/${encodeURIComponent(inst)}`);
+        base64 = q.data?.base64 || null;
+      }
+      return res.status(200).json({ ok: true, state, base64 });
+    }
+
+    // conectar_qr
+    if (clinic.tipo_conexao_whatsapp === 'oficial') return res.status(400).json({ error: 'Esta clínica usa a API Oficial — não usa QR Code' });
+    const idCurto = String(clinic.id).slice(0, 8);
+    const base = String(clinic.nome || 'clinica').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '').slice(0, 16) || 'clinica';
+    // 1) limpa SÓ as instâncias desta clínica: a principal atual + as que levam o id dela
+    //    (números extras cadastrados em "instancias" NÃO são tocados)
+    const extrasR = await fetch(`${__SB_URL}/rest/v1/instancias?clinic_id=eq.${encodeURIComponent(clinic.id)}&select=instance_name`, { headers: sbH });
+    const extras = new Set((extrasR.ok ? await extrasR.json() : []).map(x => x.instance_name));
+    const lista = await evo('GET', '/instance/fetchInstances');
+    const nomes = (Array.isArray(lista.data) ? lista.data : []).map(i => i.name || i.instance?.instanceName || i.instanceName).filter(Boolean);
+    const alvos = nomes.filter(n => !extras.has(n) && (n === clinic.whatsapp_instance || n.includes(idCurto)));
+    for (const n of alvos) {
+      await evo('DELETE', `/instance/logout/${encodeURIComponent(n)}`);
+      await new Promise(r => setTimeout(r, 300));
+      await evo('DELETE', `/instance/delete/${encodeURIComponent(n)}`);
+    }
+    // 2) cria a nova
+    const novo = `${base}_${idCurto}_${Date.now().toString().slice(-6)}`;
+    const cr = await evo('POST', '/instance/create', { instanceName: novo, qrcode: true, integration: 'WHATSAPP-BAILEYS' });
+    if (!cr.ok) return res.status(502).json({ error: 'A Evolution recusou criar a conexão: ' + JSON.stringify(cr.data).slice(0, 200) });
+    let base64 = cr.data?.qrcode?.base64 || null;
+    if (!base64) {
+      await new Promise(r => setTimeout(r, 1500));
+      const q = await evo('GET', `/instance/connect/${encodeURIComponent(novo)}`);
+      base64 = q.data?.base64 || null;
+    }
+    // 3) grava no cadastro (com permissão do servidor — não depende do login)
+    const up = await fetch(`${__SB_URL}/rest/v1/clinicas?id=eq.${encodeURIComponent(clinic.id)}`, {
+      method: 'PATCH', headers: { ...sbH, Prefer: 'return=minimal' }, body: JSON.stringify({ whatsapp_instance: novo }),
+    });
+    if (!up.ok) return res.status(500).json({ error: 'Conexão criada, mas não consegui gravar no cadastro (' + up.status + ')' });
+    if (!base64) return res.status(502).json({ error: 'A conexão foi criada, mas a Evolution não devolveu o QR. Clique em Gerar QR Code de novo.', instance: novo });
+    return res.status(200).json({ ok: true, instance: novo, base64, limpas: alvos });
+  }
+
   if (acao === 'evo') {
     const method = String(req.body?.method || 'GET').toUpperCase();
     const path = String(req.body?.path || '');
