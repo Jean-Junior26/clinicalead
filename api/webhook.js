@@ -452,11 +452,15 @@ module.exports = async function handler(req, res) {
       // ⚠️ REESCRITO 12/11/2026 — "SÓ LEADS NOVOS" DE VERDADE
       // Antes só reconhecia paciente pelo status "compareceu"/"fechado".
       // Agora é PACIENTE (Brian não atende) se QUALQUER cadastro com esse
-      // telefone tiver: status compareceu/fechado/agendado, OU qualquer
+      // telefone tiver: status compareceu/fechado, OU qualquer
       // consulta registrada, OU mensalidade (paciente de ortodontia).
       // Na dúvida (erro ao consultar), trata como paciente e NÃO responde.
       if (cfg.escopo === 'somente_leads' && jaEhLead) {
-        let ehPaciente = leadArr.some(l => ['compareceu', 'fechado', 'agendado'].includes(l.status));
+        // 14/11: "agendado" SOZINHO não conta mais como paciente — lead pode estar
+        // marcado como agendado no funil sem consulta nenhuma (caso JB 13/11, lead
+        // de implante de anúncio ficou sem resposta). Agendado de verdade tem
+        // consulta registrada, e isso é checado logo abaixo.
+        let ehPaciente = leadArr.some(l => ['compareceu', 'fechado'].includes(l.status));
         if (!ehPaciente) {
           try {
             const ids = leadArr.map(l => l.id).filter(Boolean).join(',');
