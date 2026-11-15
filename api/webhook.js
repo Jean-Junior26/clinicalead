@@ -433,6 +433,37 @@ module.exports = async function handler(req, res) {
       });
       if (humanoAtivo) return motivo(false, 'humano respondeu recentemente (Brian recua)');
 
+      // ⚠️ NOVO 15/11/2026 — TRAVA ANTI-ROBÔ
+      // Caso real (Uberlândia e ClinicaLead): o robô de ofertas da TIM
+      // escreveu pro número da clínica e a IA respondeu mais de 40 vezes
+      // em 3 dias (os dois robôs ficaram se respondendo), gastando saldo —
+      // e chegou a oferecer o plano da TIM. Três travas simples:
+      //  (a) texto típico de robô/empresa → não responde;
+      //  (b) a MESMA mensagem (25+ letras) recebida 3+ vezes em 24h → não responde;
+      //  (c) a IA já mandou 15+ mensagens pra esse contato na última hora
+      //      (nenhuma conversa de verdade chega nisso) → para.
+      try {
+        const nrmBot = (x) => String(x || '').toLowerCase().replace(/\s+/g, ' ').trim();
+        const atualBot = nrmBot(content);
+        const FRASES_ROBO = ['oferta exclusiva', 'assistente virtual da', 'este canal é', 'este canal aqui é',
+          'retirar seu número da nossa lista', 'nao responda esta mensagem', 'não responda esta mensagem',
+          'mensagem automática', 'mensagem automatica'];
+        if (FRASES_ROBO.some(f => atualBot.includes(f))) return motivo(false, 'mensagem de robô/empresa (não é paciente)');
+        const desde24 = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        const hR = await fetch(
+          `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixo}&created_at=gte.${desde24}&select=content,from_me,contact_name,created_at&order=created_at.desc&limit=80`,
+          { headers: sbHeaders }
+        );
+        const hist = hR.ok ? await hR.json() : [];
+        if (atualBot.length >= 25) {
+          const iguais = hist.filter(m => !m.from_me && nrmBot(m.content) === atualBot).length;
+          if (iguais >= 3) return motivo(false, 'mesma mensagem repetida várias vezes (provável robô)');
+        }
+        const umaHora = Date.now() - 60 * 60 * 1000;
+        const daIA = hist.filter(m => m.from_me && m.contact_name === 'BRIAN_AUTO' && new Date(m.created_at).getTime() > umaHora).length;
+        if (daIA >= 15) return motivo(false, 'IA já respondeu 15+ vezes em 1h para este contato (trava anti-loop)');
+      } catch (e) { }
+
       const saldoResp = await fetch(
         `${SUPABASE_URL}/rest/v1/brian_saldo?clinic_id=eq.${clinic_id}&select=incluso_mes,usado_mes,extra_comprado,extra_usado&limit=1`,
         { headers: sbHeaders }
@@ -1980,8 +2011,21 @@ module.exports = async function handler(req, res) {
         let phone = jid.replace('@s.whatsapp.net', '').replace('@c.us', '');
         if (jid.endsWith('@lid')) {
           const lid = jid.replace('@lid', '');
-          const alt = [key?.remoteJidAlt, key?.senderPn, key?.participantAlt, msg?.senderPn, msg?.remoteJidAlt]
-            .find(v => typeof v === 'string' && v.includes('@s.whatsapp.net'));
+          // ⚠️ CORREÇÃO 15/11/2026 — mensagem ENVIADA PELO CELULAR sumindo (JB)
+          // Em mensagem nossa (fromMe), o campo "senderPn" é o número DA
+          // PRÓPRIA CLÍNICA, não o do paciente. A versão de 10/11 aceitava
+          // esse campo e gravava "código do paciente → número da clínica":
+          // a mensagem ia parar numa conversa fantasma com o próprio número
+          // e não aparecia na conversa do paciente. Agora: em mensagem nossa
+          // só vale o "remoteJidAlt" (número do outro lado), e NUNCA se
+          // aceita o número da própria clínica como se fosse o do paciente.
+          const proprioNumero = String(body?.sender || '').replace(/@.*/, '').replace(/\D/g, '');
+          const ehProprio = (n) => !!n && !!proprioNumero && String(n).slice(-8) === proprioNumero.slice(-8);
+          const candidatos = fromMe
+            ? [key?.remoteJidAlt, msg?.remoteJidAlt]
+            : [key?.remoteJidAlt, key?.senderPn, key?.participantAlt, msg?.senderPn, msg?.remoteJidAlt];
+          const alt = candidatos.find(v => typeof v === 'string' && v.includes('@s.whatsapp.net')
+            && !ehProprio(v.replace(/@.*/, '').replace(/\D/g, '')));
           let real = alt ? alt.replace('@s.whatsapp.net', '').replace(/\D/g, '') : null;
           if (real && clinic_id) {
             try {
@@ -1999,7 +2043,7 @@ module.exports = async function handler(req, res) {
                 { headers: sbHeaders }
               );
               const mapArr = mapResp.ok ? await mapResp.json() : [];
-              if (mapArr[0]?.phone) real = mapArr[0].phone;
+              if (mapArr[0]?.phone && !ehProprio(mapArr[0].phone)) real = mapArr[0].phone;
             } catch (e) { }
           }
           if (real) {
