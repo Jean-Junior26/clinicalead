@@ -400,10 +400,14 @@ module.exports = async function handler(req, res) {
         }
       }
 
-      const MIN_RECUO_HUMANO = 30;
+      // ⚠️ 17/11/2026 — era 30 min. Caso JB: a equipe conversou com o contato
+      // (cafeteria, pós-operatório de siso) e horas depois a IA entrou na
+      // conversa fora do contexto. Agora: se um HUMANO falou com esse contato
+      // nas últimas 24h, a conversa é dele — a IA não entra (nem fora do horário).
+      const MIN_RECUO_HUMANO = 24 * 60;
       const janelaRecuo = new Date(Date.now() - MIN_RECUO_HUMANO * 60 * 1000).toISOString();
       const humResp = await fetch(
-        `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixo}&from_me=eq.true&created_at=gte.${janelaRecuo}&select=content,contact_name,created_at&order=created_at.desc&limit=5`,
+        `${SUPABASE_URL}/rest/v1/mensagens?clinic_id=eq.${clinic_id}&phone=ilike.*${sufixo}&from_me=eq.true&created_at=gte.${janelaRecuo}&select=content,contact_name,created_at&order=created_at.desc&limit=30`,
         { headers: sbHeaders }
       );
       const humArr = humResp.ok ? await humResp.json() : [];
@@ -2193,7 +2197,17 @@ module.exports = async function handler(req, res) {
           } catch (e) { }
         }
 
-        if (!fromMe && ehTextoUtilizavel) {
+        // ⚠️ 17/11/2026 — MENSAGEM ATRASADA NÃO É RESPONDIDA PELA IA.
+        // Caso JB: quando o WhatsApp volta de um travamento/reinício, a
+        // Evolution entrega de uma vez mensagens de horas atrás. A IA
+        // respondia "boa tarde" à meia-noite, fora de contexto. Se a mensagem
+        // foi enviada há mais de 15 min, ela fica salva no Inbox pra equipe,
+        // mas a IA não responde.
+        const atrasoMin = (Date.now() - new Date(created_at).getTime()) / 60000;
+        if (!fromMe && ehTextoUtilizavel && atrasoMin > 15) {
+          await logDebug(clinic_id, phone, 'decisao_resposta', 'pulado', `mensagem chegou atrasada (${Math.round(atrasoMin)} min) — fica pra equipe`);
+        }
+        if (!fromMe && ehTextoUtilizavel && atrasoMin <= 15) {
           try {
             const decisao = await brianDecide(clinic_id, phone, content, instanceName, fromMe, false);
             await logDebug(clinic_id, phone, 'decisao_resposta', decisao.responder ? 'sucesso' : 'pulado', decisao.razao);
