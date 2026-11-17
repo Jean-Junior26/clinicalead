@@ -15,6 +15,15 @@
 // ============================================================
 
 module.exports = async function handler(req, res) {
+  // ⚠️ DESATIVADO 17/11/2026 — este resgate antigo (chamado pelo cron-job.org)
+  // era uma CÓPIA do resgate que já roda na Edge Function disparar-automacoes,
+  // só que sem as proteções novas: mandava a resposta da IA com os marcadores
+  // técnicos à mostra (caso JB 15/11: saiu "[[PROC|procedimento=Prótese]]"
+  // pro paciente), sem trava anti-robô e sem a regra de quem a IA atende.
+  // O resgate continua funcionando normalmente pelo disparar-automacoes.
+  if (!(req.query && req.query.forcar === 'sim')) {
+    return res.status(200).json({ ok: true, desativado: true, motivo: 'resgate agora roda no disparar-automacoes' });
+  }
   const SUPABASE_URL = process.env.SUPABASE_URL || 'https://zcwntpkiispbhjjgidih.supabase.co';
   const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
   const EVO_URL = process.env.EVOLUTION_API_URL || 'https://evolution-api-production-62cb.up.railway.app';
@@ -131,7 +140,7 @@ module.exports = async function handler(req, res) {
             body: JSON.stringify({ action: 'responder_auto', clinic_id: cfg.clinic_id, phone, ultima_msg: ultima.content, modo: 'resgate_vacuo' }),
           });
           const brData = brResp.ok ? await brResp.json() : null;
-          const texto = brData && brData.ok ? brData.sugestao : null;
+          const texto = brData && brData.ok && brData.sugestao ? String(brData.sugestao).replace(/\s*\[\[[^\]]*\]\]\s*/g, ' ').trim() : null;
           if (!texto) { resultado.erros.push(`${phone}: Brian não gerou resposta (${brData?.erro || 'sem detalhe'})`); continue; }
 
           const cleanPhone = String(phone).replace(/\D/g, '');
