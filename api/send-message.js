@@ -217,7 +217,14 @@ export default async function handler(req, res) {
   const SUPABASE_URL = process.env.SUPABASE_URL || 'https://zcwntpkiispbhjjgidih.supabase.co';
   const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
-  const { instance, phone, message, clinic_id, tipo, media_url } = req.body;
+  const { instance, phone, clinic_id, tipo, media_url } = req.body;
+  // ⚠️ NOVO 17/11/2026 — marcador técnico da IA vazando pro paciente
+  // (caso JB: saiu "[[PROC|procedimento=Prótese]]" no WhatsApp). Toda
+  // mensagem que passa por aqui tem os marcadores [[...]] removidos
+  // antes de sair, venha de onde vier (botão "Sugerir", automação etc.).
+  const message = (typeof req.body?.message === 'string')
+    ? req.body.message.replace(/\s*\[\[\s*[A-Za-zÀ-ú_]+(?:\s*\|[^\]]*)?\]\]\s*/g, ' ').replace(/[ \t]{2,}/g, ' ').trim()
+    : req.body?.message;
   // ⚠️ CORREÇÃO 14/08: essa checagem exigia "message" preenchido sempre —
   // mas o envio de ÁUDIO manda message:'' de propósito (o conteúdo é o
   // media_url, não texto). Isso barrava TODO áudio manual do Inbox antes
