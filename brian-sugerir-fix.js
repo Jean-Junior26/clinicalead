@@ -29,7 +29,9 @@
       if (error) throw error;
       if (data && data.ok && data.sugestao) {
         if (input) {
-          input.value = data.sugestao;
+          // 17/11/2026: tira os marcadores técnicos ([[PROC|...]], [[AGENDAR|...]] etc.)
+          // da sugestão — eles são só pro sistema e nunca podem ir pro paciente.
+          input.value = String(data.sugestao).replace(/\s*\[\[[^\]]*\]\]\s*/g, ' ').replace(/[ \t]{2,}/g, ' ').trim();
           input.focus();
           if (typeof autoResizeInput === 'function') autoResizeInput(input);
           input.dispatchEvent(new Event('input'));
